@@ -13,6 +13,7 @@ import sys
 
 import gamescope_splash
 import steamos_session
+import window_titles
 
 _SPLASH_SCRIPT = os.path.join(os.path.dirname(__file__), "splash.py")
 
@@ -29,7 +30,7 @@ def run_with_steam_stopped(apply_fn, message="Applying changes…"):
     baselayer_prior = None
     if on_gamescope:
         splash_proc, baselayer_prior = gamescope_splash.launch_foregrounded(
-            [sys.executable, _SPLASH_SCRIPT, message]
+            [sys.executable, _SPLASH_SCRIPT, message], window_titles.SPLASH_TITLE
         )
 
     try:

@@ -18,31 +18,29 @@ import time
 import host_exec
 
 _WINDOW_RE = re.compile(r"^\s*(0x[0-9a-fA-F]+)\s")
-_SKIP_TITLES = ("steam", "steamoverlay", "steamwebhelper", "steam big picture mode", "mangoapp overlay window")
 
 
 def _run(argv, **kwargs):
     return subprocess.run(host_exec.wrap(argv), capture_output=True, text=True, **kwargs)
 
 
-def _find_new_window(display):
-    """Best-effort: the most recently mapped non-Steam window with a
-    real size. Small poll loop instead of a fixed sleep, since window
-    mapping time varies with what's being launched."""
+def _find_window_by_title(display, title):
+    """Find our own window by its exact title, set via Gtk's
+    set_title(). Matching on "large + not Steam-titled" instead (an
+    earlier version of this function) is not reliable: Steam's own
+    Big Picture UI has several large, untitled internal sub-surfaces
+    that pass a generic size-based filter just as easily as our real
+    window does -- confirmed live (2026-08-12), it grabbed one of
+    those instead of the real target while Steam was running. Only
+    reproduces with Steam up; doesn't show with Steam fully stopped,
+    since then there's nothing else large to false-positive on."""
+    needle = f'"{title}"'
     for _ in range(20):
         result = _run(["xwininfo", "-display", display, "-root", "-tree"])
-        candidates = []
         for line in result.stdout.splitlines():
-            if not _WINDOW_RE.match(line):
-                continue
-            if not re.search(r"\d{3,}x\d{3,}", line):
-                continue
-            lowered = line.lower()
-            if any(skip in lowered for skip in _SKIP_TITLES):
-                continue
-            candidates.append(_WINDOW_RE.match(line).group(1))
-        if candidates:
-            return candidates[-1]
+            match = _WINDOW_RE.match(line)
+            if match and needle in line:
+                return match.group(1)
         time.sleep(0.2)
     return None
 
@@ -67,12 +65,14 @@ def restore(prior_value, display=":0"):
     ])
 
 
-def launch_foregrounded(argv, display=":0"):
-    """Launch argv, find its window, and foreground it. Returns
-    (process, prior_baselayer_value) -- caller is responsible for
-    terminating the process and calling restore() when done."""
+def launch_foregrounded(argv, window_title, display=":0"):
+    """Launch argv, find the window it opens (matched by exact title --
+    the launched app must call Gtk set_title(window_title)), and
+    foreground it. Returns (process, prior_baselayer_value) -- caller
+    is responsible for terminating the process and calling restore()
+    when done."""
     proc = subprocess.Popen(host_exec.wrap(argv), start_new_session=True)
-    win_id = _find_new_window(display)
+    win_id = _find_window_by_title(display, window_title)
     if win_id is None:
         return proc, None
     prior_value = foreground(win_id, display)

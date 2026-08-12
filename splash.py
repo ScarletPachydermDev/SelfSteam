@@ -12,6 +12,8 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gdk, Gtk  # noqa: E402
 
+import window_titles
+
 # Plain Gtk4, deliberately no libadwaita: this runs natively on the host
 # (not inside Gridge's own Flatpak sandbox, which is where Adw normally
 # comes from), and SteamOS doesn't ship libadwaita for host Python.
@@ -25,6 +27,7 @@ window { background-color: #1e1e1e; color: #ffffff; }
 class SplashWindow(Gtk.ApplicationWindow):
     def __init__(self, app, message):
         super().__init__(application=app)
+        self.set_title(window_titles.SPLASH_TITLE)
         self.fullscreen()
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16, valign=Gtk.Align.CENTER, halign=Gtk.Align.CENTER)

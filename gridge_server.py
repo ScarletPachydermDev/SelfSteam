@@ -10,15 +10,19 @@ because a shortcuts.vdf write while Steam is running gets silently
 clobbered.
 """
 import html
+import http.cookies
 import os
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import auth
+import auth_display
 import create_webapp
 import maintenance
 import sgdb_client as sgdb
 
 PORT = int(os.environ.get("GRIDGE_SERVER_PORT", "8845"))
+SESSION_COOKIE = "gridge_session"
 
 PAGE_HEAD = """<!doctype html>
 <html><head><meta charset="utf-8">
@@ -83,6 +87,21 @@ def render_search_results(query, couch_mode, matches):
 """)
 
 
+def render_login(error=None):
+    error_html = f'<p style="color:#c00">{html.escape(error)}</p>' if error else ""
+    return render(f"""
+<h1>Enter the code</h1>
+<p>A 6-character code is shown on the TV. It's only displayed there --
+this proves you can see the screen, so no password to remember.</p>
+{error_html}
+<form action="/login" method="post">
+  <input type="text" name="code" required autofocus maxlength="6"
+         style="text-transform:uppercase; text-align:center; font-size:2rem; letter-spacing:0.5rem">
+  <button type="submit">Continue</button>
+</form>
+""")
+
+
 def render_done(name, ok, error=None):
     if ok:
         return render(f"""
@@ -106,9 +125,38 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _redirect(self, location, set_cookie=None):
+        self.send_response(303)
+        self.send_header("Location", location)
+        if set_cookie is not None:
+            self.send_header("Set-Cookie", set_cookie)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _session_token(self):
+        raw = self.headers.get("Cookie")
+        if not raw:
+            return None
+        jar = http.cookies.SimpleCookie()
+        jar.load(raw)
+        morsel = jar.get(SESSION_COOKIE)
+        return morsel.value if morsel else None
+
+    def _is_authenticated(self):
+        return auth.is_authenticated(self._session_token())
+
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         params = urllib.parse.parse_qs(parsed.query)
+
+        if parsed.path == "/login":
+            self._send_html(render_login())
+            return
+
+        if not self._is_authenticated():
+            auth_display.ensure_shown()
+            self._redirect("/login")
+            return
 
         if parsed.path == "/":
             self._send_html(render_home())
@@ -128,13 +176,33 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
-        if parsed.path != "/add":
-            self._send_html(render("<p>Not found</p>"), status=404)
-            return
 
         length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(length).decode()
         params = urllib.parse.parse_qs(body)
+
+        if parsed.path == "/login":
+            submitted = (params.get("code") or [""])[0]
+            token = auth.try_login(submitted)
+            if token is None:
+                self._send_html(render_login(error="Wrong or expired code -- check the TV for the current one."))
+                return
+            auth_display.dismiss()
+            cookie = http.cookies.SimpleCookie()
+            cookie[SESSION_COOKIE] = token
+            cookie[SESSION_COOKIE]["path"] = "/"
+            cookie[SESSION_COOKIE]["max-age"] = auth.SESSION_TTL
+            self._redirect("/", set_cookie=cookie[SESSION_COOKIE].OutputString())
+            return
+
+        if not self._is_authenticated():
+            auth_display.ensure_shown()
+            self._redirect("/login")
+            return
+
+        if parsed.path != "/add":
+            self._send_html(render("<p>Not found</p>"), status=404)
+            return
 
         query = (params.get("query") or [""])[0]
         couch_mode = bool(params.get("couch_mode"))
