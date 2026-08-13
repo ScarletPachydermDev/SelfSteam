@@ -1,0 +1,109 @@
+"""Lookup table so users can type a bare service name (e.g. "Netflix")
+instead of a URL. Keys are lowercase names/aliases; values are
+(domain, sgdb_search_name, sgdb_id_or_None). sgdb_id is only set for
+entries where autocomplete search is confirmed unreliable (e.g.
+Disney+, which returns garbage results and needed an exact-ID lookup
+instead) -- gui.py uses it to fetch that exact SGDB entry directly
+instead of guessing via autocomplete.
+
+Domains marked "verify" are less certain (rebrands, regional
+services) -- flagged for a human to double check, not guessed
+silently.
+"""
+
+STREAMING_SERVICES = {
+    "netflix": ("netflix.com", "Netflix", None),
+    "disney+": ("disneyplus.com", "Disney+", 5260961),
+    "disney plus": ("disneyplus.com", "Disney+", 5260961),
+    "prime video": ("primevideo.com", "Prime Video", None),
+    "amazon prime video": ("primevideo.com", "Prime Video", None),
+    "apple tv": ("tv.apple.com", "Apple TV", None),
+    "apple tv+": ("tv.apple.com", "Apple TV", None),
+    "hulu": ("hulu.com", "Hulu", None),
+    "hbo max": ("max.com", "Max", None),
+    "max": ("max.com", "Max", None),
+    "paramount+": ("paramountplus.com", "Paramount+", None),
+    "paramount plus": ("paramountplus.com", "Paramount+", None),
+    "peacock": ("peacocktv.com", "Peacock", None),
+    "peacock premium": ("peacocktv.com", "Peacock", None),
+    "discovery+": ("discoveryplus.com", "Discovery+", None),
+    "discovery plus": ("discoveryplus.com", "Discovery+", None),
+    "amc+": ("amcplus.com", "AMC+", None),
+    "amc plus": ("amcplus.com", "AMC+", None),
+    "starz": ("starz.com", "Starz", None),
+    "philo": ("philo.com", "Philo", None),
+    "crunchyroll": ("crunchyroll.com", "Crunchyroll", None),
+    "mgm+": ("mgmplus.com", "MGM+", None),
+    "mgm plus": ("mgmplus.com", "MGM+", None),
+    "fubotv": ("fubo.tv", "fuboTV", None),
+    "fubo": ("fubo.tv", "fuboTV", None),
+    "youtube": ("youtube.com", "YouTube", None),
+    "youtube premium": ("youtube.com", "YouTube", None),
+    "youtube tv": ("tv.youtube.com", "YouTube TV", None),
+    "tubi": ("tubitv.com", "Tubi", None),
+    "pluto tv": ("pluto.tv", "Pluto TV", None),
+    "crackle": ("crackle.com", "Crackle", None),
+    "vudu": ("fandangoathome.com", "Fandango At Home", None),  # verify: Vudu rebranded to Fandango At Home in 2024
+    "fandango at home": ("fandangoathome.com", "Fandango At Home", None),
+    "pbs": ("pbs.org", "PBS", None),
+    "the roku channel": ("therokuchannel.roku.com", "The Roku Channel", None),
+    "roku channel": ("therokuchannel.roku.com", "The Roku Channel", None),
+    "cbs": ("cbs.com", "CBS", None),
+    "the cw": ("cwtv.com", "The CW", None),
+    "shudder": ("shudder.com", "Shudder", None),
+    "mubi": ("mubi.com", "Mubi", None),
+    "britbox": ("britbox.com", "BritBox", None),
+    "acorn tv": ("acorn.tv", "Acorn TV", None),
+    "curiosity stream": ("curiositystream.com", "CuriosityStream", None),
+    "hidive": ("hidive.com", "HIDIVE", None),
+    "hoopla": ("hoopladigital.com", "Hoopla", None),
+    "kanopy": ("kanopy.com", "Kanopy", None),
+    "sundance now": ("sundancenow.com", "Sundance Now", None),
+    "the criterion channel": ("criterionchannel.com", "The Criterion Channel", None),
+    "criterion channel": ("criterionchannel.com", "The Criterion Channel", None),
+    "stan": ("stan.com.au", "Stan", None),
+    "binge": ("binge.com.au", "Binge", None),
+    "cbc gem": ("gem.cbc.ca", "CBC Gem", None),
+    "crave": ("crave.ca", "Crave", None),
+    "rakuten tv": ("rakuten.tv", "Rakuten TV", None),
+    "bbc iplayer": ("bbc.co.uk/iplayer", "BBC iPlayer", None),
+    "channel 4": ("channel4.com", "Channel 4", None),
+    "itvx": ("itvx.com", "ITVX", None),  # verify
+    "bfi player": ("player.bfi.org.uk", "BFI Player", None),  # verify
+    "gaia": ("gaia.com", "Gaia", None),
+    "hayu": ("hayu.com", "Hayu", None),
+    "directv stream": ("stream.directv.com", "DIRECTV Stream", None),  # verify
+    "cineverse": ("cineverse.com", "Cineverse", None),
+    "fandor": ("fandor.com", "Fandor", None),
+    "hallmark+": ("hallmarkplus.com", "Hallmark+", None),  # verify: recently rebranded from Hallmark Movies Now
+    "indieflix": ("indieflix.com", "IndieFlix", None),
+    "angel studios": ("angel.com", "Angel Studios", None),
+    "bet+": ("bet.plus", "BET+", None),
+    "broadway hd": ("broadwayhd.com", "BroadwayHD", None),
+    "magellan tv": ("magellantv.com", "MagellanTV", None),
+    "dekkoo": ("dekkoo.com", "Dekkoo", None),
+    "cultpix": ("cultpix.com", "Cultpix", None),
+    "guidedoc": ("guidedoc.tv", "Guidedoc", None),  # verify
+    "now": ("nowtv.com", "NOW", None),
+    "now tv": ("nowtv.com", "NOW", None),
+    "geforce now": ("play.geforcenow.com", "GeForce NOW", None),
+    "geforcenow": ("play.geforcenow.com", "GeForce NOW", None),
+    "xbox cloud gaming": ("xbox.com/play", "Xbox Cloud Gaming", None),
+    "game pass": ("xbox.com/play", "Xbox Cloud Gaming", None),
+    "xbox game pass": ("xbox.com/play", "Xbox Cloud Gaming", None),
+    "amazon luna": ("luna.amazon.com", "Amazon Luna", None),
+    "luna": ("luna.amazon.com", "Amazon Luna", None),
+    "boosteroid": ("boosteroid.com", "Boosteroid", None),
+    "spotify": ("open.spotify.com", "Spotify", None),
+    "apple music": ("music.apple.com", "Apple Music", None),
+    "youtube music": ("music.youtube.com", "YouTube Music", None),
+    "amazon music": ("music.amazon.com", "Amazon Music", None),
+    "tidal": ("listen.tidal.com", "Tidal", None),
+    "deezer": ("deezer.com", "Deezer", None),
+    "soundcloud": ("soundcloud.com", "SoundCloud", None),
+    "pandora": ("pandora.com", "Pandora", None),
+    "iheartradio": ("iheart.com", "iHeartRadio", None),
+    "iheart radio": ("iheart.com", "iHeartRadio", None),
+    "qobuz": ("play.qobuz.com", "Qobuz", None),
+    "bandcamp": ("bandcamp.com", "Bandcamp", None),
+}

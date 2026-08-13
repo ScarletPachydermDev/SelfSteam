@@ -16,9 +16,14 @@ from gi.repository import Gdk, Gtk  # noqa: E402
 import window_titles
 
 _CSS = b"""
-window { background-color: #1e1e1e; color: #ffffff; }
-label.gridge-auth-title { font-size: 24px; }
-label.gridge-auth-code { font-size: 96px; font-family: monospace; letter-spacing: 12px; margin-top: 24px; }
+window { background-color: #000000; color: #ffffff; }
+label.gridge-auth-title {
+  font-family: Helvetica, Arial, sans-serif; font-size: 90px; font-weight: 400;
+}
+label.gridge-auth-code {
+  font-family: Helvetica, Arial, sans-serif; font-weight: 700;
+  font-size: 420px; letter-spacing: 20px; margin-top: 40px;
+}
 """
 
 
