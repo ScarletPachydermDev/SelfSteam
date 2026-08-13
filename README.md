@@ -6,13 +6,12 @@ No JavaScript. Plain server-rendered HTML forms.
 
 ## Status
 
-Early prototype, live-tested end to end on real hardware (2026-08-12): web request in, Steam stopped, a full-screen "please wait" splash shown in Game Mode, the shortcut + artwork written safely while Steam is down, Steam restarted, shortcut launches correctly.
+Live-tested end to end on real hardware: web request in, a random code shown full-screen on the TV to log in (same pattern ChimeraOS's own authenticator and `emerytech/couchside` both use -- no accounts, "can you see the screen" is the access control), Steam stopped, a full-screen "please wait" splash, the shortcut + artwork written safely while Steam is down, Steam restarted, shortcut launches correctly -- now running as a real boot-persistent systemd user service via `install.sh`.
 
 Not yet done:
 
-- Flatpak packaging (currently runs as plain `.py` files via `python3 gridge_server.py`)
-- Boot-persistence (systemd user service + `loginctl enable-linger`, matching the pattern `org.jellyfin.JellyfinServer`'s Flatpak uses)
-- **No authentication on the web UI yet** -- anyone reachable on the LAN can currently add shortcuts and trigger a Steam restart. Don't expose this beyond a trusted home network.
+- Flatpak packaging (currently installs as plain `.py` files, see `install.sh`)
+- Session cookies are in-memory only -- a server restart logs everyone out (no persistence layer yet, by design for now)
 
 ## Why a restart is needed at all
 
@@ -25,7 +24,19 @@ Writing to Steam's `shortcuts.vdf` while Steam is running gets silently overwrit
 
 On plain desktop Linux (no `gamescope-session.target`), this falls back to a simple kill/relaunch with no splash needed, since a normal window manager is already there.
 
-## Running it
+## Installing
+
+```
+./install.sh
+```
+
+Installs to `~/.local/opt/gridge-web-server`, reuses the SteamGridDB API key from Gridge's desktop app if it's already set up (or asks for one), and installs + starts a systemd user service that survives reboots (`loginctl enable-linger` + `systemctl --user enable`). Not sandboxed yet, so this can just do all of that directly -- unlike e.g. Jellyfin's Flatpak, which has to ship a unit template plus a copy-paste setup script because its sandbox can't touch `~/.config/systemd/user` or run `systemctl`/`loginctl` itself.
+
+Re-running `install.sh` after pulling an update restarts the service to pick up the change.
+
+On a gamescope/SteamOS session, the generated unit pulls `DISPLAY`/`XDG_RUNTIME_DIR` from `%t/gamescope-environment` -- the same file `steam-launcher.service` itself uses. Without it, a systemd user service doesn't inherit the graphical session's environment at all, which silently breaks the auth screen and maintenance splash (confirmed live: `Gdk.Display.get_default()` returns `None` and the launched window just crashes).
+
+### Running it directly, without installing
 
 ```
 python3 gridge_server.py
