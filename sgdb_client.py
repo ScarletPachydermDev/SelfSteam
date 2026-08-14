@@ -48,6 +48,14 @@ def _api_key():
     return key
 
 
+def has_api_key():
+    try:
+        _api_key()
+        return True
+    except SGDBError:
+        return False
+
+
 def _get(path, params=None):
     url = f"{API_BASE}{path}"
     if params:

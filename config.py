@@ -49,3 +49,11 @@ def get_sgdb_api_key():
 
 def set_sgdb_api_key(key):
     save(sgdb_api_key=key)
+
+
+def get_last_browser():
+    return load().get("server_last_browser")
+
+
+def set_last_browser(app_id):
+    save(server_last_browser=app_id)
