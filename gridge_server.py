@@ -51,16 +51,17 @@ PORT = int(os.environ.get("GRIDGE_SERVER_PORT", "8845"))
 SESSION_COOKIE = "gridge_session"
 _DARKREADER_PATH = os.path.join(os.path.dirname(__file__), "vendor", "darkreader.js")
 _ADD_FORM_ID = "gridge-add-form"
+_SEARCH_ICON_SVG = (
+    '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="white" '
+    'stroke-width="3" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle>'
+    '<line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>'
+)
 
 # (basename, display title, candidate-fetcher, cell width, cell height)
-# -- basenames and the *relative* cell proportions match gui.py's own
-# ARTWORK_CATEGORIES exactly (170x255, 260x121, 320x104, 160x100,
-# 100x100), scaled up by _ARTWORK_SCALE. Kept small enough (rather than
-# the desktop app's own 1.8x) that all 5 categories fit within the
-# column's now-bounded height without needing to scroll on typical
-# screens; .card's overflow-y:auto is still there as a safety net for
-# short windows.
-_ARTWORK_SCALE = 0.85
+# -- basenames and the *relative* proportions between categories match
+# gui.py's own ARTWORK_CATEGORIES exactly (170x255, 260x121, 320x104,
+# 160x100, 100x100); actual on-screen size is computed per category in
+# _artwork_picker_html from the real viewport height, not a fixed scale.
 ARTWORK_CATEGORIES = [
     ("grid_vertical", "Vertical Grid", sgdb.get_vertical_grid_candidates, 170, 255),
     ("grid_horizontal", "Horizontal Grid", sgdb.get_horizontal_grid_candidates, 260, 121),
@@ -159,7 +160,7 @@ main { width: 100%; padding: 2rem; flex: 1; min-height: 0; display: flex; flex-d
    too far from their fields. */
 .field-group { display: flex; flex-direction: column; gap: 0.35rem; }
 label.field-label {
-  display: block; font-size: 0.85rem; font-weight: 600; color: var(--text-dim);
+  display: block; font-size: 1.05rem; font-weight: 700; color: var(--text);
   letter-spacing: 0.01em; margin: 0;
 }
 input[type=text], select {
@@ -168,12 +169,27 @@ input[type=text], select {
   appearance: none; outline: none;
 }
 input[type=text]:focus, select:focus { border-color: var(--accent); }
+/* Pairs the pill input with a separate circular search button beside
+   it (not an icon glued inside the pill) -- a real type=submit, not
+   just decoration, so there's now an explicit click target for
+   searching instead of relying on Enter alone. */
+.search-field-row { display: flex; align-items: center; gap: 0.6rem; }
+.search-field-row .field-with-clear { flex: 1; min-width: 0; }
 .field-with-clear {
   display: flex; align-items: center; background: #fff; border: 1px solid var(--input-border);
   border-radius: 20px; padding: 0 0.4rem 0 1.1rem;
 }
 .field-with-clear input[type=text] { flex: 1; min-width: 0; border: none; padding: 0.85rem 0; border-radius: 0; }
 .field-with-clear input[type=text]:focus { border: none; }
+/* Accent-filled circle, white icon -- not the bare emoji this used to
+   be, since browsers render emoji glyphs in their own fixed colors
+   regardless of CSS `color`, so an actual "white icon" needs a real
+   SVG instead. */
+.search-submit-btn {
+  width: 2.9rem; height: 2.9rem; flex: 0 0 auto; margin: 0; padding: 0; border-radius: 50%;
+  background: var(--accent); border: none; display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+}
 .field-clear-btn {
   width: 1.8rem; height: 1.8rem; flex: 0 0 auto; margin: 0; padding: 0; font-size: 0.9rem; line-height: 1;
   border-radius: 50%; background: transparent; color: #4a4a4a; border: none; text-decoration: none;
@@ -211,22 +227,25 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
 .placeholder-row { flex: 0 0 auto; height: 2.3rem; }
 .placeholder-row:nth-child(odd) { background: #ececec; }
 .placeholder-row:nth-child(even) { background: #f3f3f3; }
-.artwork-card { gap: 0.5rem; }
-.artwork-category h3 { font-size: 0.85rem; font-weight: 700; margin: 0 0 0.4rem 0; color: var(--text); }
-.artwork-row { display: flex; gap: 0.7rem; overflow-x: auto; padding-bottom: 0.15rem; }
+/* Tightened chrome (padding/gaps/label size) vs the default .card,
+   specifically to reclaim vertical space for the actual artwork --
+   every pixel trimmed here is a pixel _ARTWORK_VH_OVERHEAD_PX doesn't
+   have to reserve, i.e. directly bigger tiles. */
+.artwork-card { gap: 0.25rem; padding: 0.7rem 1.15rem 0.35rem; }
+.artwork-category h3 { font-size: 0.85rem; font-weight: 700; margin: 0 0 0.2rem 0; color: var(--text); }
+.artwork-row { display: flex; gap: 0.7rem; overflow-x: auto; padding-bottom: 0.05rem; }
 .artwork-cell { flex: 0 0 auto; }
 .artwork-cell input[type=radio] { display: none; }
 .artwork-cell label {
   display: flex; align-items: center; justify-content: center;
   border: 3px solid transparent; border-radius: 8px;
   cursor: pointer; overflow: hidden;
-  /* Deliberately not var(--skeleton) (light gray): white/light logos
-     with a transparent background were invisible against it. A
-     neutral dark gray works as a "light box" for artwork of any
-     color, light or dark. Dark Reader (the toggle) recolors it
-     automatically along with everything else, so no separate
-     dark-mode value needed. */
-  background: #3a3a3a;
+  /* Matches the blank-state skeleton color -- an earlier dark #3a3a3a
+     version kept white/transparent logos visible more reliably, but
+     read as "too black" against real (mostly non-white) artwork;
+     explicit tradeoff accepted in favor of visual consistency with
+     the skeleton placeholders. */
+  background: var(--skeleton);
 }
 .artwork-cell input[type=radio]:checked + label { border-color: var(--accent); }
 /* CONTAIN, not cover: cover crops to fill the box, which mangled
@@ -234,7 +253,10 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
    logo showed up as a cropped square). gui.py's own picker uses
    Gtk.ContentFit.CONTAIN for exactly this reason; match it here. */
 .artwork-cell img { display: block; width: 100%; height: 100%; object-fit: contain; }
-.artwork-empty { color: var(--text-dim); font-size: 0.85rem; font-style: italic; }
+/* Blank-state tiles before any search -- light gray skeletons (not the
+   dark #3a3a3a real cells use, which exists specifically to keep white
+   logos visible) matching the design handoff's own placeholder look. */
+.artwork-skeleton { background: var(--skeleton); border-radius: 8px; }
 .switch-row { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; }
 /* Segmented tab bar (URL / Apps / Chimera / Emulators): a pure-CSS
    radio hack, same technique as the sgdb-search reveal used to be --
@@ -409,9 +431,12 @@ def _url_tab_panel_html(query="", couch_mode=False, browser=""):
     return f"""
   <div class="field-group">
     <label class="field-label">Streaming service or URL</label>
-    <div class="field-with-clear">
-      <input type="text" name="q" value="{html.escape(query)}" placeholder="e.g. Netflix" required autofocus>
-      <a href="/" class="field-clear-btn" title="Clear">&#10005;</a>
+    <div class="search-field-row">
+      <div class="field-with-clear">
+        <input type="text" name="q" value="{html.escape(query)}" placeholder="e.g. Netflix" required autofocus>
+        <a href="/" class="field-clear-btn" title="Clear">&#10005;</a>
+      </div>
+      <button type="submit" class="search-submit-btn" title="Search">{_SEARCH_ICON_SVG}</button>
     </div>
   </div>{couch_row}
   {hint}
@@ -469,9 +494,12 @@ def _sgdb_search_bar_html(query, couch_mode, browser, sgdb_q):
     return f"""
 <form action="/search" method="get">
   {_hidden_state_fields(query, couch_mode, browser)}
-  <div class="field-with-clear">
-    <input type="text" name="sgdb_q" value="{html.escape(display_term)}" placeholder="SGDB search">
-    <a href="{clear_href}" class="field-clear-btn" title="Clear">&#10005;</a>
+  <div class="search-field-row">
+    <div class="field-with-clear">
+      <input type="text" name="sgdb_q" value="{html.escape(display_term)}" placeholder="SGDB search">
+      <a href="{clear_href}" class="field-clear-btn" title="Clear">&#10005;</a>
+    </div>
+    <button type="submit" class="search-submit-btn" title="Search">{_SEARCH_ICON_SVG}</button>
   </div>
 </form>
 """
@@ -503,6 +531,32 @@ def _middle_column_html(query, couch_mode, browser, sgdb_q, matches, match_index
 """
 
 
+# Sum of gui.py's own category heights (255+121+104+100+100) -- used
+# below to give each category a share of the column's real height
+# proportional to its own natural size, instead of a fixed px scale
+# that leaves the column visibly short of its actual available space
+# on any screen taller than whatever it was tuned against.
+_ARTWORK_HEIGHT_WEIGHT_SUM = sum(base_h for _b, _t, _f, _w, base_h in ARTWORK_CATEGORIES)
+# Rough fixed overhead per category row (its <h3> label, row gaps, the
+# card's own padding/gaps) subtracted from 100vh before splitting the
+# remainder by weight -- not exact (header height/main padding vary a
+# little), just close enough that all 5 categories land within the
+# column's real height rather than needing to scroll for one of them.
+_ARTWORK_VH_OVERHEAD_PX = 355
+
+
+# Skeleton tile counts per category before any search -- matches the
+# design handoff's own placeholder counts exactly, so the blank state
+# looks like real content is about to load rather than an empty column.
+_SKELETON_TILE_COUNTS = {
+    "grid_vertical": 4,
+    "grid_horizontal": 2,
+    "hero": 2,
+    "logo": 4,
+    "icon": 6,
+}
+
+
 def _artwork_picker_html(candidates_by_category):
     # Always renders all 5 categories, even with zero candidates
     # (candidates_by_category can be {}) -- shown before any search
@@ -511,20 +565,29 @@ def _artwork_picker_html(candidates_by_category):
     sections = []
     for basename, title, _fetch, base_w, base_h in ARTWORK_CATEGORIES:
         candidates = candidates_by_category.get(basename) or []
+        # Height-driven sizing (not width): each category's row height is
+        # a share of the viewport proportional to its own natural size,
+        # and aspect-ratio derives the width from that -- so the artwork
+        # column actually fills the screen instead of sitting at a fixed
+        # size tuned for one particular window height. Shared between
+        # real cells and empty-state skeleton tiles so the layout doesn't
+        # jump once a search actually returns candidates.
+        weight = base_h / _ARTWORK_HEIGHT_WEIGHT_SUM
+        cell_style = (
+            f"height:calc((100vh - {_ARTWORK_VH_OVERHEAD_PX}px) * {weight:.4f}); "
+            f"min-height:60px; aspect-ratio: {base_w} / {base_h};"
+        )
         if not candidates:
+            skeletons = "".join(
+                f'<div class="artwork-cell artwork-skeleton" style="{cell_style}"></div>'
+                for _ in range(_SKELETON_TILE_COUNTS[basename])
+            )
             sections.append(f"""
 <div class="artwork-category">
   <h3>{html.escape(title)}</h3>
-  <span class="artwork-empty">No {html.escape(title.lower())} available.</span>
+  <div class="artwork-row">{skeletons}</div>
 </div>""")
             continue
-        cell_w = round(base_w * _ARTWORK_SCALE)
-        # clamp() keeps categories responsive: cells shrink to fit
-        # narrower screens (down to a 70px floor) instead of forcing
-        # horizontal scrolling or overflowing, and aspect-ratio (not a
-        # fixed height) keeps each category's real proportions at
-        # whatever width it lands on.
-        cell_style = f"width:clamp(70px, {round(cell_w / 12)}vw, {cell_w}px); aspect-ratio: {base_w} / {base_h};"
         cells = []
         for i, cand in enumerate(candidates):
             checked = "checked" if i == 0 else ""
