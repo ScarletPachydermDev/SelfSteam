@@ -34,6 +34,7 @@ non-Chromium browsers.
 """
 import html
 import http.cookies
+import json
 import os
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -44,6 +45,7 @@ import browser_picker
 import config
 import create_webapp
 import maintenance
+import pending_queue
 import service_resolver
 import sgdb_client as sgdb
 
@@ -55,6 +57,31 @@ _SEARCH_ICON_SVG = (
     '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="white" '
     'stroke-width="3" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle>'
     '<line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>'
+)
+# Original artwork (not copied from anywhere) -- same crescent-moon/sun
+# toggle *concept* as sites like dekudeals.com use, but their actual
+# icon is a Font Awesome 6 Pro glyph (a paid, licensed icon font), so
+# it isn't something to copy/bundle here. currentColor picks up
+# .icon-btn-round's color, so it matches the other header icons.
+_MOON_ICON_SVG = (
+    '<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">'
+    '<path d="M20.5 14.7A8.6 8.6 0 0 1 9.3 3.5a.6.6 0 0 0-.7-.9A10 10 0 1 0 21.4 15.4a.6.6 0 0 0-.9-.7Z"></path></svg>'
+)
+_SUN_ICON_SVG = (
+    '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+    'stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.5"></circle>'
+    '<path d="M12 2.5v2.5M12 19v2.5M4.6 4.6l1.8 1.8M17.6 17.6l1.8 1.8M2.5 12h2.5M19 12h2.5'
+    'M4.6 19.4l1.8-1.8M17.6 6.4l1.8-1.8"></path></svg>'
+)
+_HEART_ICON_SVG = (
+    '<svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">'
+    '<path d="M12 21s-6.7-4.35-9.3-8.2C.8 9.9 1.8 6.3 4.7 5c2.2-1 4.6-.2 5.9 1.6C11.9 8.4 12 8.6 12 8.6'
+    's.1-.2 1.4-2C14.7 4.8 17.1 4 19.3 5c2.9 1.3 3.9 4.9 2 7.8C18.7 16.65 12 21 12 21Z"></path></svg>'
+)
+_BACK_ICON_SVG = (
+    '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+    'stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">'
+    '<path d="M15 5 7 12l8 7"></path></svg>'
 )
 
 # (basename, display title, candidate-fetcher, cell width, cell height)
@@ -83,8 +110,8 @@ PAGE_HEAD = """<!doctype html>
    pixel-for-pixel, but the shape (pill inputs, flat cards, segmented
    tab bar, pastel accent) is the deliberate target look. */
 :root {
-  --accent: #b8e0b0;
-  --accent-text: #1f4d1a;
+  --accent: #0095ff;
+  --accent-text: #ffffff;
   --success-bg: #eaf7ec; --success-border: #bfe3c4; --success-text: #2f7a3d;
   --bg: #f2f2f2;
   --card-bg: #ffffff;
@@ -107,15 +134,29 @@ header.gridge-header {
   padding: 1.1rem 2rem; display: flex; align-items: center; justify-content: space-between;
   flex-wrap: wrap; gap: 1rem; flex: 0 0 auto;
 }
-.gridge-header-title { display: flex; flex-direction: column; gap: 0.1rem; }
+.gridge-header-left { display: flex; align-items: center; gap: 1rem; }
 .gridge-header-title strong { font-size: 1.2rem; font-weight: 700; letter-spacing: -0.01em; }
-.gridge-header-title span { font-size: 0.8rem; color: var(--text-dim); }
 .gridge-header-actions { display: flex; gap: 0.6rem; align-items: center; }
 .icon-btn-round {
-  width: 2.6rem; margin: 0; padding: 0; height: 2.6rem; border-radius: 10px;
-  border: 1px solid var(--border); background: var(--card-bg); color: var(--text-dim);
+  width: 3rem; margin: 0; padding: 0; height: 3rem; border-radius: 10px;
+  border: none; background: var(--card-bg); color: var(--text-dim);
   display: flex; align-items: center; justify-content: center; font-size: 1.2rem; cursor: pointer;
 }
+/* Not wired to anything yet -- purely visual, placed ahead of the
+   title so it reads as "back" at a glance once it does something. */
+.back-btn { width: 3.2rem; height: 3.2rem; }
+.queue-actions { display: flex; align-items: center; gap: 0.6rem; }
+.restart-btn {
+  width: auto; margin: 0; padding: 0.65rem 1.3rem; border-radius: 20px; font-size: 0.9rem;
+  background: #1a1a1a; color: #fff; white-space: nowrap;
+}
+.restart-btn:disabled { background: #d8d8d8; color: #9a9a9a; cursor: not-allowed; }
+.queue-counter {
+  width: 1.9rem; height: 1.9rem; flex: 0 0 auto; border-radius: 50%;
+  background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center;
+  font-size: 0.85rem; font-weight: 700; text-decoration: none;
+}
+.queue-counter.empty { background: #d8d8d8; color: #9a9a9a; }
 .sgdb-key-badge {
   width: auto; margin: 0; padding: 0.5rem 1rem; border-radius: 20px; font-size: 0.8rem; font-weight: 700;
   display: inline-flex; align-items: center; gap: 0.4rem; cursor: default;
@@ -231,8 +272,17 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
    specifically to reclaim vertical space for the actual artwork --
    every pixel trimmed here is a pixel _ARTWORK_VH_OVERHEAD_PX doesn't
    have to reserve, i.e. directly bigger tiles. */
-.artwork-card { gap: 0.25rem; padding: 0.7rem 1.15rem 0.35rem; }
-.artwork-category h3 { font-size: 0.85rem; font-weight: 700; margin: 0 0 0.2rem 0; color: var(--text); }
+/* Extra space here (between category blocks) only ever shows above
+   the 2nd-5th categories -- flex gap doesn't add anything before the
+   first item, so Vertical Grid stays flush with the card's own top
+   padding while Horizontal Grid/Hero/Logo/Icon each get breathing
+   room above their title. */
+.artwork-card { gap: 0.65rem; padding: 0.7rem 1.15rem 0.35rem; }
+/* Same title-to-content gap (0.35rem) as .field-group elsewhere, for
+   consistency across all three columns -- gap instead of margin so it
+   matches exactly rather than approximately. */
+.artwork-category { display: flex; flex-direction: column; gap: 0.35rem; }
+.artwork-category h3 { font-size: 0.85rem; font-weight: 700; margin: 0; color: var(--text); }
 .artwork-row { display: flex; gap: 0.7rem; overflow-x: auto; padding-bottom: 0.05rem; }
 .artwork-cell { flex: 0 0 auto; }
 .artwork-cell input[type=radio] { display: none; }
@@ -258,19 +308,19 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
    logos visible) matching the design handoff's own placeholder look. */
 .artwork-skeleton { background: var(--skeleton); border-radius: 8px; }
 .switch-row { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; }
-/* Segmented tab bar (URL / Apps / Chimera / Emulators): a pure-CSS
+/* Segmented tab bar (URL / Apps / RetroArch / Emulators): a pure-CSS
    radio hack, same technique as the sgdb-search reveal used to be --
    no page reload needed to switch tabs, since nothing server-side
    depends on which one is showing. */
 .tab-radio { position: absolute; opacity: 0; pointer-events: none; }
 .tab-bar { display: flex; gap: 4px; background: var(--bg); border-radius: 12px; padding: 4px; }
 .tab-label {
-  flex: 1; padding: 0.55rem 0.25rem; border-radius: 9px; font-size: 0.8rem; font-weight: 600;
+  flex: 1; padding: 0.6rem 0.25rem; border-radius: 9px; font-size: 1rem; font-weight: 600;
   text-align: center; cursor: pointer; color: var(--text-dim);
 }
 #tab-url:checked ~ .tab-bar label[for="tab-url"],
 #tab-apps:checked ~ .tab-bar label[for="tab-apps"],
-#tab-chimera:checked ~ .tab-bar label[for="tab-chimera"],
+#tab-retroarch:checked ~ .tab-bar label[for="tab-retroarch"],
 #tab-emulators:checked ~ .tab-bar label[for="tab-emulators"] {
   background: #fff; color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,0.12);
 }
@@ -278,7 +328,7 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
 .tab-panel { display: none; flex-direction: column; gap: 0.9rem; }
 #tab-url:checked ~ .tab-panels .tab-panel-url,
 #tab-apps:checked ~ .tab-panels .tab-panel-apps,
-#tab-chimera:checked ~ .tab-panels .tab-panel-chimera,
+#tab-retroarch:checked ~ .tab-panels .tab-panel-retroarch,
 #tab-emulators:checked ~ .tab-panels .tab-panel-emulators { display: flex; }
 .coming-soon { color: var(--text-dim); font-size: 0.85rem; padding: 1rem 0; text-align: center; }
 @media (max-width: 960px) {
@@ -296,14 +346,17 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
 }
 </style></head><body>
 <header class="gridge-header">
-  <div class="gridge-header-title">
-    <strong>Add Steam Shortcut</strong>
-    <span>Create a shortcut, find matching artwork, and preview it before saving</span>
+  <div class="gridge-header-left">
+    <button class="icon-btn-round back-btn" type="button" title="Back"><!--BACK_ICON--></button>
+    <div class="gridge-header-title">
+      <strong>Add Steam Shortcut</strong>
+    </div>
+    <!--QUEUE_ACTIONS-->
   </div>
   <div class="gridge-header-actions">
-    <button class="icon-btn-round" type="button" title="Favorite" style="color:#e0568c">&#9825;</button>
+    <button class="icon-btn-round" type="button" title="Favorite" style="color:#e0568c"><!--HEART_ICON--></button>
     <!--SGDB_KEY_BADGE-->
-    <button id="gridge-dark-toggle" class="icon-btn-round" type="button" title="Toggle dark mode">&#9789;</button>
+    <button id="gridge-dark-toggle" class="icon-btn-round" type="button" title="Toggle dark mode"><!--DARK_ICON--></button>
   </div>
 </header>
 <main>
@@ -318,10 +371,13 @@ PAGE_TAIL = """</main>
 <script>
 (function () {
   var KEY = "gridge-dark-mode";
-  var enable = function () { DarkReader.enable({brightness: 100, contrast: 100, sepia: 0}); };
-  var disable = function () { DarkReader.disable(); };
-  if (localStorage.getItem(KEY) === "1") enable();
-  document.getElementById("gridge-dark-toggle").addEventListener("click", function () {
+  var MOON_SVG = "<!--MOON_SVG_JS-->";
+  var SUN_SVG = "<!--SUN_SVG_JS-->";
+  var btn = document.getElementById("gridge-dark-toggle");
+  var enable = function () { DarkReader.enable({brightness: 100, contrast: 100, sepia: 0}); btn.innerHTML = SUN_SVG; };
+  var disable = function () { DarkReader.disable(); btn.innerHTML = MOON_SVG; };
+  if (localStorage.getItem(KEY) === "1") enable(); else disable();
+  btn.addEventListener("click", function () {
     if (localStorage.getItem(KEY) === "1") {
       localStorage.setItem(KEY, "0");
       disable();
@@ -337,13 +393,38 @@ PAGE_TAIL = """</main>
 
 def _sgdb_key_badge_html():
     if sgdb.has_api_key():
-        return '<span class="sgdb-key-badge">&#10003; SGDB API key configured</span>'
+        return '<span class="sgdb-key-badge">&#10003; SGDB API key verified</span>'
     return '<span class="sgdb-key-badge unverified">&#33; No SGDB API key</span>'
+
+
+def _queue_actions_html():
+    # Always present, but disabled/greyed out with nothing queued --
+    # native button[disabled] blocks the form submit itself, no JS
+    # needed to keep an empty commit from doing anything.
+    n = pending_queue.count()
+    disabled = "" if n else " disabled"
+    counter_class = "queue-counter" if n else "queue-counter empty"
+    return f"""
+<div class="queue-actions">
+  <form action="/commit" method="post" style="margin:0">
+    <button type="submit" class="restart-btn"{disabled}>Save Changes and Restart Steam OS</button>
+  </form>
+  <a href="/pending" class="{counter_class}" title="View queued changes">{n}</a>
+</div>"""
 
 
 def render(body):
     head = PAGE_HEAD.replace("<!--SGDB_KEY_BADGE-->", _sgdb_key_badge_html())
-    return (head + body + PAGE_TAIL).encode()
+    head = head.replace("<!--DARK_ICON-->", _MOON_ICON_SVG)
+    head = head.replace("<!--BACK_ICON-->", _BACK_ICON_SVG)
+    head = head.replace("<!--HEART_ICON-->", _HEART_ICON_SVG)
+    head = head.replace("<!--QUEUE_ACTIONS-->", _queue_actions_html())
+    # json.dumps for a safe JS string literal (handles the SVG's own
+    # quotes) rather than hand-escaping -- these two go inside a JS
+    # "..." literal in PAGE_TAIL's <script>, not raw HTML.
+    tail = PAGE_TAIL.replace("\"<!--MOON_SVG_JS-->\"", json.dumps(_MOON_ICON_SVG))
+    tail = tail.replace("\"<!--SUN_SVG_JS-->\"", json.dumps(_SUN_ICON_SVG))
+    return (head + body + tail).encode()
 
 
 def _hidden_state_fields(query, couch_mode, browser):
@@ -443,7 +524,7 @@ def _url_tab_panel_html(query="", couch_mode=False, browser=""):
   {_browser_select_html(browser)}"""
 
 
-_FORM_TABS = [("tab-url", "URL"), ("tab-apps", "Apps"), ("tab-chimera", "Chimera"), ("tab-emulators", "Emulators")]
+_FORM_TABS = [("tab-url", "URL"), ("tab-apps", "Apps"), ("tab-retroarch", "RetroArch"), ("tab-emulators", "Emulators")]
 
 
 def _tab_bar_html():
@@ -453,7 +534,7 @@ def _tab_bar_html():
     # stylesheet (#tab-url:checked ~ .tab-bar label[for="tab-url"], etc.)
     # can reach both the matching label and the matching panel from a
     # single :checked radio. Only the URL tab is functional for now;
-    # Apps/Chimera/Emulators are placeholders per the design handoff.
+    # Apps/RetroArch/Emulators are placeholders per the design handoff.
     radios = "".join(
         f'<input type="radio" name="gridge-form-tab" id="{tab_id}" class="tab-radio"{" checked" if tab_id == "tab-url" else ""}>'
         for tab_id, _label in _FORM_TABS
@@ -483,7 +564,7 @@ def _sgdb_search_bar_html(query, couch_mode, browser, sgdb_q):
     # Pre-filled with the term actually driving the current results
     # (the explicit override if there is one, else whatever the URL/
     # service field itself resolved to) rather than sitting empty until
-    # touched -- same behavior planned for the Apps/Chimera/Emulators
+    # touched -- same behavior planned for the Apps/RetroArch/Emulators
     # tabs once they're built out, not just the URL tab.
     if sgdb_q:
         display_term = sgdb_q
@@ -525,8 +606,10 @@ def _middle_column_html(query, couch_mode, browser, sgdb_q, matches, match_index
     return f"""
 <div class="card">
   {_sgdb_search_bar_html(query, couch_mode, browser, sgdb_q)}
-  <h2>SGDB matches</h2>
-  {list_html}
+  <div class="field-group" style="flex:1;min-height:0">
+    <h2>SGDB matches</h2>
+    {list_html}
+  </div>
 </div>
 """
 
@@ -542,7 +625,7 @@ _ARTWORK_HEIGHT_WEIGHT_SUM = sum(base_h for _b, _t, _f, _w, base_h in ARTWORK_CA
 # remainder by weight -- not exact (header height/main padding vary a
 # little), just close enough that all 5 categories land within the
 # column's real height rather than needing to scroll for one of them.
-_ARTWORK_VH_OVERHEAD_PX = 355
+_ARTWORK_VH_OVERHEAD_PX = 393
 
 
 # Skeleton tile counts per category before any search -- matches the
@@ -655,7 +738,7 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
       </form>
     </div>
     <div class="tab-panel tab-panel-apps"><div class="coming-soon">Apps (Flathub/Installed) -- coming soon</div></div>
-    <div class="tab-panel tab-panel-chimera"><div class="coming-soon">Chimera platforms -- coming soon</div></div>
+    <div class="tab-panel tab-panel-retroarch"><div class="coming-soon">RetroArch platforms -- coming soon</div></div>
     <div class="tab-panel tab-panel-emulators"><div class="coming-soon">Emulators -- coming soon</div></div>
   </div>
   <div class="gridge-spacer"></div>
@@ -677,7 +760,7 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
 def render_login(error=None):
     error_html = f'<p style="color:#c00">{html.escape(error)}</p>' if error else ""
     return render(f"""
-<div class="card" style="max-width:360px;margin:2rem auto">
+<div class="card" style="width:100%;max-width:360px;margin:2rem auto">
   <h2>Enter the code</h2>
   <p>A 6-character code is shown on the TV. It's only displayed there --
   this proves you can see the screen, so no password to remember.</p>
@@ -705,19 +788,54 @@ def render_login(error=None):
 def render_done(name, ok, error=None):
     if ok:
         body = f"""
-<div class="card" style="max-width:420px;margin:2rem auto">
-  <h2 style="color:var(--success)">Done</h2>
-  <p><strong>{html.escape(name)}</strong> was added. Steam has restarted -- it should
+<div class="card" style="width:100%;max-width:420px;margin:2rem auto">
+  <h2 style="color:var(--success-text)">Done</h2>
+  <p><strong>{html.escape(name)}</strong> added. Steam has restarted -- it should
   show up in your library now.</p>
   <a class="btn" href="/" style="display:inline-block;text-decoration:none">Add another</a>
 </div>
 """
     else:
         body = f"""
-<div class="card" style="max-width:420px;margin:2rem auto">
+<div class="card" style="width:100%;max-width:420px;margin:2rem auto">
   <h2 style="color:#c00">Failed</h2>
   <p>Couldn't add <strong>{html.escape(name)}</strong>: {html.escape(str(error))}</p>
   <a class="btn secondary" href="/" style="display:inline-block;text-decoration:none">Back</a>
+</div>
+"""
+    return render(body)
+
+
+def render_pending():
+    items = pending_queue.all_items()
+    if not items:
+        body = """
+<div class="card" style="width:100%;max-width:800px;margin:2rem auto">
+  <h2>No changes queued</h2>
+  <p style="color:var(--text-dim)">Add a shortcut and it'll show up here, staged until you
+  save changes and restart SteamOS.</p>
+  <a class="btn secondary" href="/" style="display:block;text-align:center;text-decoration:none">Back</a>
+</div>
+"""
+        return render(body)
+    rows = []
+    for i, item in enumerate(items):
+        rows.append(f"""
+<div class="card" style="width:100%;max-width:800px;margin:0 auto;flex-direction:row;align-items:center;justify-content:space-between">
+  <div>
+    <strong>{html.escape(item['name'])}</strong>
+    <div style="color:var(--text-dim);font-size:0.85rem">{html.escape(item['url'])}</div>
+  </div>
+  <form action="/pending/remove" method="post" style="margin:0">
+    <input type="hidden" name="index" value="{i}">
+    <button type="submit" class="secondary" style="width:auto;padding:0.5rem 1rem">Remove</button>
+  </form>
+</div>""")
+    body = f"""
+<div style="width:100%;max-width:800px;margin:2rem auto;display:flex;flex-direction:column;gap:1rem">
+  <h2>{len(items)} change{"s" if len(items) != 1 else ""} queued</h2>
+  {"".join(rows)}
+  <a class="btn secondary" href="/" style="display:block;text-align:center;text-decoration:none">Back</a>
 </div>
 """
     return render(body)
@@ -787,6 +905,10 @@ class Handler(BaseHTTPRequestHandler):
 
         if parsed.path == "/":
             self._send_html(render_page())
+            return
+
+        if parsed.path == "/pending":
+            self._send_html(render_pending())
             return
 
         if parsed.path == "/search":
@@ -861,6 +983,16 @@ class Handler(BaseHTTPRequestHandler):
             self._redirect("/login")
             return
 
+        if parsed.path == "/pending/remove":
+            index = int((params.get("index") or ["-1"])[0])
+            pending_queue.remove(index)
+            self._redirect("/pending")
+            return
+
+        if parsed.path == "/commit":
+            self._commit_pending()
+            return
+
         if parsed.path != "/add":
             self._send_html(render("<p>Not found</p>"), status=404)
             return
@@ -893,20 +1025,44 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         try:
+            # Downloading/saving artwork doesn't touch Steam or
+            # shortcuts.vdf at all, so it doesn't need a maintenance
+            # window -- only actually queues the shortcut (name, url,
+            # already-downloaded asset paths) for the next "Save Changes
+            # and Restart Steam OS" commit, instead of stopping Steam
+            # for every single shortcut added. Redirects straight back
+            # to a blank home page ("clean slate") so the next shortcut
+            # can be added immediately without an extra confirmation
+            # step in the way.
             slug = create_webapp.slugify(chosen["name"])
             selections = {}
             for basename, _title, _fetch, _w, _h in ARTWORK_CATEGORIES:
                 selection_url = (params.get(f"artwork_{basename}") or [None])[0]
                 selections[basename] = {"url": selection_url} if selection_url else None
             asset_paths = create_webapp.download_selected_assets(slug, selections)
-
-            def apply():
-                create_webapp.register_steam_shortcut(chosen["name"], url, asset_paths, couch_mode=couch_mode)
-
-            maintenance.run_with_steam_stopped(apply, message=f"Adding {chosen['name']}…")
-            self._send_html(render_done(chosen["name"], ok=True))
+            pending_queue.add(chosen["name"], url, couch_mode, asset_paths)
+            self._redirect("/")
         except Exception as e:  # noqa: BLE001 -- surfaced to the user, not swallowed
             self._send_html(render_done(chosen["name"], ok=False, error=e))
+
+    def _commit_pending(self):
+        items = pending_queue.all_items()
+        if not items:
+            self._redirect("/")
+            return
+        label = f"{len(items)} shortcut{'s' if len(items) != 1 else ''}"
+        try:
+            def apply():
+                for item in items:
+                    create_webapp.register_steam_shortcut(
+                        item["name"], item["url"], item["asset_paths"], couch_mode=item["couch_mode"]
+                    )
+
+            maintenance.run_with_steam_stopped(apply, message=f"Adding {label}…")
+            pending_queue.clear()
+            self._send_html(render_done(label, ok=True))
+        except Exception as e:  # noqa: BLE001 -- surfaced to the user, not swallowed
+            self._send_html(render_done(label, ok=False, error=e))
 
     def log_message(self, fmt, *args):
         print(f"[gridge-server] {self.address_string()} - {fmt % args}")
