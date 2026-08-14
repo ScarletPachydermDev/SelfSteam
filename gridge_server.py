@@ -758,15 +758,20 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
 
 
 def render_login(error=None):
-    error_html = f'<p style="color:#c00">{html.escape(error)}</p>' if error else ""
+    error_html = f'<p style="color:#c00;margin:0">{html.escape(error)}</p>' if error else ""
+    # flex:none overrides the base .card rule's flex:1 -- that's meant
+    # for the 3-column workspace where a card should stretch to fill a
+    # bounded row height, but here (a lone card in main's flex column,
+    # with nothing else sharing the row) it just stretched this card to
+    # the full page height instead of sizing to its own content --
+    # "very narrow and tall" for what should just be a compact box.
     return render(f"""
-<div class="card" style="width:100%;max-width:360px;margin:2rem auto">
-  <h2>Enter the code</h2>
-  <p>A 6-character code is shown on the TV. It's only displayed there --
-  this proves you can see the screen, so no password to remember.</p>
+<div class="card" style="width:100%;max-width:360px;margin:2rem auto;flex:none">
+  <h2 style="font-size:1.5rem">Enter the code</h2>
   {error_html}
   <form id="gridge-login-form" action="/login" method="post">
     <input type="text" name="code" id="gridge-login-code" required autofocus maxlength="6"
+           autocomplete="off"
            style="text-transform:uppercase; text-align:center; font-size:1.6rem; letter-spacing:0.4rem">
   </form>
   <script>
