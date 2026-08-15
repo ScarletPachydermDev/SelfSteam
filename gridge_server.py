@@ -696,18 +696,23 @@ def _artwork_picker_html(candidates_by_category):
             f"height:calc((100vh - {_ARTWORK_VH_OVERHEAD_PX}px) * {weight:.4f}); "
             f"min-height:60px; aspect-ratio: {base_w} / {base_h};"
         )
-        # Always the first cell, always checked by default: value=""
-        # already flows through do_POST's existing "falsy selection ->
-        # skip this category" logic untouched, so a shortcut can always
-        # be created with no artwork picked -- either because there's no
-        # SGDB key at all (real candidates never loaded, this is the
-        # only selectable cell in the row) or because the user actively
-        # wants to skip artwork for this one category despite real
-        # candidates being available.
+        # Always the first cell. value="" already flows through
+        # do_POST's existing "falsy selection -> skip this category"
+        # logic untouched, so a shortcut can always be created with no
+        # artwork picked -- either because there's no SGDB key at all
+        # (real candidates never loaded, this is the only selectable
+        # cell in the row) or because the user actively wants to skip
+        # artwork for this one category despite real candidates being
+        # available. Checked by default only when there ARE no real
+        # candidates to default to instead -- once a search actually
+        # finds artwork, the first real result is the more useful
+        # default (one fewer click for the common case), same as
+        # before "none" existed at all.
         none_id = f"art-{basename}-none"
+        none_checked = "" if candidates else " checked"
         none_cell = f"""
 <div class="artwork-cell">
-  <input type="radio" id="{none_id}" name="artwork_{basename}" value="" form="{_ADD_FORM_ID}" checked>
+  <input type="radio" id="{none_id}" name="artwork_{basename}" value="" form="{_ADD_FORM_ID}"{none_checked}>
   <label for="{none_id}" style="{cell_style}">{_NO_ARTWORK_ICON_SVG}</label>
 </div>"""
         if not candidates:
@@ -727,12 +732,13 @@ def _artwork_picker_html(candidates_by_category):
             continue
         cells = [none_cell]
         for i, cand in enumerate(candidates):
+            checked = " checked" if i == 0 else ""
             input_id = f"art-{basename}-{i}"
             thumb = html.escape(cand.get("thumb") or cand["url"])
             url = html.escape(cand["url"])
             cells.append(f"""
 <div class="artwork-cell">
-  <input type="radio" id="{input_id}" name="artwork_{basename}" value="{url}" form="{_ADD_FORM_ID}">
+  <input type="radio" id="{input_id}" name="artwork_{basename}" value="{url}" form="{_ADD_FORM_ID}"{checked}>
   <label for="{input_id}" style="{cell_style}">
     <img src="{thumb}" loading="lazy" alt="">
   </label>
@@ -928,21 +934,27 @@ def render_settings(error=None):
 
 
 def _resolve_matches(query, resolved, sgdb_q=None):
-    """SGDB matches for a resolved query, or a single synthetic match
-    (id=None) built from the resolved name if no SGDB key is
-    configured. A missing key must not block adding shortcuts at all --
-    it only means no artwork step (see _fetch_candidates's own id=None
-    guard) -- previously sgdb.search()/get_game() raised straight
-    through uncaught here, silently killing the request thread with no
-    response sent at all (surfaced as "the page didn't respond")."""
+    """SGDB matches for a resolved query, falling back to a single
+    synthetic match (id=None, no artwork step -- see _fetch_candidates's
+    own id=None guard) whenever there's no real match to offer: no SGDB
+    key configured, or a real search that came back with zero results
+    (a valid URL/service with nothing on SGDB, e.g. a niche site).
+    Either way a resolved URL must always be addable -- previously an
+    empty real search left the caller with chosen=None and a disabled
+    Add button, and before that, sgdb.search()/get_game() with no key
+    at all raised straight through uncaught here, silently killing the
+    request thread with no response sent at all ("the page didn't
+    respond")."""
+    name = resolved.name or create_webapp.clean_shortcut_name(query)
     if not sgdb.has_api_key():
-        name = resolved.name or create_webapp.clean_shortcut_name(query)
         return [{"id": None, "name": name}]
     if sgdb_q:
-        return sgdb.search(sgdb_q)
-    if resolved.sgdb_id is not None:
-        return [sgdb.get_game(resolved.sgdb_id)]
-    return sgdb.search(resolved.name or create_webapp.clean_shortcut_name(query))
+        matches = sgdb.search(sgdb_q)
+    elif resolved.sgdb_id is not None:
+        matches = [sgdb.get_game(resolved.sgdb_id)]
+    else:
+        matches = sgdb.search(name)
+    return matches or [{"id": None, "name": name}]
 
 
 def _fetch_candidates(game_id):
@@ -1049,9 +1061,6 @@ class Handler(BaseHTTPRequestHandler):
             # itself resolves to -- e.g. keep adding netflix.com while
             # picking artwork from an entirely different SGDB entry.
             matches = _resolve_matches(query, resolved, sgdb_q)
-            if not matches:
-                self._send_html(render_page(query, couch_mode, browser, sgdb_q))
-                return
             match_index = min(match_index, len(matches) - 1)
             candidates = _fetch_candidates(matches[match_index]["id"])
             self._send_html(render_page(
