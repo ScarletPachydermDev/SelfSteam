@@ -1107,7 +1107,7 @@ def render_gallery():
     <span class="add-poster-plus">+</span>
   </a>
 </div>
-""", page_title=_hostname())
+""", page_title=_hostname(), show_back=False)
 
 
 def _fetch_candidates(game_id):
