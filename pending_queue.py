@@ -35,7 +35,7 @@ def _save(items):
         json.dump(items, f, indent=2)
 
 
-def add(name, url, couch_mode, asset_paths):
+def add(name, url, couch_mode, asset_paths, browser_app_id=None):
     with _lock:
         items = _load()
         items.append({
@@ -43,6 +43,7 @@ def add(name, url, couch_mode, asset_paths):
             "url": url,
             "couch_mode": couch_mode,
             "asset_paths": asset_paths,
+            "browser_app_id": browser_app_id,
             "queued_at": time.time(),
         })
         _save(items)

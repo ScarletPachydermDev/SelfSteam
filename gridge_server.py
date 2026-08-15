@@ -160,8 +160,16 @@ header.gridge-header {
 .restart-btn {
   width: auto; margin: 0; padding: 0.65rem 1.3rem; border-radius: 20px; font-size: 0.9rem;
   background: #1a1a1a; color: #fff; white-space: nowrap;
+  /* A near-black fill on a light page is exactly the kind of color
+     Dark Reader's inversion tends to map close to its own dark-mode
+     background -- confirmed live, the button became indistinguishable
+     from the page once dark mode was on. A border isn't dependent on
+     that fill/background transform at all, so the button stays
+     visible regardless of what Dark Reader does with the background
+     color. */
+  border: 1px solid #4a4a4a;
 }
-.restart-btn:disabled { background: #d8d8d8; color: #9a9a9a; cursor: not-allowed; }
+.restart-btn:disabled { background: #d8d8d8; color: #9a9a9a; border-color: #d8d8d8; cursor: not-allowed; }
 .queue-counter {
   width: 1.9rem; height: 1.9rem; flex: 0 0 auto; border-radius: 50%;
   background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center;
@@ -442,7 +450,7 @@ def _queue_actions_html():
     return f"""
 <div class="queue-actions">
   <form action="/commit" method="post" style="margin:0">
-    <button type="submit" class="restart-btn"{disabled}>Save Changes and Restart Steam OS</button>
+    <button type="submit" class="restart-btn"{disabled}>Save changes and restart Steam</button>
   </form>
   <a href="/pending" class="{counter_class}" title="View queued changes">{n}</a>
 </div>"""
@@ -511,7 +519,7 @@ def _browser_select_html(selected_browser):
         options.append(f'<option value="{html.escape(app_id)}"{sel}>{html.escape(name)}</option>')
     return f"""
   <div class="field-group">
-    <label class="field-label" for="gridge-browser-select">Browser</label>
+    <label class="field-label" for="gridge-browser-select">Browser <span style="color:var(--text-dim);font-weight:400;font-size:0.85rem">Flatpak</span></label>
     <select name="browser" id="gridge-browser-select">{''.join(options)}</select>
   </div>"""
 
@@ -1182,7 +1190,7 @@ class Handler(BaseHTTPRequestHandler):
                 selection_url = (params.get(f"artwork_{basename}") or [None])[0]
                 selections[basename] = {"url": selection_url} if selection_url else None
             asset_paths = create_webapp.download_selected_assets(slug, selections)
-            pending_queue.add(chosen["name"], url, couch_mode, asset_paths)
+            pending_queue.add(chosen["name"], url, couch_mode, asset_paths, browser_app_id=browser or None)
             self._redirect("/")
         except Exception as e:  # noqa: BLE001 -- surfaced to the user, not swallowed
             self._send_html(render_done(chosen["name"], ok=False, error=e))
@@ -1197,7 +1205,8 @@ class Handler(BaseHTTPRequestHandler):
             def apply():
                 for item in items:
                     create_webapp.register_steam_shortcut(
-                        item["name"], item["url"], item["asset_paths"], couch_mode=item["couch_mode"]
+                        item["name"], item["url"], item["asset_paths"],
+                        couch_mode=item["couch_mode"], browser_app_id=item.get("browser_app_id"),
                     )
 
             maintenance.run_with_steam_stopped(apply, message=f"Adding {label}…")

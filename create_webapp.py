@@ -12,6 +12,7 @@ import subprocess
 import sys
 from urllib.parse import urlparse
 
+import browser_launcher
 import edge_launcher
 import host_exec
 import sgdb_client as sgdb
@@ -297,13 +298,50 @@ YOUTUBE_TV_USER_AGENT = (
 )
 
 
-def register_steam_shortcut(name, url, asset_paths, user_id=None, couch_mode=False):
+def register_steam_shortcut(name, url, asset_paths, user_id=None, couch_mode=False, browser_app_id=None):
     """Copy fetched assets into Steam's grid folder and add/update a
-    non-Steam shortcut entry in shortcuts.vdf. Returns the appid."""
+    non-Steam shortcut entry in shortcuts.vdf. Returns the appid.
+
+    browser_app_id picks which installed Flatpak browser the shortcut
+    launches -- None or Edge's own id keeps using edge_launcher.py
+    (proven, has its own extra first-run/onboarding suppression beyond
+    plain kiosk flags); anything else goes through browser_launcher.py,
+    which only covers browsers confirmed to actually work in kiosk mode
+    (see its own docstring) rather than guessing flags for an untested
+    one."""
     if couch_mode:
         url = YOUTUBE_TV_URL
 
-    edge_exe, edge_prefix_args = edge_launcher.find_edge()
+    if not browser_app_id or browser_app_id == edge_launcher.FLATPAK_APP_ID:
+        edge_exe, edge_prefix_args = edge_launcher.find_edge()
+        # No --profile-directory/--user-data-dir: use Edge's own default
+        # profile, shared with the user's regular Edge browsing, so
+        # logins already saved there (Netflix, Disney+, etc.) just work
+        # without a separate sign-in per shortcut.
+        browser_args = [
+            edge_exe,
+            *edge_prefix_args,
+            f"--app={url}",
+            "--kiosk",
+            "--start-fullscreen",
+            "--hide-scrollbars",
+            "--no-first-run",
+            "--no-default-browser-check",
+        ]
+        if couch_mode:
+            # LaunchOptions is stored/parsed as one shell-like string,
+            # and the TV user-agent has spaces/parens/semicolons in it --
+            # unquoted, it gets word-split into several bogus arguments
+            # (confirmed: Edge then fails to start at all, so Steam's
+            # Play button just resets with nothing visibly happening).
+            browser_args.append(shlex.quote(f"--user-agent={YOUTUBE_TV_USER_AGENT}"))
+    else:
+        # Already shell-quoted where needed -- browser_launcher.py owns
+        # that decision since it knows which element (if any) needs it
+        # per browser family, unlike here.
+        browser_args = browser_launcher.kiosk_launch_args(
+            browser_app_id, url, couch_mode, YOUTUBE_TV_USER_AGENT
+        )
 
     userdata_dir = steam_paths.find_userdata_dir(user_id)
     grid_dir = os.path.join(userdata_dir, "config", "grid")
@@ -323,28 +361,6 @@ def register_steam_shortcut(name, url, asset_paths, user_id=None, couch_mode=Fal
         if basename == "icon":
             icon_dest = dest
 
-    # No --profile-directory/--user-data-dir: use Edge's own default
-    # profile, shared with the user's regular Edge browsing, so logins
-    # already saved there (Netflix, Disney+, etc.) just work without a
-    # separate sign-in per shortcut.
-    edge_args = [
-        edge_exe,
-        *edge_prefix_args,
-        f"--app={url}",
-        "--kiosk",
-        "--start-fullscreen",
-        "--hide-scrollbars",
-        "--no-first-run",
-        "--no-default-browser-check",
-    ]
-    if couch_mode:
-        # LaunchOptions is stored/parsed as one shell-like string, and the
-        # TV user-agent has spaces/parens/semicolons in it -- unquoted, it
-        # gets word-split into several bogus arguments (confirmed: Edge
-        # then fails to start at all, so Steam's Play button just resets
-        # with nothing visibly happening).
-        edge_args.append(shlex.quote(f"--user-agent={YOUTUBE_TV_USER_AGENT}"))
-
     vdf_path = os.path.join(userdata_dir, "config", "shortcuts.vdf")
     written_appid, stale_appids = shortcuts_vdf.add_shortcut(
         vdf_path,
@@ -352,7 +368,7 @@ def register_steam_shortcut(name, url, asset_paths, user_id=None, couch_mode=Fal
         exe=launch_wrapper,
         start_dir=os.path.dirname(launch_wrapper) + "/",
         icon=icon_dest or "",
-        launch_options=" ".join(edge_args),
+        launch_options=" ".join(browser_args),
         allow_overlay=False,
     )
     assert written_appid == appid
