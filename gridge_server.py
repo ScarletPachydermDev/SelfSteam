@@ -53,6 +53,7 @@ import steam_paths
 
 PORT = int(os.environ.get("GRIDGE_SERVER_PORT", "8845"))
 SESSION_COOKIE = "gridge_session"
+REMEMBER_COOKIE = "gridge_remember"
 _DARKREADER_PATH = os.path.join(os.path.dirname(__file__), "vendor", "darkreader.js")
 _POSTER_FRAME_PATH = os.path.join(os.path.dirname(__file__), "vendor", "poster-frame.webp")
 _ADD_FORM_ID = "gridge-add-form"
@@ -927,6 +928,9 @@ def render_login(error=None):
     <input type="text" name="code" id="gridge-login-code" required autofocus maxlength="6"
            autocomplete="off"
            style="text-transform:uppercase; text-align:center; font-size:1.6rem; letter-spacing:0.4rem">
+    <label style="display:flex;align-items:center;justify-content:center;gap:0.4rem;margin-top:0.9rem;font-size:0.9rem">
+      <input type="checkbox" name="remember"> Remember this device
+    </label>
   </form>
   <script>
   // Second deliberate JS exception (after the dark-mode toggle), same
@@ -1028,6 +1032,15 @@ def render_settings(error=None):
     <button type="submit">Save</button>
   </form>
 </div>
+<div class="card" style="width:100%;max-width:480px;margin:0 auto 2rem;flex:none">
+  <p style="text-align:center;color:var(--text-dim);margin-top:0">
+    Devices that checked "Remember this device" at login skip re-entering
+    the code until this is used.
+  </p>
+  <form action="/key/forget-devices" method="post">
+    <button type="submit" class="secondary" style="width:100%">Forget all remembered devices</button>
+  </form>
+</div>
 """, page_title=_hostname())
 
 
@@ -1125,10 +1138,17 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _redirect(self, location, set_cookie=None):
+        # set_cookie may be a single Set-Cookie value or a list of them
+        # (e.g. login setting both the session cookie and, if "remember
+        # this device" was checked, the remember cookie in the same
+        # response) -- HTTP allows repeating the header, it just can't
+        # be combined into one.
         self.send_response(303)
         self.send_header("Location", location)
         if set_cookie is not None:
-            self.send_header("Set-Cookie", set_cookie)
+            cookies = set_cookie if isinstance(set_cookie, list) else [set_cookie]
+            for c in cookies:
+                self.send_header("Set-Cookie", c)
         self.send_header("Content-Length", "0")
         self.end_headers()
 
@@ -1158,17 +1178,25 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _session_token(self):
+    def _cookie(self, name):
         raw = self.headers.get("Cookie")
         if not raw:
             return None
         jar = http.cookies.SimpleCookie()
         jar.load(raw)
-        morsel = jar.get(SESSION_COOKIE)
+        morsel = jar.get(name)
         return morsel.value if morsel else None
 
+    def _session_token(self):
+        return self._cookie(SESSION_COOKIE)
+
     def _is_authenticated(self):
-        return auth.is_authenticated(self._session_token())
+        # A valid remember-device cookie counts the same as a live
+        # session -- that's the entire point of "remember this device":
+        # skip re-entering the code, not just skip it once.
+        if auth.is_authenticated(self._session_token()):
+            return True
+        return auth.is_remembered(self._cookie(REMEMBER_COOKIE))
 
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
@@ -1187,11 +1215,18 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/login":
-            # Show the code whenever anyone lands on /login while not
-            # authenticated -- whether they got here via the redirect
-            # below, or navigated straight to /login themselves.
-            if not self._is_authenticated():
-                auth_display.ensure_shown()
+            # A remembered device (or a still-live session) landing on
+            # /login directly -- e.g. an old bookmark/tab -- has nothing
+            # to do here, so send it straight to the real homepage
+            # instead of making it look at a code entry box it doesn't
+            # need.
+            if self._is_authenticated():
+                self._redirect("/")
+                return
+            # Otherwise show the code whenever anyone lands on /login
+            # while not authenticated -- whether they got here via the
+            # redirect below, or navigated straight to /login themselves.
+            auth_display.ensure_shown()
             self._send_html(render_login())
             return
 
@@ -1280,6 +1315,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if parsed.path == "/login":
             submitted = (params.get("code") or [""])[0]
+            remember = bool(params.get("remember"))
             token = auth.try_login(submitted)
             if token is None:
                 self._send_html(render_login(error="Wrong or expired code -- check the TV for the current one."))
@@ -1289,7 +1325,14 @@ class Handler(BaseHTTPRequestHandler):
             cookie[SESSION_COOKIE] = token
             cookie[SESSION_COOKIE]["path"] = "/"
             cookie[SESSION_COOKIE]["max-age"] = auth.SESSION_TTL
-            self._redirect("/", set_cookie=cookie[SESSION_COOKIE].OutputString())
+            cookies = [cookie[SESSION_COOKIE].OutputString()]
+            if remember:
+                remember_cookie = http.cookies.SimpleCookie()
+                remember_cookie[REMEMBER_COOKIE] = auth.remember_device()
+                remember_cookie[REMEMBER_COOKIE]["path"] = "/"
+                remember_cookie[REMEMBER_COOKIE]["max-age"] = auth.REMEMBER_TTL
+                cookies.append(remember_cookie[REMEMBER_COOKIE].OutputString())
+            self._redirect("/", set_cookie=cookies)
             return
 
         if not self._is_authenticated():
@@ -1344,6 +1387,19 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/key/remove":
             config.clear_sgdb_api_key()
             self._redirect("/key")
+            return
+
+        if parsed.path == "/key/forget-devices":
+            auth.forget_all_devices()
+            # Also expire the cookie on the browser making this request --
+            # forget_all_devices() already invalidated it server-side, but
+            # there's no reason to leave a now-useless cookie sitting
+            # around on the one device that's guaranteed to be here.
+            expired = http.cookies.SimpleCookie()
+            expired[REMEMBER_COOKIE] = ""
+            expired[REMEMBER_COOKIE]["path"] = "/"
+            expired[REMEMBER_COOKIE]["max-age"] = 0
+            self._redirect("/key", set_cookie=expired[REMEMBER_COOKIE].OutputString())
             return
 
         if parsed.path != "/add":
