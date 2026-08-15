@@ -95,24 +95,26 @@ _NO_ARTWORK_ICON_SVG = (
     'stroke-linecap="round" style="width:35%;height:35%">'
     '<circle cx="12" cy="12" r="9"></circle><line x1="6" y1="18" x2="18" y2="6"></line></svg>'
 )
-# Poster overlay icons (gallery/home page): edit name, edit artwork, remove.
+# Poster overlay icons (gallery/home page): edit name, edit artwork,
+# remove -- exact paths from the design handoff's own HTML source
+# (steam-webapp-creator/"Copy of Three-column UI draft"), not
+# reconstructed from scratch. stroke="currentColor" so it follows
+# .poster-icon-btn's own color instead of a hardcoded white.
 _EDIT_NAME_ICON_SVG = (
-    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" '
-    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
-    '<path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>'
+    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">'
+    '<path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>'
 )
 _EDIT_ARTWORK_ICON_SVG = (
-    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" '
-    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">'
     '<rect x="3" y="3" width="18" height="18" rx="2"></rect>'
-    '<circle cx="8.5" cy="8.5" r="1.5"></circle><path d="m21 15-5-5L5 21"></path></svg>'
+    '<circle cx="8.5" cy="8.5" r="1.5"></circle><path d="M21 15l-5-5L5 21"></path></svg>'
 )
 _TRASH_ICON_SVG = (
-    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" '
-    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
-    '<path d="M3 6h18"></path><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>'
-    '<path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path>'
-    '<line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>'
+    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">'
+    '<polyline points="3 6 5 6 21 6"></polyline>'
+    '<path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>'
+    '<path d="M10 11v6"></path><path d="M14 11v6"></path>'
+    '<path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>'
 )
 
 # (basename, display title, candidate-fetcher, cell width, cell height)
@@ -383,44 +385,40 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
    library of hundreds of shortcuts is expected to need real scrolling. */
 .gallery-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; }
 .gallery-header h2 { font-size: 1.3rem; margin: 0; }
-.gallery-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 1.5rem;
+.gallery-grid { display: flex; flex-wrap: wrap; gap: 24px; }
+/* Fixed pixel sizes throughout this poster, not responsive/aspect-ratio
+   based -- the frame's own shape below is an exact SVG path in these
+   specific coordinates (from the design handoff's real HTML source,
+   steam-webapp-creator/"Copy of Three-column UI draft"), not a generic
+   clip-path that could scale independently of the artwork panel inside
+   it. Earlier attempt used a simple corner clip-path directly on the
+   poster with the icons layered on top of the artwork -- confirmed
+   live that read as no chamfer at all, since the icons covered the one
+   visual cue (page background through the cut) that would have shown
+   it. The real design instead gives the icons their own dedicated
+   margin to the right of the artwork, inside the frame's own tab-like
+   bump, never overlapping the artwork itself. */
+.shortcut-poster { position: relative; width: 195px; height: 229px; flex: 0 0 auto; }
+.poster-frame {
+  position: absolute; left: 0; top: 0; width: 195px; height: 229px; background: var(--accent);
+  clip-path: path('M12,0 L148,0 Q160,0 160,12 L160,72 Q160,86 171,97 L182,108 Q195,121 195,122 L195,217 Q195,229 183,229 L12,229 A12,12 0 0 1 0,217 L0,12 A12,12 0 0 1 12,0 Z');
 }
-.shortcut-poster {
-  position: relative; aspect-ratio: 170 / 255; border-radius: 12px; overflow: hidden;
-  background: var(--accent); padding: 8px; display: block;
+.poster-art {
+  position: absolute; left: 9px; top: 9px; width: 141px; height: 211px; border-radius: 8px;
+  object-fit: cover; display: block; background: var(--skeleton);
 }
-.shortcut-poster img, .poster-placeholder {
-  width: 100%; height: 100%; object-fit: cover; border-radius: 6px; display: block;
-  background: var(--skeleton);
-}
-/* The folder-tab fold: earlier this was a clip-path cut on the whole
-   poster, which technically worked (confirmed applied) but was
-   invisible in practice -- the icon cluster sitting right on top of
-   that exact corner covered the one visual cue (page background
-   showing through the cut) that would've made it read as a fold at
-   all. This instead paints an explicit solid wedge in that corner
-   first, so there's a real, always-visible triangular shape for the
-   icons to sit on regardless of what's under them. */
-.shortcut-poster::after {
-  content: ""; position: absolute; right: 0; bottom: 0; width: 64px; height: 64px;
-  background: #0c4a72; clip-path: polygon(100% 0, 100% 100%, 0 100%);
-}
-.poster-icons {
-  position: absolute; right: 8px; bottom: 8px; display: flex; flex-direction: column; gap: 4px; z-index: 1;
-}
+.poster-icons { position: absolute; right: 6px; bottom: 6px; display: flex; flex-direction: column; gap: 6px; }
 .poster-icon-btn {
-  width: 1.9rem; height: 1.9rem; flex: 0 0 auto; margin: 0; padding: 0; border-radius: 6px;
-  background: rgba(255,255,255,0.15); border: none; display: flex; align-items: center; justify-content: center;
-  cursor: pointer; text-decoration: none;
+  width: 28px; height: 28px; flex: 0 0 auto; margin: 0; padding: 0; border-radius: 6px;
+  background: rgba(0,0,0,0.55); border: none; display: flex; align-items: center; justify-content: center;
+  cursor: pointer; text-decoration: none; color: #fff;
 }
 .poster-icon-btn:disabled { opacity: 0.55; cursor: not-allowed; }
 .add-poster {
-  background: var(--skeleton); display: flex; align-items: center; justify-content: center;
-  color: var(--text-dim);
+  width: 141px; height: 211px; border-radius: 8px; background: var(--skeleton); flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: center; color: var(--text-dim); text-decoration: none;
 }
-.add-poster::after { content: none; }
-.add-poster-plus { font-size: 3rem; line-height: 1; font-weight: 300; }
+.add-poster-plus { font-size: 3.5rem; line-height: 1; font-weight: 300; }
 @media (max-width: 960px) {
   /* Stacked columns don't work with the bounded-height/internal-scroll
      trick above -- three independently-scrolling panels stacked
@@ -1047,8 +1045,8 @@ def _poster_card_html(shortcut):
     appid = shortcut["appid"]
     name = shortcut["name"]
     img_html = (
-        f'<img src="/grid-image/{appid}" loading="lazy" alt="{html.escape(name)}">'
-        if appid is not None else '<div class="poster-placeholder"></div>'
+        f'<img class="poster-art" src="/grid-image/{appid}" loading="lazy" alt="{html.escape(name)}">'
+        if appid is not None else '<div class="poster-art"></div>'
     )
     # Reuses the exact same /search entry point real shortcut creation
     # goes through -- searching by the shortcut's own already-known URL
@@ -1060,6 +1058,7 @@ def _poster_card_html(shortcut):
     edit_artwork_href = f"/search?q={urllib.parse.quote(shortcut['url'] or name)}"
     return f"""
 <div class="shortcut-poster">
+  <div class="poster-frame"></div>
   {img_html}
   <div class="poster-icons">
     <button type="button" class="poster-icon-btn" title="Edit name -- coming soon" disabled>{_EDIT_NAME_ICON_SVG}</button>
@@ -1086,7 +1085,7 @@ def render_gallery():
 </div>
 <div class="gallery-grid">
   {cards_html}
-  <a class="shortcut-poster add-poster" href="/new" title="Add a shortcut">
+  <a class="add-poster" href="/new" title="Add a shortcut">
     <span class="add-poster-plus">+</span>
   </a>
 </div>
