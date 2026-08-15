@@ -51,6 +51,14 @@ def set_sgdb_api_key(key):
     save(sgdb_api_key=key)
 
 
+def clear_sgdb_api_key():
+    data = load()
+    if data.pop("sgdb_api_key", None) is not None:
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        with open(CONFIG_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+
+
 def get_last_browser():
     return load().get("server_last_browser")
 

@@ -6,12 +6,13 @@ plain-Gtk4-no-Adw reasoning as splash.py: runs natively on the host,
 outside Gridge's own Flatpak sandbox where libadwaita normally comes
 from.
 """
+import signal
 import sys
 
 import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gdk, Gtk  # noqa: E402
+from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
 import window_titles
 
@@ -56,6 +57,18 @@ def main():
         )
         win = AuthScreen(app, code)
         win.present()
+        # auth_display.py tears this window down with a plain SIGTERM
+        # (either a fresh code replacing this one, or the code being
+        # used/expiring) -- Python/GTK run no cleanup at all on a bare
+        # SIGTERM by default, so the fullscreen Wayland surface never
+        # gets unmapped through the normal protocol path. Confirmed
+        # live: that left Mutter's window stacking in a bad enough
+        # state to freeze mouse input system-wide, not just break this
+        # window. GLib.unix_signal_add (not Python's own signal.signal)
+        # is the safe way to handle a Unix signal inside a GLib main
+        # loop -- routes it through the loop itself instead of
+        # interrupting a C call at a random point.
+        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, app.quit)
 
     app.connect("activate", on_activate)
     app.run([])

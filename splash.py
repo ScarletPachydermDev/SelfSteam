@@ -5,12 +5,13 @@ entrypoint from gui.py (Gridge's main interactive app) since this needs
 to run headless-launched via gamescope_splash.launch_foregrounded(),
 not opened by a user.
 """
+import signal
 import sys
 
 import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gdk, Gtk  # noqa: E402
+from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
 import window_titles
 
@@ -52,6 +53,12 @@ def main():
         )
         win = SplashWindow(app, message)
         win.present()
+        # See auth_screen.py's on_activate for why this matters: a bare
+        # SIGTERM (what maintenance.py's own teardown sends) skips all
+        # GTK/Wayland cleanup, and confirmed live that leaves Mutter's
+        # window stacking broken enough to freeze mouse input entirely,
+        # not just this window.
+        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, app.quit)
 
     app.connect("activate", on_activate)
     app.run([])

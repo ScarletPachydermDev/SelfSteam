@@ -48,6 +48,7 @@ import maintenance
 import pending_queue
 import service_resolver
 import sgdb_client as sgdb
+import steam_paths
 
 PORT = int(os.environ.get("GRIDGE_SERVER_PORT", "8845"))
 SESSION_COOKIE = "gridge_session"
@@ -82,6 +83,16 @@ _BACK_ICON_SVG = (
     '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
     'stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">'
     '<path d="M15 5 7 12l8 7"></path></svg>'
+)
+# Standard "none/prohibited" pictograph (circle + diagonal slash) --
+# generic enough it isn't anyone's particular icon set, safe to draw
+# directly rather than needing to source one. Sized in % so it scales
+# with whatever cell it lands in, from the small Icon category up to
+# the much bigger Vertical Grid one.
+_NO_ARTWORK_ICON_SVG = (
+    '<svg viewBox="0 0 24 24" fill="none" stroke="#9a9a9a" stroke-width="2" '
+    'stroke-linecap="round" style="width:35%;height:35%">'
+    '<circle cx="12" cy="12" r="9"></circle><line x1="6" y1="18" x2="18" y2="6"></line></svg>'
 )
 
 # (basename, display title, candidate-fetcher, cell width, cell height)
@@ -159,10 +170,16 @@ header.gridge-header {
 .queue-counter.empty { background: #d8d8d8; color: #9a9a9a; }
 .sgdb-key-badge {
   width: auto; margin: 0; padding: 0.5rem 1rem; border-radius: 20px; font-size: 0.8rem; font-weight: 700;
-  display: inline-flex; align-items: center; gap: 0.4rem; cursor: default;
+  display: inline-flex; align-items: center; gap: 0.4rem; cursor: pointer; text-decoration: none;
   background: var(--success-bg); border: 1px solid var(--success-border); color: var(--success-text);
 }
-.sgdb-key-badge.unverified { background: #fbeceb; border-color: #f0c4c0; color: #a13a2f; }
+.sgdb-key-badge.unverified {
+  background: #fdf3d9; border-color: #f0d68a; color: #8a6d1a;
+}
+.steam-warning-banner {
+  background: #fdf3d9; border-bottom: 1px solid #f0d68a; color: #8a6d1a;
+  padding: 0.7rem 2rem; font-size: 0.9rem; text-align: center; flex: 0 0 auto;
+}
 /* min-height:0 everywhere down this flex chain is load-bearing: flex
    items default to min-height:auto, which refuses to shrink below
    their content size and lets real content (e.g. many artwork
@@ -359,6 +376,7 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
     <button id="gridge-dark-toggle" class="icon-btn-round" type="button" title="Toggle dark mode"><!--DARK_ICON--></button>
   </div>
 </header>
+<!--STEAM_WARNING-->
 <main>
 """
 # Dark Reader (vendor/darkreader.js, MIT, see vendor/DARKREADER-LICENSE.txt)
@@ -392,9 +410,26 @@ PAGE_TAIL = """</main>
 
 
 def _sgdb_key_badge_html():
+    # Always a link to /settings, verified or not -- letting it update
+    # an already-configured key (not just add a missing one) is what a
+    # user actually expects from a clickable status badge.
     if sgdb.has_api_key():
-        return '<span class="sgdb-key-badge">&#10003; SGDB API key verified</span>'
-    return '<span class="sgdb-key-badge unverified">&#33; No SGDB API key</span>'
+        return '<a href="/settings" class="sgdb-key-badge">&#10003; SGDB API key verified</a>'
+    return '<a href="/settings" class="sgdb-key-badge unverified">&#9888; No SGDB API key</a>'
+
+
+def _steam_warning_html():
+    # Sanity check, not a hard requirement -- on real SteamOS this can
+    # never fire (Steam owns the machine), but Gridge Server itself is
+    # plain Python with no dependency on Steam being installed at all,
+    # so running it on a bare Linux box without Steam yet would
+    # otherwise fail silently/late, deep inside /add or /commit instead
+    # of up front where it's actually useful.
+    try:
+        steam_paths.find_steam_root()
+        return ""
+    except steam_paths.SteamNotFoundError:
+        return '<div class="steam-warning-banner">&#9888; Steam not found on this machine -- shortcuts can\'t be created until it\'s installed.</div>'
 
 
 def _queue_actions_html():
@@ -419,6 +454,7 @@ def render(body):
     head = head.replace("<!--BACK_ICON-->", _BACK_ICON_SVG)
     head = head.replace("<!--HEART_ICON-->", _HEART_ICON_SVG)
     head = head.replace("<!--QUEUE_ACTIONS-->", _queue_actions_html())
+    head = head.replace("<!--STEAM_WARNING-->", _steam_warning_html())
     # json.dumps for a safe JS string literal (handles the SVG's own
     # quotes) rather than hand-escaping -- these two go inside a JS
     # "..." literal in PAGE_TAIL's <script>, not raw HTML.
@@ -660,26 +696,43 @@ def _artwork_picker_html(candidates_by_category):
             f"height:calc((100vh - {_ARTWORK_VH_OVERHEAD_PX}px) * {weight:.4f}); "
             f"min-height:60px; aspect-ratio: {base_w} / {base_h};"
         )
+        # Always the first cell, always checked by default: value=""
+        # already flows through do_POST's existing "falsy selection ->
+        # skip this category" logic untouched, so a shortcut can always
+        # be created with no artwork picked -- either because there's no
+        # SGDB key at all (real candidates never loaded, this is the
+        # only selectable cell in the row) or because the user actively
+        # wants to skip artwork for this one category despite real
+        # candidates being available.
+        none_id = f"art-{basename}-none"
+        none_cell = f"""
+<div class="artwork-cell">
+  <input type="radio" id="{none_id}" name="artwork_{basename}" value="" form="{_ADD_FORM_ID}" checked>
+  <label for="{none_id}" style="{cell_style}">{_NO_ARTWORK_ICON_SVG}</label>
+</div>"""
         if not candidates:
+            # One real cell less of filler now that the "none" cell
+            # itself occupies the first slot -- keeps the same total
+            # tile count as before per category.
+            filler_count = max(_SKELETON_TILE_COUNTS[basename] - 1, 0)
             skeletons = "".join(
                 f'<div class="artwork-cell artwork-skeleton" style="{cell_style}"></div>'
-                for _ in range(_SKELETON_TILE_COUNTS[basename])
+                for _ in range(filler_count)
             )
             sections.append(f"""
 <div class="artwork-category">
   <h3>{html.escape(title)}</h3>
-  <div class="artwork-row">{skeletons}</div>
+  <div class="artwork-row">{none_cell}{skeletons}</div>
 </div>""")
             continue
-        cells = []
+        cells = [none_cell]
         for i, cand in enumerate(candidates):
-            checked = "checked" if i == 0 else ""
             input_id = f"art-{basename}-{i}"
             thumb = html.escape(cand.get("thumb") or cand["url"])
             url = html.escape(cand["url"])
             cells.append(f"""
 <div class="artwork-cell">
-  <input type="radio" id="{input_id}" name="artwork_{basename}" value="{url}" form="{_ADD_FORM_ID}" {checked}>
+  <input type="radio" id="{input_id}" name="artwork_{basename}" value="{url}" form="{_ADD_FORM_ID}">
   <label for="{input_id}" style="{cell_style}">
     <img src="{thumb}" loading="lazy" alt="">
   </label>
@@ -805,7 +858,6 @@ def render_done(name, ok, error=None):
 <div class="card" style="width:100%;max-width:420px;margin:2rem auto">
   <h2 style="color:#c00">Failed</h2>
   <p>Couldn't add <strong>{html.escape(name)}</strong>: {html.escape(str(error))}</p>
-  <a class="btn secondary" href="/" style="display:inline-block;text-decoration:none">Back</a>
 </div>
 """
     return render(body)
@@ -819,7 +871,6 @@ def render_pending():
   <h2>No changes queued</h2>
   <p style="color:var(--text-dim)">Add a shortcut and it'll show up here, staged until you
   save changes and restart SteamOS.</p>
-  <a class="btn secondary" href="/" style="display:block;text-align:center;text-decoration:none">Back</a>
 </div>
 """
         return render(body)
@@ -840,13 +891,63 @@ def render_pending():
 <div style="width:100%;max-width:800px;margin:2rem auto;display:flex;flex-direction:column;gap:1rem">
   <h2>{len(items)} change{"s" if len(items) != 1 else ""} queued</h2>
   {"".join(rows)}
-  <a class="btn secondary" href="/" style="display:block;text-align:center;text-decoration:none">Back</a>
 </div>
 """
     return render(body)
 
 
+def render_settings(error=None):
+    has_key = sgdb.has_api_key()
+    current_key = config.get_sgdb_api_key() or ""
+    status_html = (
+        '<p style="color:var(--success-text)">&#10003; A key is currently configured and verified.</p>'
+        if has_key else
+        '<p style="color:#8a6d1a">&#9888; No key configured yet -- shortcuts can still be '
+        'added without artwork, but SGDB search/matching won\'t work until one is set.</p>'
+    )
+    error_html = f'<p style="color:#c00">{html.escape(error)}</p>' if error else ""
+    return render(f"""
+<div class="card" style="width:100%;max-width:480px;margin:2rem auto;flex:none">
+  <h2>SteamGridDB API key</h2>
+  {status_html}
+  {error_html}
+  <form action="/settings" method="post" style="display:flex;flex-direction:column;gap:0.9rem">
+    <div class="field-group">
+      <label class="field-label" for="gridge-sgdb-key">API key</label>
+      <div class="field-with-clear">
+        <input type="text" name="sgdb_api_key" id="gridge-sgdb-key" value="{html.escape(current_key)}"
+               placeholder="Paste your key here" autocomplete="off">
+        <button type="submit" formaction="/settings/remove" formnovalidate class="field-clear-btn" title="Remove key">&#10005;</button>
+      </div>
+      <a href="https://www.steamgriddb.com/profile/preferences/api" target="_blank" rel="noopener" style="font-size:0.85rem">Get a free key at steamgriddb.com</a>
+    </div>
+    <button type="submit">Save</button>
+  </form>
+</div>
+""")
+
+
+def _resolve_matches(query, resolved, sgdb_q=None):
+    """SGDB matches for a resolved query, or a single synthetic match
+    (id=None) built from the resolved name if no SGDB key is
+    configured. A missing key must not block adding shortcuts at all --
+    it only means no artwork step (see _fetch_candidates's own id=None
+    guard) -- previously sgdb.search()/get_game() raised straight
+    through uncaught here, silently killing the request thread with no
+    response sent at all (surfaced as "the page didn't respond")."""
+    if not sgdb.has_api_key():
+        name = resolved.name or create_webapp.clean_shortcut_name(query)
+        return [{"id": None, "name": name}]
+    if sgdb_q:
+        return sgdb.search(sgdb_q)
+    if resolved.sgdb_id is not None:
+        return [sgdb.get_game(resolved.sgdb_id)]
+    return sgdb.search(resolved.name or create_webapp.clean_shortcut_name(query))
+
+
 def _fetch_candidates(game_id):
+    if game_id is None:
+        return {}
     return {basename: fetch(game_id) for basename, _title, fetch, _w, _h in ARTWORK_CATEGORIES}
 
 
@@ -916,6 +1017,10 @@ class Handler(BaseHTTPRequestHandler):
             self._send_html(render_pending())
             return
 
+        if parsed.path == "/settings":
+            self._send_html(render_settings())
+            return
+
         if parsed.path == "/search":
             query = (params.get("q") or [""])[0].strip()
             couch_mode = bool(params.get("couch_mode"))
@@ -943,12 +1048,7 @@ class Handler(BaseHTTPRequestHandler):
             # what SGDB is searched for, independent of what the URL
             # itself resolves to -- e.g. keep adding netflix.com while
             # picking artwork from an entirely different SGDB entry.
-            if sgdb_q:
-                matches = sgdb.search(sgdb_q)
-            elif resolved.sgdb_id is not None:
-                matches = [sgdb.get_game(resolved.sgdb_id)]
-            else:
-                matches = sgdb.search(resolved.name or create_webapp.clean_shortcut_name(query))
+            matches = _resolve_matches(query, resolved, sgdb_q)
             if not matches:
                 self._send_html(render_page(query, couch_mode, browser, sgdb_q))
                 return
@@ -998,6 +1098,37 @@ class Handler(BaseHTTPRequestHandler):
             self._commit_pending()
             return
 
+        if parsed.path == "/settings":
+            key = (params.get("sgdb_api_key") or [""])[0].strip()
+            if key:
+                try:
+                    valid = sgdb.verify_api_key(key)
+                except sgdb.SGDBError:
+                    # Couldn't reach SGDB to check at all (network down,
+                    # timeout) -- save anyway rather than blocking on a
+                    # check that itself failed; a genuinely bad key still
+                    # gets caught the next time something actually
+                    # searches, just not immediately here.
+                    valid = True
+                if not valid:
+                    self._send_html(render_settings(error="That key was rejected by SteamGridDB -- double check it and try again."))
+                    return
+                config.set_sgdb_api_key(key)
+                self._redirect("/")
+            else:
+                # Submitting Save with the field emptied (manually
+                # deleted, not just the dedicated clear button below)
+                # removes the key too -- "empty" reads as "I want this
+                # gone", not "do nothing".
+                config.clear_sgdb_api_key()
+                self._redirect("/settings")
+            return
+
+        if parsed.path == "/settings/remove":
+            config.clear_sgdb_api_key()
+            self._redirect("/settings")
+            return
+
         if parsed.path != "/add":
             self._send_html(render("<p>Not found</p>"), status=404)
             return
@@ -1016,10 +1147,7 @@ class Handler(BaseHTTPRequestHandler):
         # match list, and re-searching by raw query text here wouldn't
         # reproduce that list at all, breaking match_index for those.
         resolved = service_resolver.resolve(query)
-        if resolved.sgdb_id is not None:
-            matches = [sgdb.get_game(resolved.sgdb_id)]
-        else:
-            matches = sgdb.search(resolved.name or create_webapp.clean_shortcut_name(query))
+        matches = _resolve_matches(query, resolved)
         if not matches or match_index >= len(matches):
             self._send_html(render_done(match_name or query, ok=False, error="match no longer available, please search again"))
             return

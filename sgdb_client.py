@@ -56,6 +56,27 @@ def has_api_key():
         return False
 
 
+def verify_api_key(key):
+    """True/False for whether `key` is actually accepted by SGDB's API
+    (a real request, not just "is a string configured") -- checked
+    against the key being submitted, not whatever's already saved.
+    Raises SGDBError only for transport-level failures (network down,
+    timeout, unexpected response) so callers can tell "definitely
+    invalid" apart from "couldn't check right now"."""
+    url = f"{API_BASE}/search/autocomplete/a"
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {key}", "User-Agent": "gridge/0.1"})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.load(resp)
+        return bool(data.get("success"))
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            return False
+        raise SGDBError(f"SGDB API error {e.code} verifying key: {e.read().decode(errors='replace')}")
+    except urllib.error.URLError as e:
+        raise SGDBError(f"Network error verifying SGDB key: {e.reason}")
+
+
 def _get(path, params=None):
     url = f"{API_BASE}{path}"
     if params:
