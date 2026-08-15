@@ -13,3 +13,6 @@ Vendored third-party code, committed as plain source (not a git submodule).
 - `poster-frame.webp` — the shortcut gallery's own poster background
   shape, not third-party: user-supplied PNG (`poster-blue-frame.png`),
   converted to WebP here for its transparency + size.
+- `name-field-wand.webp` — decorative icon in the Name field, not
+  third-party: user-supplied PNG screenshot, cropped to content,
+  recolored to `--text-dim` grey, converted to WebP here.

@@ -41,15 +41,37 @@ def _match_streaming_service(key):
     return None
 
 
+# Compound TLDs (a country-code TLD with its own second level, e.g.
+# .com.au) aren't a subdomain boundary the way a plain .com is --
+# binge.com.au's site name is "binge", not "com". No full public-suffix
+# list here (that needs an external dependency this project otherwise
+# has no use for); just the handful actually plausible for a streaming
+# service's own domain.
+_COMPOUND_TLDS = {"com.au", "co.uk", "org.uk", "co.nz", "com.br", "co.jp", "com.mx", "co.za"}
+# Generic access-point subdomains: real brand names (spotify, stremio)
+# are always more distinctive than these, so once the compound-TLD (or
+# plain single-label TLD) is stripped off, drop these before picking
+# the site's own name.
+_GENERIC_SUBDOMAIN_LABELS = {"www", "web", "open", "app", "my", "watch", "play", "go", "get", "use", "login", "m", "mobile", "account"}
+
+
 def guess_name_from_url(url):
     if "://" not in url:
         url = f"https://{url}"
     host = urlparse(url).netloc.removeprefix("www.")
-    # The registrable-domain label, not just the first one: open.spotify.com
-    # and web.stremio.com should guess "Spotify"/"Stremio", not the
-    # "open"/"web" subdomain in front of it -- a real reported bug.
-    parts = host.split(".")
-    base = parts[-2] if len(parts) >= 2 else parts[0]
+    for tld in _COMPOUND_TLDS:
+        suffix = f".{tld}"
+        if host.endswith(suffix):
+            labels = host[:-len(suffix)].split(".")
+            break
+    else:
+        labels = host.split(".")[:-1]
+    # open.spotify.com / web.stremio.com should guess "Spotify"/
+    # "Stremio", not the "open"/"web" subdomain in front of it -- a
+    # real reported bug -- but binge.com.au (no subdomain, just a
+    # compound TLD) should still guess "Binge".
+    labels = [label for label in labels if label not in _GENERIC_SUBDOMAIN_LABELS] or labels
+    base = labels[-1] if labels else host
     return base.replace("-", " ").title()
 
 

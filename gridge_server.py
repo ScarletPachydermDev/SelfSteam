@@ -56,6 +56,7 @@ SESSION_COOKIE = "gridge_session"
 REMEMBER_COOKIE = "gridge_remember"
 _DARKREADER_PATH = os.path.join(os.path.dirname(__file__), "vendor", "darkreader.js")
 _POSTER_FRAME_PATH = os.path.join(os.path.dirname(__file__), "vendor", "poster-frame.webp")
+_NAME_FIELD_WAND_PATH = os.path.join(os.path.dirname(__file__), "vendor", "name-field-wand.webp")
 _ADD_FORM_ID = "gridge-add-form"
 _SEARCH_ICON_SVG = (
     '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="white" '
@@ -97,19 +98,14 @@ _NO_ARTWORK_ICON_SVG = (
     'stroke-linecap="round" style="width:35%;height:35%">'
     '<circle cx="12" cy="12" r="9"></circle><line x1="6" y1="18" x2="18" y2="6"></line></svg>'
 )
-# Poster overlay icons (gallery/home page): edit name, edit artwork,
-# remove -- exact paths from the design handoff's own HTML source
-# (steam-webapp-creator/"Copy of Three-column UI draft"), not
-# reconstructed from scratch. stroke="currentColor" so it follows
-# .poster-icon-btn's own color instead of a hardcoded white.
+# Poster overlay icons (gallery/home page): edit, remove -- exact path
+# from the design handoff's own HTML source (steam-webapp-creator/
+# "Copy of Three-column UI draft"), not reconstructed from scratch.
+# stroke="currentColor" so it follows .poster-icon-btn's own color
+# instead of a hardcoded white.
 _EDIT_NAME_ICON_SVG = (
     '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">'
     '<path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>'
-)
-_EDIT_ARTWORK_ICON_SVG = (
-    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">'
-    '<rect x="3" y="3" width="18" height="18" rx="2"></rect>'
-    '<circle cx="8.5" cy="8.5" r="1.5"></circle><path d="M21 15l-5-5L5 21"></path></svg>'
 )
 _TRASH_ICON_SVG = (
     '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">'
@@ -254,6 +250,7 @@ label.field-label {
   display: block; font-size: 1.05rem; font-weight: 700; color: var(--text);
   letter-spacing: 0.01em; margin: 0;
 }
+.required-asterisk { color: #c00; }
 input[type=text], select {
   width: 100%; padding: 0.8rem 1.1rem; font-size: 0.9rem; font-family: inherit;
   border: 1px solid var(--input-border); border-radius: 20px; background: #fff; color: var(--text);
@@ -286,6 +283,15 @@ input[type=text]:focus, select:focus { border-color: var(--accent); }
   border-radius: 50%; background: transparent; color: #4a4a4a; border: none; text-decoration: none;
   display: flex; align-items: center; justify-content: center;
 }
+.name-field-icon {
+  flex: 0 0 auto; width: 26px; height: 26px; margin-right: 0.5rem; object-fit: contain;
+}
+/* Hidden once the field actually has a name in it (typed or already
+   auto-filled) -- it's a "this can be auto-filled" cue, not permanent
+   decoration, so it'd just be clutter sitting next to real text.
+   :placeholder-shown is false the moment there's a value, whether that
+   value came from typing or from the server's own auto-fill. */
+.field-with-clear:has(input:not(:placeholder-shown)) .name-field-icon { display: none; }
 .hint-row { display: flex; align-items: flex-start; gap: 0.5rem; font-size: 0.95rem; color: var(--text-dim); margin: 0; }
 .hint-row.warning { color: #c25b1f; }
 .info-icon {
@@ -313,6 +319,12 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
 .boxed-list a:nth-child(odd) { background: #ececec; }
 .boxed-list a:nth-child(even) { background: #f3f3f3; }
 .boxed-list a.selected { outline: 2px solid var(--accent); outline-offset: -2px; font-weight: 600; }
+/* The list's own rounded corners (.boxed-list's overflow:hidden) clip
+   flush against the first/last row -- without matching border-radius
+   here too, a selected first/last row's square outline corners get cut
+   off by that clip instead of following it. */
+.boxed-list a:first-child { border-top-left-radius: 8px; border-top-right-radius: 8px; }
+.boxed-list a:last-child { border-bottom-left-radius: 8px; border-bottom-right-radius: 8px; }
 /* Placeholder rows before any search -- reserves the middle column's
    space instead of it looking like an empty gap. */
 .placeholder-row { flex: 0 0 auto; height: 2.3rem; }
@@ -540,9 +552,13 @@ def _queue_actions_html():
 
 
 def render(body, page_title="Add Steam Shortcut", show_back=True):
+    # Even when there's no back button (top-level pages), its slot in
+    # the header still needs to take up the same space -- an invisible
+    # placeholder of the same size, not an empty string, or the title
+    # next to it shifts left to fill the gap instead of staying put.
     back_btn_html = (
         f'<a class="icon-btn-round back-btn" href="/" title="Back to shortcuts">{_BACK_ICON_SVG}</a>'
-        if show_back else ""
+        if show_back else '<span class="icon-btn-round back-btn" style="visibility:hidden"></span>'
     )
     head = PAGE_HEAD.replace("<!--SGDB_KEY_BADGE-->", _sgdb_key_badge_html())
     head = head.replace("<!--DARK_ICON-->", _MOON_ICON_SVG)
@@ -612,7 +628,7 @@ def _browser_select_html(selected_browser):
   </div>"""
 
 
-def _url_tab_panel_html(query="", couch_mode=False, browser=""):
+def _url_tab_panel_html(query="", couch_mode=False, browser="", chosen=None, name_reset_href="/"):
     resolved = service_resolver.resolve(query) if query else None
 
     # Couch Mode only makes sense for the plain youtube.com site --
@@ -641,17 +657,42 @@ def _url_tab_panel_html(query="", couch_mode=False, browser=""):
     # current query -- clicking it did nothing visible, reported as
     # "clear fields not working". A link back to / with the field
     # actually absent is a real clear, still zero-JS.
+    # Cross-populated the same moment the SGDB search box is (both
+    # ultimately come from resolved.name), then refined to the exact
+    # match's own name once one is chosen -- but a real, separate,
+    # directly editable field rather than that search box doing double
+    # duty as the saved name. Owned by the standalone Add form (see
+    # render_page) via form="..." rather than DOM nesting -- lets it
+    # live here, under the URL field, while still submitting with
+    # Create Steam Shortcut instead of this form's own GET search.
+    # sgdb.clean_sgdb_name strips SGDB's own "(Website)"/"(Program)"-
+    # style tags here (the actual saved name), but NOT from the match
+    # list itself (see _match_list_html) -- there, the same tag is a
+    # useful disambiguator between same-named entries.
+    name_default = sgdb.clean_sgdb_name(chosen["name"]) if chosen else (resolved.name if resolved and resolved.name else "")
+    name_field = f"""
+  <div class="field-group">
+    <label class="field-label" for="gridge-name-field">Name</label>
+    <div class="field-with-clear">
+      <img class="name-field-icon" src="/vendor/name-field-wand.webp" alt="">
+      <input type="text" name="match_name" id="gridge-name-field" form="{_ADD_FORM_ID}"
+             value="{html.escape(name_default)}" placeholder="Shortcut name">
+      <a href="{name_reset_href}" class="field-clear-btn" title="Reset to guessed name">&#10005;</a>
+    </div>
+  </div>"""
+
     return f"""
   <div class="field-group">
-    <label class="field-label">Streaming service or URL</label>
+    <label class="field-label">Streaming service or URL <span class="required-asterisk">*</span></label>
     <div class="search-field-row">
       <div class="field-with-clear">
-        <input type="text" name="q" value="{html.escape(query)}" placeholder="e.g. Netflix" required autofocus>
-        <a href="/" class="field-clear-btn" title="Clear">&#10005;</a>
+        <input type="text" name="q" value="{html.escape(query)}" placeholder="e.g. Netflix or www.arte.tv" required autofocus>
+        <a href="/new" class="field-clear-btn" title="Clear">&#10005;</a>
       </div>
       <button type="submit" class="search-submit-btn" title="Search">{_SEARCH_ICON_SVG}</button>
     </div>
-  </div>{couch_row}
+  </div>
+  {name_field}{couch_row}
   {hint}
   {_browser_select_html(browser)}"""
 
@@ -687,6 +728,18 @@ def _placeholder_matches_html():
     return f'<div class="boxed-list">{"".join(rows)}</div>'
 
 
+def _display_name(query, sgdb_q):
+    """What's actually driving the current SGDB results: the explicit
+    override if there is one, else whatever the URL/service field
+    itself resolved to. Purely a search term -- the separate Name field
+    (see _url_tab_panel_html) is what actually gets saved, so editing
+    this doesn't rename anything on its own."""
+    if sgdb_q:
+        return sgdb_q
+    resolved = service_resolver.resolve(query) if query else None
+    return resolved.name if resolved and resolved.name else ""
+
+
 def _sgdb_search_bar_html(query, couch_mode, browser, sgdb_q):
     # Always-visible override search (matches the design handoff's
     # column-2 "SGDB search" pill) rather than the earlier magnifying-
@@ -698,11 +751,7 @@ def _sgdb_search_bar_html(query, couch_mode, browser, sgdb_q):
     # service field itself resolved to) rather than sitting empty until
     # touched -- same behavior planned for the Apps/RetroArch/Emulators
     # tabs once they're built out, not just the URL tab.
-    if sgdb_q:
-        display_term = sgdb_q
-    else:
-        resolved = service_resolver.resolve(query) if query else None
-        display_term = resolved.name if resolved and resolved.name else ""
+    display_term = _display_name(query, sgdb_q)
     clear_href = f"/search?{_state_qs(query, couch_mode, browser)}"
     return f"""
 <form action="/search" method="get">
@@ -723,6 +772,10 @@ def _match_list_html(query, couch_mode, browser, sgdb_q, matches, match_index):
     # straight to that match's artwork (a real GET, no JS needed) --
     # a radio selection alone doesn't submit anything by itself, which
     # read as "artwork doesn't change when I pick a different match".
+    # sgdb_q stays whatever it already was across rows -- picking a
+    # match no longer touches the search box, only which artwork/name
+    # is chosen (the Name field, back in the left column, follows the
+    # picked match's own name instead).
     rows = []
     qs = _state_qs(query, couch_mode, browser, sgdb_q=sgdb_q)
     for i, m in enumerate(matches):
@@ -871,11 +924,14 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
         # merging the inner form's fields/buttons into the outer one --
         # confirmed live, this made clicking "Search" submit /add (with
         # stale data) instead of actually searching.
+        # The Name field itself (see _url_tab_panel_html) is what
+        # actually carries match_name to /add -- it's a real visible
+        # input tagged form="{_ADD_FORM_ID}" so its live value (whatever
+        # was typed, not just whatever the server last rendered) is
+        # what's submitted, without needing to nest it inside this form.
         add_form = f"""
 <form id="{_ADD_FORM_ID}" action="/add" method="post">
   <input type="hidden" name="query" value="{html.escape(query)}">
-  <input type="hidden" name="match_index" value="{match_index}">
-  <input type="hidden" name="match_name" value="{html.escape(chosen['name'])}">
   <input type="hidden" name="resolved_url" value="{html.escape(resolved_url or '')}">
   <input type="hidden" name="browser" value="{html.escape(_default_browser(browser))}">
   {couch_field}
@@ -883,13 +939,21 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
 """
         add_button = f'<button type="submit" form="{_ADD_FORM_ID}">Create Steam Shortcut</button>'
 
+    # Reloading with the exact same state discards whatever's currently
+    # typed in the Name field and re-renders its default (chosen's own
+    # name) -- same "clear means revert to default" meaning the SGDB
+    # search box's own clear button already has, not a literal empty
+    # field (there's no way to distinguish "explicitly cleared" from
+    # "never touched" without JS to track that).
+    name_reset_href = f"/search?{_state_qs(query, couch_mode, browser, sgdb_q=sgdb_q)}&match_index={match_index}"
+
     left = f"""
 <div class="card">
   {_tab_bar_html()}
   <div class="tab-panels">
     <div class="tab-panel tab-panel-url">
       <form action="/search" method="get" style="display:flex;flex-direction:column;gap:0.9rem">
-        {_url_tab_panel_html(query, couch_mode, browser)}
+        {_url_tab_panel_html(query, couch_mode, browser, chosen, name_reset_href)}
       </form>
     </div>
     <div class="tab-panel tab-panel-apps"><div class="coming-soon">Apps (Flathub/Installed) -- coming soon</div></div>
@@ -1034,8 +1098,8 @@ def render_settings(error=None):
 </div>
 <div class="card" style="width:100%;max-width:480px;margin:0 auto 2rem;flex:none">
   <p style="text-align:center;color:var(--text-dim);margin-top:0">
-    Devices that checked "Remember this device" at login skip re-entering
-    the code until this is used.
+    Sign out from server every device that checked "Remember this
+    device" at login.
   </p>
   <form action="/key/forget-devices" method="post">
     <button type="submit" class="secondary" style="width:100%">Forget all remembered devices</button>
@@ -1082,18 +1146,19 @@ def _poster_card_html(shortcut):
     # Reuses the exact same /search entry point real shortcut creation
     # goes through -- searching by the shortcut's own already-known URL
     # runs SGDB matching immediately (no re-typing), and picking new
-    # artwork there and hitting Create Steam Shortcut replaces this
-    # shortcut in place rather than duplicating it: add_shortcut's own
-    # appid is deterministic from exe+name, and it already dedups any
-    # existing entry with the same name before writing.
-    edit_artwork_href = f"/search?q={urllib.parse.quote(shortcut['url'] or name)}"
+    # artwork or editing the Name field there and hitting Create Steam
+    # Shortcut replaces this shortcut in place rather than duplicating
+    # it: add_shortcut's own appid is deterministic from exe+name, and
+    # it already dedups any existing entry with the same name before
+    # writing. One "Edit" icon, not separate name/artwork ones -- both
+    # would point at this exact same page anyway.
+    edit_href = f"/search?q={urllib.parse.quote(shortcut['url'] or name)}"
     return f"""
 <div class="shortcut-poster">
   <div class="poster-frame"></div>
   {art_html}
   <div class="poster-icons">
-    <button type="button" class="poster-icon-btn" title="Edit name -- coming soon" disabled>{_EDIT_NAME_ICON_SVG}</button>
-    <a href="{edit_artwork_href}" class="poster-icon-btn" title="Edit artwork">{_EDIT_ARTWORK_ICON_SVG}</a>
+    <a href="{edit_href}" class="poster-icon-btn" title="Edit">{_EDIT_NAME_ICON_SVG}</a>
     <form action="/shortcuts/remove" method="post" style="margin:0">
       <input type="hidden" name="appid" value="{html.escape(str(appid))}">
       <input type="hidden" name="name" value="{html.escape(name)}">
@@ -1240,6 +1305,16 @@ class Handler(BaseHTTPRequestHandler):
             # unauthenticated login page itself needs) -- only used on
             # the gallery, which is never reachable unauthenticated.
             with open(_POSTER_FRAME_PATH, "rb") as f:
+                body = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/webp")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        if parsed.path == "/vendor/name-field-wand.webp":
+            with open(_NAME_FIELD_WAND_PATH, "rb") as f:
                 body = f.read()
             self.send_response(200)
             self.send_header("Content-Type", "image/webp")
@@ -1408,26 +1483,19 @@ class Handler(BaseHTTPRequestHandler):
 
         query = (params.get("query") or [""])[0]
         couch_mode = bool(params.get("couch_mode"))
-        match_index = int((params.get("match_index") or ["0"])[0])
-        match_name = (params.get("match_name") or [""])[0]
+        # match_name comes straight from the Name field's own live value
+        # (see _url_tab_panel_html) -- used as-is here rather than
+        # re-resolving matches from SGDB all over again just to recover
+        # a name, so editing it doesn't require a second live SGDB
+        # round-trip on every Add.
+        match_name = (params.get("match_name") or [""])[0] or create_webapp.clean_shortcut_name(query)
         url = (params.get("resolved_url") or [""])[0]
         browser = (params.get("browser") or [""])[0]
         if browser:
             config.set_last_browser(browser)
 
-        # Re-resolve the same way /search did rather than a fresh raw
-        # text search: a resolved.sgdb_id lookup produces a single-item
-        # match list, and re-searching by raw query text here wouldn't
-        # reproduce that list at all, breaking match_index for those.
-        resolved = service_resolver.resolve(query)
-        matches = _resolve_matches(query, resolved)
-        if not matches or match_index >= len(matches):
-            self._send_html(render_done(match_name or query, ok=False, error="match no longer available, please search again"))
-            return
-        chosen = matches[match_index]
-
         if not url:
-            self._send_html(render_done(chosen["name"], ok=False, error="couldn't resolve a URL for this shortcut, please search again"))
+            self._send_html(render_done(match_name, ok=False, error="couldn't resolve a URL for this shortcut, please search again"))
             return
 
         try:
@@ -1440,16 +1508,16 @@ class Handler(BaseHTTPRequestHandler):
             # to a blank home page ("clean slate") so the next shortcut
             # can be added immediately without an extra confirmation
             # step in the way.
-            slug = create_webapp.slugify(chosen["name"])
+            slug = create_webapp.slugify(match_name)
             selections = {}
             for basename, _title, _fetch, _w, _h in ARTWORK_CATEGORIES:
                 selection_url = (params.get(f"artwork_{basename}") or [None])[0]
                 selections[basename] = {"url": selection_url} if selection_url else None
             asset_paths = create_webapp.download_selected_assets(slug, selections)
-            pending_queue.add(chosen["name"], url, couch_mode, asset_paths, browser_app_id=browser or None)
+            pending_queue.add(match_name, url, couch_mode, asset_paths, browser_app_id=browser or None)
             self._redirect("/")
         except Exception as e:  # noqa: BLE001 -- surfaced to the user, not swallowed
-            self._send_html(render_done(chosen["name"], ok=False, error=e))
+            self._send_html(render_done(match_name, ok=False, error=e))
 
     def _commit_pending(self):
         items = pending_queue.all_items()
