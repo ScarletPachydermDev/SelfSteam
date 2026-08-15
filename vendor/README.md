@@ -10,3 +10,6 @@ Vendored third-party code, committed as plain source (not a git submodule).
 - `darkreader.js` — [Dark Reader](https://github.com/darkreader/darkreader)
   4.9.128, MIT (see `DARKREADER-LICENSE.txt`). Used for the web UI's
   dark-mode toggle.
+- `poster-frame.webp` — the shortcut gallery's own poster background
+  shape, not third-party: user-supplied PNG (`poster-blue-frame.png`),
+  converted to WebP here for its transparency + size.

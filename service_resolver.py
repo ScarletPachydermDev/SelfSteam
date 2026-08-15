@@ -45,7 +45,11 @@ def guess_name_from_url(url):
     if "://" not in url:
         url = f"https://{url}"
     host = urlparse(url).netloc.removeprefix("www.")
-    base = host.split(".")[0]
+    # The registrable-domain label, not just the first one: open.spotify.com
+    # and web.stremio.com should guess "Spotify"/"Stremio", not the
+    # "open"/"web" subdomain in front of it -- a real reported bug.
+    parts = host.split(".")
+    base = parts[-2] if len(parts) >= 2 else parts[0]
     return base.replace("-", " ").title()
 
 

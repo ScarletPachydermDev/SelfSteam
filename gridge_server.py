@@ -54,6 +54,7 @@ import steam_paths
 PORT = int(os.environ.get("GRIDGE_SERVER_PORT", "8845"))
 SESSION_COOKIE = "gridge_session"
 _DARKREADER_PATH = os.path.join(os.path.dirname(__file__), "vendor", "darkreader.js")
+_POSTER_FRAME_PATH = os.path.join(os.path.dirname(__file__), "vendor", "poster-frame.webp")
 _ADD_FORM_ID = "gridge-add-form"
 _SEARCH_ICON_SVG = (
     '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="white" '
@@ -387,36 +388,46 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
 .gallery-header h2 { font-size: 1.3rem; margin: 0; }
 .gallery-grid { display: flex; flex-wrap: wrap; gap: 24px; }
 /* Fixed pixel sizes throughout this poster, not responsive/aspect-ratio
-   based -- the frame's own shape below is an exact SVG path in these
-   specific coordinates (from the design handoff's real HTML source,
-   steam-webapp-creator/"Copy of Three-column UI draft"), not a generic
-   clip-path that could scale independently of the artwork panel inside
-   it. Earlier attempt used a simple corner clip-path directly on the
-   poster with the icons layered on top of the artwork -- confirmed
-   live that read as no chamfer at all, since the icons covered the one
-   visual cue (page background through the cut) that would have shown
-   it. The real design instead gives the icons their own dedicated
-   margin to the right of the artwork, inside the frame's own tab-like
-   bump, never overlapping the artwork itself. */
-.shortcut-poster { position: relative; width: 195px; height: 229px; flex: 0 0 auto; }
+   based -- scaled up (195x229 -> 230x270, same ~0.852 aspect ratio) from
+   the design handoff's own exact coordinates (steam-webapp-creator/
+   "Copy of Three-column UI draft"), not invented. The frame itself is
+   now a real image (vendor/poster-frame.webp, user-supplied PNG
+   re-exported as WebP for transparency + size) instead of a CSS
+   clip-path -- the clip-path version was technically applying
+   correctly but read as no chamfer at all in practice, since the icon
+   cluster sitting on that exact corner hid the one visual cue (page
+   background through the cut) that would have shown it. The image
+   approach has no such gap: it's just always visibly there. */
+.shortcut-poster { position: relative; width: 230px; height: 270px; flex: 0 0 auto; }
 .poster-frame {
-  position: absolute; left: 0; top: 0; width: 195px; height: 229px; background: var(--accent);
-  clip-path: path('M12,0 L148,0 Q160,0 160,12 L160,72 Q160,86 171,97 L182,108 Q195,121 195,122 L195,217 Q195,229 183,229 L12,229 A12,12 0 0 1 0,217 L0,12 A12,12 0 0 1 12,0 Z');
+  position: absolute; left: 0; top: 0; width: 230px; height: 270px;
+  background: url(/vendor/poster-frame.webp) no-repeat; background-size: 100% 100%;
 }
 .poster-art {
-  position: absolute; left: 9px; top: 9px; width: 141px; height: 211px; border-radius: 8px;
+  position: absolute; left: 11px; top: 11px; width: 166px; height: 249px; border-radius: 8px;
   object-fit: cover; display: block; background: var(--skeleton);
 }
-.poster-icons { position: absolute; right: 6px; bottom: 6px; display: flex; flex-direction: column; gap: 6px; }
+.poster-art-noimg {
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  padding: 12px; box-sizing: border-box;
+}
+.poster-art-noimg span { font-size: 0.95rem; font-weight: 600; color: var(--text-dim); word-break: break-word; }
+.poster-icons { position: absolute; right: 7px; bottom: 7px; display: flex; flex-direction: column; gap: 7px; }
 .poster-icon-btn {
-  width: 28px; height: 28px; flex: 0 0 auto; margin: 0; padding: 0; border-radius: 6px;
+  width: 33px; height: 33px; flex: 0 0 auto; margin: 0; padding: 0; border-radius: 7px;
   background: rgba(0,0,0,0.55); border: none; display: flex; align-items: center; justify-content: center;
   cursor: pointer; text-decoration: none; color: #fff;
 }
 .poster-icon-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+/* Sized/offset to match the *artwork* region of the other posters
+   exactly (166x249, 11px inset), not their full outer box -- the add
+   card has no blue frame of its own, so aligning by outer edges would
+   leave its "+" sitting visibly higher than every other poster's real
+   content. */
 .add-poster {
-  width: 141px; height: 211px; border-radius: 8px; background: var(--skeleton); flex: 0 0 auto;
-  display: flex; align-items: center; justify-content: center; color: var(--text-dim); text-decoration: none;
+  width: 166px; height: 249px; margin-top: 11px; border-radius: 8px; background: var(--skeleton);
+  flex: 0 0 auto; display: flex; align-items: center; justify-content: center;
+  color: var(--text-dim); text-decoration: none;
 }
 .add-poster-plus { font-size: 3.5rem; line-height: 1; font-weight: 300; }
 @media (max-width: 960px) {
@@ -435,7 +446,7 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
 </style></head><body>
 <header class="gridge-header">
   <div class="gridge-header-left">
-    <a class="icon-btn-round back-btn" href="/" title="Back to shortcuts"><!--BACK_ICON--></a>
+    <!--BACK_BTN-->
     <div class="gridge-header-title">
       <strong><!--PAGE_TITLE--></strong>
     </div>
@@ -481,12 +492,12 @@ PAGE_TAIL = """</main>
 
 
 def _sgdb_key_badge_html():
-    # Always a link to /settings, verified or not -- letting it update
+    # Always a link to /key, verified or not -- letting it update
     # an already-configured key (not just add a missing one) is what a
     # user actually expects from a clickable status badge.
     if sgdb.has_api_key():
-        return '<a href="/settings" class="sgdb-key-badge">&#10003; SGDB API key verified</a>'
-    return '<a href="/settings" class="sgdb-key-badge unverified">&#9888; No SGDB API key</a>'
+        return '<a href="/key" class="sgdb-key-badge">&#10003; SGDB API key verified</a>'
+    return '<a href="/key" class="sgdb-key-badge unverified">&#9888; No SGDB API key</a>'
 
 
 def _hostname():
@@ -527,10 +538,14 @@ def _queue_actions_html():
 </div>"""
 
 
-def render(body, page_title="Add Steam Shortcut"):
+def render(body, page_title="Add Steam Shortcut", show_back=True):
+    back_btn_html = (
+        f'<a class="icon-btn-round back-btn" href="/" title="Back to shortcuts">{_BACK_ICON_SVG}</a>'
+        if show_back else ""
+    )
     head = PAGE_HEAD.replace("<!--SGDB_KEY_BADGE-->", _sgdb_key_badge_html())
     head = head.replace("<!--DARK_ICON-->", _MOON_ICON_SVG)
-    head = head.replace("<!--BACK_ICON-->", _BACK_ICON_SVG)
+    head = head.replace("<!--BACK_BTN-->", back_btn_html)
     head = head.replace("<!--HEART_ICON-->", _HEART_ICON_SVG)
     head = head.replace("<!--QUEUE_ACTIONS-->", _queue_actions_html())
     head = head.replace("<!--STEAM_WARNING-->", _steam_warning_html())
@@ -906,7 +921,7 @@ def render_login(error=None):
     # "very narrow and tall" for what should just be a compact box.
     return render(f"""
 <div class="card" style="width:100%;max-width:360px;margin:2rem auto;flex:none">
-  <h2 style="font-size:1.5rem">Enter the code</h2>
+  <h2 style="font-size:1.5rem">Enter code</h2>
   {error_html}
   <form id="gridge-login-form" action="/login" method="post">
     <input type="text" name="code" id="gridge-login-code" required autofocus maxlength="6"
@@ -926,7 +941,7 @@ def render_login(error=None):
   }});
   </script>
 </div>
-""", page_title=_hostname())
+""", page_title=_hostname(), show_back=False)
 
 
 def render_done(name, ok, error=None):
@@ -990,24 +1005,23 @@ def render_settings(error=None):
     has_key = sgdb.has_api_key()
     current_key = config.get_sgdb_api_key() or ""
     status_html = (
-        '<p style="color:var(--success-text)">&#10003; A key is currently configured and verified.</p>'
+        '<p style="color:var(--success-text);text-align:center">&#10003; A key is currently configured and verified.</p>'
         if has_key else
-        '<p style="color:#8a6d1a">&#9888; No key configured yet -- shortcuts can still be '
+        '<p style="color:#8a6d1a;text-align:center">&#9888; No key configured yet -- shortcuts can still be '
         'added without artwork, but SGDB search/matching won\'t work until one is set.</p>'
     )
-    error_html = f'<p style="color:#c00">{html.escape(error)}</p>' if error else ""
+    error_html = f'<p style="color:#c00;text-align:center">{html.escape(error)}</p>' if error else ""
     return render(f"""
 <div class="card" style="width:100%;max-width:480px;margin:2rem auto;flex:none">
-  <h2>SteamGridDB API key</h2>
   {status_html}
   {error_html}
-  <form action="/settings" method="post" style="display:flex;flex-direction:column;gap:0.9rem">
+  <form action="/key" method="post" style="display:flex;flex-direction:column;gap:0.9rem">
     <div class="field-group">
-      <label class="field-label" for="gridge-sgdb-key">API key</label>
+      <label class="field-label" for="gridge-sgdb-key">SteamGridDB API key</label>
       <div class="field-with-clear">
         <input type="text" name="sgdb_api_key" id="gridge-sgdb-key" value="{html.escape(current_key)}"
                placeholder="Paste your key here" autocomplete="off">
-        <button type="submit" formaction="/settings/remove" formnovalidate class="field-clear-btn" title="Remove key">&#10005;</button>
+        <button type="submit" formaction="/key/remove" formnovalidate class="field-clear-btn" title="Remove key">&#10005;</button>
       </div>
       <a href="https://www.steamgriddb.com/profile/preferences/api" target="_blank" rel="noopener" style="font-size:0.85rem">Get a free key at steamgriddb.com</a>
     </div>
@@ -1044,10 +1058,14 @@ def _resolve_matches(query, resolved, sgdb_q=None):
 def _poster_card_html(shortcut):
     appid = shortcut["appid"]
     name = shortcut["name"]
-    img_html = (
-        f'<img class="poster-art" src="/grid-image/{appid}" loading="lazy" alt="{html.escape(name)}">'
-        if appid is not None else '<div class="poster-art"></div>'
-    )
+    has_artwork = appid is not None and create_webapp.find_grid_image_for_appid(appid) is not None
+    if has_artwork:
+        art_html = f'<img class="poster-art" src="/grid-image/{appid}" loading="lazy" alt="{html.escape(name)}">'
+    else:
+        # No grid image on disk -- rather than a broken <img> or a blank
+        # panel, show the shortcut's own name so the poster still reads
+        # as *that* shortcut instead of an empty tile.
+        art_html = f'<div class="poster-art poster-art-noimg"><span>{html.escape(name)}</span></div>'
     # Reuses the exact same /search entry point real shortcut creation
     # goes through -- searching by the shortcut's own already-known URL
     # runs SGDB matching immediately (no re-typing), and picking new
@@ -1059,7 +1077,7 @@ def _poster_card_html(shortcut):
     return f"""
 <div class="shortcut-poster">
   <div class="poster-frame"></div>
-  {img_html}
+  {art_html}
   <div class="poster-icons">
     <button type="button" class="poster-icon-btn" title="Edit name -- coming soon" disabled>{_EDIT_NAME_ICON_SVG}</button>
     <a href="{edit_artwork_href}" class="poster-icon-btn" title="Edit artwork">{_EDIT_ARTWORK_ICON_SVG}</a>
@@ -1182,6 +1200,19 @@ class Handler(BaseHTTPRequestHandler):
             self._redirect("/login")
             return
 
+        if parsed.path == "/vendor/poster-frame.webp":
+            # Behind auth (unlike darkreader.js above, which the
+            # unauthenticated login page itself needs) -- only used on
+            # the gallery, which is never reachable unauthenticated.
+            with open(_POSTER_FRAME_PATH, "rb") as f:
+                body = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/webp")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
         if parsed.path == "/":
             self._send_html(render_gallery())
             return
@@ -1198,7 +1229,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_html(render_pending())
             return
 
-        if parsed.path == "/settings":
+        if parsed.path == "/key":
             self._send_html(render_settings())
             return
 
@@ -1284,7 +1315,7 @@ class Handler(BaseHTTPRequestHandler):
             self._commit_pending()
             return
 
-        if parsed.path == "/settings":
+        if parsed.path == "/key":
             key = (params.get("sgdb_api_key") or [""])[0].strip()
             if key:
                 try:
@@ -1307,12 +1338,12 @@ class Handler(BaseHTTPRequestHandler):
                 # removes the key too -- "empty" reads as "I want this
                 # gone", not "do nothing".
                 config.clear_sgdb_api_key()
-                self._redirect("/settings")
+                self._redirect("/key")
             return
 
-        if parsed.path == "/settings/remove":
+        if parsed.path == "/key/remove":
             config.clear_sgdb_api_key()
-            self._redirect("/settings")
+            self._redirect("/key")
             return
 
         if parsed.path != "/add":
