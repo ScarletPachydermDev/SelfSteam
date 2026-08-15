@@ -4,6 +4,7 @@ and (for local testing without Steam) register a .desktop entry so the icon
 shows up in the app menu.
 """
 import argparse
+import glob
 import os
 import re
 import shlex
@@ -382,6 +383,126 @@ def register_steam_shortcut(name, url, asset_paths, user_id=None, couch_mode=Fal
     print(f"\nAdded/updated Steam shortcut '{name}' (appid {appid}) in {vdf_path}")
     print("Restart Steam (fully quit, not just close the window) to see it.")
     return appid
+
+
+def _field(entry, *names):
+    """Reads a shortcuts.vdf entry field trying several key casings --
+    Steam rewrites the whole file with its own casing (confirmed:
+    "appname" becomes "AppName") every time it starts, and add_shortcut's
+    own dedup logic already has to account for exactly this. Applying
+    the same defensive lookup to every field read here, not just
+    appname, since which fields Steam's own rewrite touches isn't
+    something to assume without seeing it happen to each one."""
+    for name in names:
+        if name in entry:
+            return entry[name]
+    return None
+
+
+def _extract_launch_url(launch_options):
+    """Pulls the target URL back out of a shortcut's own LaunchOptions
+    string -- Chromium-family shortcuts carry it as --app=<url>;
+    Firefox-family ones (see browser_launcher.py) have no --app=
+    equivalent, so it's just the last bare http(s) token instead."""
+    try:
+        tokens = shlex.split(launch_options)
+    except ValueError:
+        tokens = launch_options.split()
+    for tok in tokens:
+        if tok.startswith("--app="):
+            return tok[len("--app="):]
+    for tok in reversed(tokens):
+        if tok.startswith(("http://", "https://")):
+            return tok
+    return None
+
+
+def find_grid_image_path(grid_dir, appid):
+    """The vertical-grid image file for `appid` in `grid_dir`, whatever
+    its extension actually is (SGDB candidates can be .png/.jpg/.webp) --
+    GRID_FILENAMES only gives the pattern, not a real filename to open
+    directly."""
+    matches = glob.glob(os.path.join(grid_dir, GRID_FILENAMES["grid_vertical"].format(appid=appid, ext=".*")))
+    return matches[0] if matches else None
+
+
+def find_grid_image_for_appid(appid):
+    """Same as find_grid_image_path, but searches every Steam user's
+    grid dir instead of requiring the caller to already know which one --
+    used by the gallery's own image-serving route, which only has an
+    appid to go on."""
+    root = steam_paths.find_steam_root()
+    userdata = os.path.join(root, "userdata")
+    if not os.path.isdir(userdata):
+        return None
+    for uid in os.listdir(userdata):
+        if not uid.isdigit():
+            continue
+        path = find_grid_image_path(os.path.join(userdata, uid, "config", "grid"), appid)
+        if path:
+            return path
+    return None
+
+
+def list_gridge_shortcuts():
+    """Every non-Steam shortcut Gridge itself created (matched via
+    is_gridge_launch_wrapper on the exe field, never a user's own
+    unrelated non-Steam shortcuts), across every Steam user profile.
+    Returns dicts with appid/name/url/user_id -- callers needing the
+    grid image should call find_grid_image_path themselves with the
+    right per-user grid_dir, since two different users could each have
+    their own art for a same-named shortcut."""
+    root = steam_paths.find_steam_root()
+    userdata = os.path.join(root, "userdata")
+    if not os.path.isdir(userdata):
+        return []
+    results = []
+    for uid in os.listdir(userdata):
+        if not uid.isdigit():
+            continue
+        vdf_path = os.path.join(userdata, uid, "config", "shortcuts.vdf")
+        data = shortcuts_vdf.load(vdf_path)
+        for entry in data.get("shortcuts", {}).values():
+            exe = _field(entry, "exe", "Exe") or ""
+            if not is_gridge_launch_wrapper(exe):
+                continue
+            launch_options = _field(entry, "LaunchOptions", "launchoptions") or ""
+            results.append({
+                "appid": _field(entry, "appid", "AppID"),
+                "name": _field(entry, "appname", "AppName") or "",
+                "url": _extract_launch_url(launch_options),
+                "user_id": uid,
+            })
+    results.sort(key=lambda r: r["name"].lower())
+    return results
+
+
+def remove_gridge_shortcut(appid):
+    """Removes a Gridge-created shortcut (and its stale grid assets) by
+    appid, across every Steam user profile. No-ops (not an error) if
+    already gone some other way -- deleting is inherently idempotent
+    from the caller's point of view."""
+    root = steam_paths.find_steam_root()
+    userdata = os.path.join(root, "userdata")
+    if not os.path.isdir(userdata):
+        return
+    for uid in os.listdir(userdata):
+        if not uid.isdigit():
+            continue
+        vdf_path = os.path.join(userdata, uid, "config", "shortcuts.vdf")
+        grid_dir = os.path.join(userdata, uid, "config", "grid")
+        data = shortcuts_vdf.load(vdf_path)
+        shortcuts = data.get("shortcuts", {})
+        stale_keys = [k for k, e in shortcuts.items() if str(_field(e, "appid", "AppID")) == str(appid)]
+        if not stale_keys:
+            continue
+        for k in stale_keys:
+            del shortcuts[k]
+        shortcuts_vdf.save(vdf_path, data)
+        if os.path.isdir(grid_dir):
+            for f in os.listdir(grid_dir):
+                if f.startswith(str(appid)):
+                    os.remove(os.path.join(grid_dir, f))
 
 
 def register_test_desktop_entry(name, slug, url, icon_path):

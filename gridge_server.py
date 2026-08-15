@@ -36,6 +36,7 @@ import html
 import http.cookies
 import json
 import os
+import socket
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -93,6 +94,25 @@ _NO_ARTWORK_ICON_SVG = (
     '<svg viewBox="0 0 24 24" fill="none" stroke="#9a9a9a" stroke-width="2" '
     'stroke-linecap="round" style="width:35%;height:35%">'
     '<circle cx="12" cy="12" r="9"></circle><line x1="6" y1="18" x2="18" y2="6"></line></svg>'
+)
+# Poster overlay icons (gallery/home page): edit name, edit artwork, remove.
+_EDIT_NAME_ICON_SVG = (
+    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" '
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+    '<path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>'
+)
+_EDIT_ARTWORK_ICON_SVG = (
+    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" '
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+    '<rect x="3" y="3" width="18" height="18" rx="2"></rect>'
+    '<circle cx="8.5" cy="8.5" r="1.5"></circle><path d="m21 15-5-5L5 21"></path></svg>'
+)
+_TRASH_ICON_SVG = (
+    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" '
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+    '<path d="M3 6h18"></path><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>'
+    '<path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path>'
+    '<line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>'
 )
 
 # (basename, display title, candidate-fetcher, cell width, cell height)
@@ -152,9 +172,10 @@ header.gridge-header {
   width: 3rem; margin: 0; padding: 0; height: 3rem; border-radius: 10px;
   border: none; background: var(--card-bg); color: var(--text-dim);
   display: flex; align-items: center; justify-content: center; font-size: 1.2rem; cursor: pointer;
+  text-decoration: none;
 }
-/* Not wired to anything yet -- purely visual, placed ahead of the
-   title so it reads as "back" at a glance once it does something. */
+/* Links back to the shortcut gallery (the real home page) from
+   anywhere else in the app. */
 .back-btn { width: 3.2rem; height: 3.2rem; }
 .queue-actions { display: flex; align-items: center; gap: 0.6rem; }
 .restart-btn {
@@ -356,6 +377,50 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
 #tab-retroarch:checked ~ .tab-panels .tab-panel-retroarch,
 #tab-emulators:checked ~ .tab-panels .tab-panel-emulators { display: flex; }
 .coming-soon { color: var(--text-dim); font-size: 0.85rem; padding: 1rem 0; text-align: center; }
+/* Shortcut gallery (the real home page: "/"). main's own flex column
+   already scrolls the whole page here -- unlike the 3-column workspace,
+   there's no reason to bound this to the viewport height, since a
+   library of hundreds of shortcuts is expected to need real scrolling. */
+.gallery-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; }
+.gallery-header h2 { font-size: 1.3rem; margin: 0; }
+.gallery-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 1.5rem;
+}
+.shortcut-poster {
+  position: relative; aspect-ratio: 170 / 255; border-radius: 12px; overflow: hidden;
+  background: var(--accent); padding: 8px; display: block;
+}
+.shortcut-poster img, .poster-placeholder {
+  width: 100%; height: 100%; object-fit: cover; border-radius: 6px; display: block;
+  background: var(--skeleton);
+}
+/* The folder-tab fold: earlier this was a clip-path cut on the whole
+   poster, which technically worked (confirmed applied) but was
+   invisible in practice -- the icon cluster sitting right on top of
+   that exact corner covered the one visual cue (page background
+   showing through the cut) that would've made it read as a fold at
+   all. This instead paints an explicit solid wedge in that corner
+   first, so there's a real, always-visible triangular shape for the
+   icons to sit on regardless of what's under them. */
+.shortcut-poster::after {
+  content: ""; position: absolute; right: 0; bottom: 0; width: 64px; height: 64px;
+  background: #0c4a72; clip-path: polygon(100% 0, 100% 100%, 0 100%);
+}
+.poster-icons {
+  position: absolute; right: 8px; bottom: 8px; display: flex; flex-direction: column; gap: 4px; z-index: 1;
+}
+.poster-icon-btn {
+  width: 1.9rem; height: 1.9rem; flex: 0 0 auto; margin: 0; padding: 0; border-radius: 6px;
+  background: rgba(255,255,255,0.15); border: none; display: flex; align-items: center; justify-content: center;
+  cursor: pointer; text-decoration: none;
+}
+.poster-icon-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.add-poster {
+  background: var(--skeleton); display: flex; align-items: center; justify-content: center;
+  color: var(--text-dim);
+}
+.add-poster::after { content: none; }
+.add-poster-plus { font-size: 3rem; line-height: 1; font-weight: 300; }
 @media (max-width: 960px) {
   /* Stacked columns don't work with the bounded-height/internal-scroll
      trick above -- three independently-scrolling panels stacked
@@ -372,9 +437,9 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
 </style></head><body>
 <header class="gridge-header">
   <div class="gridge-header-left">
-    <button class="icon-btn-round back-btn" type="button" title="Back"><!--BACK_ICON--></button>
+    <a class="icon-btn-round back-btn" href="/" title="Back to shortcuts"><!--BACK_ICON--></a>
     <div class="gridge-header-title">
-      <strong>Add Steam Shortcut</strong>
+      <strong><!--PAGE_TITLE--></strong>
     </div>
     <!--QUEUE_ACTIONS-->
   </div>
@@ -426,6 +491,14 @@ def _sgdb_key_badge_html():
     return '<a href="/settings" class="sgdb-key-badge unverified">&#9888; No SGDB API key</a>'
 
 
+def _hostname():
+    # Login and the shortcut gallery both show this instead of a fixed
+    # title -- it's the fastest way to confirm from the login screen
+    # alone that you've reached the right machine, useful the moment
+    # there's more than one Gridge Server on the same network.
+    return socket.gethostname()
+
+
 def _steam_warning_html():
     # Sanity check, not a hard requirement -- on real SteamOS this can
     # never fire (Steam owns the machine), but Gridge Server itself is
@@ -456,13 +529,14 @@ def _queue_actions_html():
 </div>"""
 
 
-def render(body):
+def render(body, page_title="Add Steam Shortcut"):
     head = PAGE_HEAD.replace("<!--SGDB_KEY_BADGE-->", _sgdb_key_badge_html())
     head = head.replace("<!--DARK_ICON-->", _MOON_ICON_SVG)
     head = head.replace("<!--BACK_ICON-->", _BACK_ICON_SVG)
     head = head.replace("<!--HEART_ICON-->", _HEART_ICON_SVG)
     head = head.replace("<!--QUEUE_ACTIONS-->", _queue_actions_html())
     head = head.replace("<!--STEAM_WARNING-->", _steam_warning_html())
+    head = head.replace("<!--PAGE_TITLE-->", html.escape(page_title))
     # json.dumps for a safe JS string literal (handles the SVG's own
     # quotes) rather than hand-escaping -- these two go inside a JS
     # "..." literal in PAGE_TAIL's <script>, not raw HTML.
@@ -854,7 +928,7 @@ def render_login(error=None):
   }});
   </script>
 </div>
-""")
+""", page_title=_hostname())
 
 
 def render_done(name, ok, error=None):
@@ -864,7 +938,7 @@ def render_done(name, ok, error=None):
   <h2 style="color:var(--success-text)">Done</h2>
   <p><strong>{html.escape(name)}</strong> added. Steam has restarted -- it should
   show up in your library now.</p>
-  <a class="btn" href="/" style="display:inline-block;text-decoration:none">Add another</a>
+  <a class="btn" href="/new" style="display:inline-block;text-decoration:none">Add another</a>
 </div>
 """
     else:
@@ -874,7 +948,7 @@ def render_done(name, ok, error=None):
   <p>Couldn't add <strong>{html.escape(name)}</strong>: {html.escape(str(error))}</p>
 </div>
 """
-    return render(body)
+    return render(body, page_title=_hostname())
 
 
 def render_pending():
@@ -887,18 +961,22 @@ def render_pending():
   save changes and restart SteamOS.</p>
 </div>
 """
-        return render(body)
+        return render(body, page_title=_hostname())
     rows = []
     for i, item in enumerate(items):
+        is_removal = item.get("type") == "remove"
+        action_label = "Removing" if is_removal else "Adding"
+        detail = "" if is_removal else f'<div style="color:var(--text-dim);font-size:0.85rem">{html.escape(item["url"])}</div>'
         rows.append(f"""
 <div class="card" style="width:100%;max-width:800px;margin:0 auto;flex-direction:row;align-items:center;justify-content:space-between">
   <div>
-    <strong>{html.escape(item['name'])}</strong>
-    <div style="color:var(--text-dim);font-size:0.85rem">{html.escape(item['url'])}</div>
+    <span style="color:var(--text-dim);font-size:0.8rem;text-transform:uppercase">{action_label}</span>
+    <div><strong>{html.escape(item['name'])}</strong></div>
+    {detail}
   </div>
   <form action="/pending/remove" method="post" style="margin:0">
     <input type="hidden" name="index" value="{i}">
-    <button type="submit" class="secondary" style="width:auto;padding:0.5rem 1rem">Remove</button>
+    <button type="submit" class="secondary" style="width:auto;padding:0.5rem 1rem">Cancel</button>
   </form>
 </div>""")
     body = f"""
@@ -907,7 +985,7 @@ def render_pending():
   {"".join(rows)}
 </div>
 """
-    return render(body)
+    return render(body, page_title=_hostname())
 
 
 def render_settings(error=None):
@@ -938,7 +1016,7 @@ def render_settings(error=None):
     <button type="submit">Save</button>
   </form>
 </div>
-""")
+""", page_title=_hostname())
 
 
 def _resolve_matches(query, resolved, sgdb_q=None):
@@ -965,6 +1043,56 @@ def _resolve_matches(query, resolved, sgdb_q=None):
     return matches or [{"id": None, "name": name}]
 
 
+def _poster_card_html(shortcut):
+    appid = shortcut["appid"]
+    name = shortcut["name"]
+    img_html = (
+        f'<img src="/grid-image/{appid}" loading="lazy" alt="{html.escape(name)}">'
+        if appid is not None else '<div class="poster-placeholder"></div>'
+    )
+    # Reuses the exact same /search entry point real shortcut creation
+    # goes through -- searching by the shortcut's own already-known URL
+    # runs SGDB matching immediately (no re-typing), and picking new
+    # artwork there and hitting Create Steam Shortcut replaces this
+    # shortcut in place rather than duplicating it: add_shortcut's own
+    # appid is deterministic from exe+name, and it already dedups any
+    # existing entry with the same name before writing.
+    edit_artwork_href = f"/search?q={urllib.parse.quote(shortcut['url'] or name)}"
+    return f"""
+<div class="shortcut-poster">
+  {img_html}
+  <div class="poster-icons">
+    <button type="button" class="poster-icon-btn" title="Edit name -- coming soon" disabled>{_EDIT_NAME_ICON_SVG}</button>
+    <a href="{edit_artwork_href}" class="poster-icon-btn" title="Edit artwork">{_EDIT_ARTWORK_ICON_SVG}</a>
+    <form action="/shortcuts/remove" method="post" style="margin:0">
+      <input type="hidden" name="appid" value="{html.escape(str(appid))}">
+      <input type="hidden" name="name" value="{html.escape(name)}">
+      <button type="submit" class="poster-icon-btn" title="Remove shortcut">{_TRASH_ICON_SVG}</button>
+    </form>
+  </div>
+</div>"""
+
+
+def render_gallery():
+    # No cap on how many render -- explicitly meant to hold however many
+    # shortcuts exist (a user can have hundreds), not a paginated/lazy
+    # subset. CSS grid + the browser's own image lazy-loading is what
+    # keeps that reasonable, not limiting the query.
+    shortcuts = create_webapp.list_gridge_shortcuts()
+    cards_html = "".join(_poster_card_html(s) for s in shortcuts)
+    return render(f"""
+<div class="gallery-header">
+  <h2>Non Steam shortcuts</h2>
+</div>
+<div class="gallery-grid">
+  {cards_html}
+  <a class="shortcut-poster add-poster" href="/new" title="Add a shortcut">
+    <span class="add-poster-plus">+</span>
+  </a>
+</div>
+""", page_title=_hostname())
+
+
 def _fetch_candidates(game_id):
     if game_id is None:
         return {}
@@ -986,6 +1114,32 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Set-Cookie", set_cookie)
         self.send_header("Content-Length", "0")
         self.end_headers()
+
+    _IMAGE_CONTENT_TYPES = {
+        ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+        ".webp": "image/webp", ".gif": "image/gif",
+    }
+
+    def _serve_grid_image(self, appid):
+        # appid comes straight from the URL path -- validated as a bare
+        # positive int before it ever reaches a filesystem call, same
+        # reasoning as any other path built from request input.
+        if not appid.isdigit():
+            self._send_html(render("<p>Not found</p>"), status=404)
+            return
+        path = create_webapp.find_grid_image_for_appid(int(appid))
+        if not path or not os.path.exists(path):
+            self._send_html(render("<p>Not found</p>"), status=404)
+            return
+        ext = os.path.splitext(path)[1].lower()
+        content_type = self._IMAGE_CONTENT_TYPES.get(ext, "application/octet-stream")
+        with open(path, "rb") as f:
+            body = f.read()
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def _session_token(self):
         raw = self.headers.get("Cookie")
@@ -1030,7 +1184,15 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/":
+            self._send_html(render_gallery())
+            return
+
+        if parsed.path == "/new":
             self._send_html(render_page())
+            return
+
+        if parsed.path.startswith("/grid-image/"):
+            self._serve_grid_image(parsed.path[len("/grid-image/"):])
             return
 
         if parsed.path == "/pending":
@@ -1109,6 +1271,14 @@ class Handler(BaseHTTPRequestHandler):
             index = int((params.get("index") or ["-1"])[0])
             pending_queue.remove(index)
             self._redirect("/pending")
+            return
+
+        if parsed.path == "/shortcuts/remove":
+            appid = (params.get("appid") or [""])[0]
+            name = (params.get("name") or [""])[0]
+            if appid:
+                pending_queue.add_removal(appid, name)
+            self._redirect("/")
             return
 
         if parsed.path == "/commit":
@@ -1200,16 +1370,26 @@ class Handler(BaseHTTPRequestHandler):
         if not items:
             self._redirect("/")
             return
-        label = f"{len(items)} shortcut{'s' if len(items) != 1 else ''}"
+        added = sum(1 for i in items if i.get("type", "add") == "add")
+        removed = sum(1 for i in items if i.get("type") == "remove")
+        parts = []
+        if added:
+            parts.append(f"{added} added")
+        if removed:
+            parts.append(f"{removed} removed")
+        label = " and ".join(parts) if parts else f"{len(items)} shortcut{'s' if len(items) != 1 else ''}"
         try:
             def apply():
                 for item in items:
-                    create_webapp.register_steam_shortcut(
-                        item["name"], item["url"], item["asset_paths"],
-                        couch_mode=item["couch_mode"], browser_app_id=item.get("browser_app_id"),
-                    )
+                    if item.get("type") == "remove":
+                        create_webapp.remove_gridge_shortcut(item["appid"])
+                    else:
+                        create_webapp.register_steam_shortcut(
+                            item["name"], item["url"], item["asset_paths"],
+                            couch_mode=item["couch_mode"], browser_app_id=item.get("browser_app_id"),
+                        )
 
-            maintenance.run_with_steam_stopped(apply, message=f"Adding {label}…")
+            maintenance.run_with_steam_stopped(apply, message=f"Applying {label}…")
             pending_queue.clear()
             self._send_html(render_done(label, ok=True))
         except Exception as e:  # noqa: BLE001 -- surfaced to the user, not swallowed

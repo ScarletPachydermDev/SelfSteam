@@ -39,11 +39,28 @@ def add(name, url, couch_mode, asset_paths, browser_app_id=None):
     with _lock:
         items = _load()
         items.append({
+            "type": "add",
             "name": name,
             "url": url,
             "couch_mode": couch_mode,
             "asset_paths": asset_paths,
             "browser_app_id": browser_app_id,
+            "queued_at": time.time(),
+        })
+        _save(items)
+
+
+def add_removal(appid, name):
+    # Removals are batchable the same way additions are -- someone
+    # cleaning up several old shortcuts shouldn't need a separate Steam
+    # restart per deletion any more than someone adding several new
+    # ones should.
+    with _lock:
+        items = _load()
+        items.append({
+            "type": "remove",
+            "appid": appid,
+            "name": name,
             "queued_at": time.time(),
         })
         _save(items)
