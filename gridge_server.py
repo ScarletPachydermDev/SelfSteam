@@ -133,6 +133,7 @@ PAGE_HEAD = """<!doctype html>
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Gridge Server</title>
+<!--EXTRA_HEAD-->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -422,11 +423,30 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
 .breadcrumbs a { color: var(--accent); text-decoration: none; }
 .breadcrumbs a:hover { text-decoration: underline; }
 .folder-icon, .file-icon { flex: 0 0 auto; width: 1rem; text-align: center; }
-/* Tighter than the URL tab's own list heights on purpose -- BIOS +
-   ROM pickers can both be visible at once (PS1 etc.), so each gets
-   less room to leave space for the Name field below without the whole
-   tab needing to scroll on a modest-height screen. */
-.picker-list { flex: 0 0 auto; max-height: 130px; overflow-y: auto; }
+/* Was tightened to 130px to avoid the tab itself needing to scroll --
+   reverted taller now that scrolling in the tab is an accepted
+   tradeoff (the panel itself scrolls cleanly, see .tab-panel's own
+   overflow-y:auto), and a short list made browsing a real ROMs folder
+   feel cramped. */
+.picker-list { flex: 0 0 auto; max-height: 280px; overflow-y: auto; }
+.selected-file-row { display: flex; align-items: center; gap: 0.5rem; }
+.selected-file-name {
+  color: var(--success-text); font-weight: 600; font-size: 0.85rem; flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.remove-file-btn {
+  flex: 0 0 auto; width: 1.4rem; height: 1.4rem; border-radius: 50%; background: #c00; color: #fff;
+  display: flex; align-items: center; justify-content: center; font-size: 0.7rem; text-decoration: none;
+}
+/* Pure CSS spinner (no JS needed for the animation) -- shown next to
+   an artwork category's title while its SGDB search is still running
+   (see the ra_resolved meta-refresh loading phase). */
+@keyframes gridge-spin { to { transform: rotate(360deg); } }
+.spinner {
+  display: inline-block; width: 0.9rem; height: 0.9rem; margin-left: 0.4rem; vertical-align: -2px;
+  border: 2px solid var(--skeleton); border-top-color: var(--accent); border-radius: 50%;
+  animation: gridge-spin 0.8s linear infinite;
+}
 /* ::file-selector-button is a real, standard CSS pseudo-element for
    the browser's own "Choose File" button (Chromium/Firefox/Safari all
    support it) -- themed to match the app's pill inputs/buttons without
@@ -597,7 +617,7 @@ def _queue_actions_html():
 </div>"""
 
 
-def render(body, page_title="Add Steam Shortcut", show_back=True):
+def render(body, page_title="Add Steam Shortcut", show_back=True, extra_head=""):
     # Even when there's no back button (top-level pages), its slot in
     # the header still needs to take up the same space -- an invisible
     # placeholder of the same size, not an empty string, or the title
@@ -606,7 +626,8 @@ def render(body, page_title="Add Steam Shortcut", show_back=True):
         f'<a class="icon-btn-round back-btn" href="/" title="Back to shortcuts">{_BACK_ICON_SVG}</a>'
         if show_back else '<span class="icon-btn-round back-btn" style="visibility:hidden"></span>'
     )
-    head = PAGE_HEAD.replace("<!--SGDB_KEY_BADGE-->", _sgdb_key_badge_html())
+    head = PAGE_HEAD.replace("<!--EXTRA_HEAD-->", extra_head)
+    head = head.replace("<!--SGDB_KEY_BADGE-->", _sgdb_key_badge_html())
     head = head.replace("<!--DARK_ICON-->", _MOON_ICON_SVG)
     head = head.replace("<!--BACK_BTN-->", back_btn_html)
     head = head.replace("<!--HEART_ICON-->", _HEART_ICON_SVG)
@@ -749,7 +770,10 @@ def _url_tab_panel_html(query="", couch_mode=False, browser="", chosen=None, nam
 # on an unrelated click -- picking a ROM shouldn't forget you'd chosen
 # "Upload" for BIOS, changing console shouldn't lose the folder you
 # were browsing, etc.
-_RA_STATE_KEYS = ["ra_console", "ra_rompath", "ra_romfile", "ra_biospath", "ra_biosfile", "ra_romsource", "ra_biossource"]
+_RA_STATE_KEYS = [
+    "ra_console", "ra_rompath", "ra_romfile", "ra_biospath", "ra_biosfile",
+    "ra_romsource", "ra_biossource", "ra_resolved",
+]
 _RA_ROOT = os.path.expanduser("~")
 
 
@@ -801,7 +825,14 @@ def _ra_list_rows(abs_path, rel_path, state, path_key, file_key):
             href = f"/new?{_ra_qs(state, **{path_key: entry_rel})}"
             rows.append(f'<a href="{href}"><span class="folder-icon">&#128193;</span>{html.escape(entry.name)}</a>')
         else:
-            href = f"/new?{_ra_qs(state, **{path_key: rel_path, file_key: entry_rel})}"
+            overrides = {path_key: rel_path, file_key: entry_rel}
+            if file_key == "ra_romfile":
+                # A freshly-picked ROM needs a fresh SGDB search -- see
+                # the /new handler's ra_loading branch, which only
+                # skips straight to showing results when ra_resolved is
+                # already set for this exact pick.
+                overrides["ra_resolved"] = ""
+            href = f"/new?{_ra_qs(state, **overrides)}"
             rows.append(f'<a href="{href}"><span class="file-icon">&#128190;</span>{html.escape(entry.name)}</a>')
     return "".join(rows)
 
@@ -812,11 +843,29 @@ def _ra_picker_section(prefix, label, state):
     source_key = f"ra_{prefix}source"
     rel_path = state.get(path_key, "")
     source = state.get(source_key) or "local"
+    selected_file = state.get(file_key, "")
 
     upload_href = f"/new?{_ra_qs(state, **{source_key: 'upload'})}"
     local_href = f"/new?{_ra_qs(state, **{source_key: 'local'})}"
     upload_cls = "source-label active" if source == "upload" else "source-label"
     local_cls = "source-label active" if source != "upload" else "source-label"
+
+    # Removing the ROM also clears ra_resolved -- the SGDB search/Name
+    # field are entirely derived from ra_romfile (see the /new handler),
+    # so an emptied romfile naturally means no more search on the next
+    # render; removing this specific field doesn't need to reset
+    # ra_resolved for BIOS (nothing there drives a search).
+    selected_row = ""
+    if selected_file:
+        remove_overrides = {file_key: ""}
+        if prefix == "rom":
+            remove_overrides["ra_resolved"] = ""
+        remove_href = f"/new?{_ra_qs(state, **remove_overrides)}"
+        selected_row = f"""
+    <div class="selected-file-row">
+      <span class="selected-file-name">&#10003; {html.escape(os.path.basename(selected_file))}</span>
+      <a href="{remove_href}" class="remove-file-btn" title="Remove file">&#10005;</a>
+    </div>"""
 
     if source == "upload":
         # Not wired up yet (deliberately deferred -- see pending upload
@@ -837,6 +886,7 @@ def _ra_picker_section(prefix, label, state):
     return f"""
   <div class="field-group">
     <label class="field-label">{label} <span class="required-asterisk">*</span></label>
+    {selected_row}
     <div class="source-toggle">
       <a class="{upload_cls}" href="{upload_href}">Upload</a>
       <a class="{local_cls}" href="{local_href}">{html.escape(_hostname())}</a>
@@ -1068,6 +1118,29 @@ _SKELETON_TILE_COUNTS = {
 }
 
 
+def _ra_loading_artwork_html():
+    # Shown only during the ra_resolved meta-refresh loading phase (see
+    # the /new handler) -- a real SGDB search can take a few seconds,
+    # and the earlier version gave zero visible feedback during that
+    # wait (the previous page just sat there until the new one loaded),
+    # read as "did my click even register?". Same skeleton grid as the
+    # real empty state, just with a spinner next to each category
+    # title instead of nothing.
+    sections = []
+    for basename, title, _fetch, w, h in ARTWORK_CATEGORIES:
+        cell_style = f"width:{w}px;height:{h}px"
+        skeletons = "".join(
+            f'<div class="artwork-cell artwork-skeleton" style="{cell_style}"></div>'
+            for _ in range(_SKELETON_TILE_COUNTS[basename])
+        )
+        sections.append(f"""
+<div class="artwork-category">
+  <h3>{html.escape(title)}<span class="spinner"></span></h3>
+  <div class="artwork-row">{skeletons}</div>
+</div>""")
+    return "".join(sections)
+
+
 def _artwork_picker_html(candidates_by_category):
     # Always renders all 5 categories, even with zero candidates
     # (candidates_by_category can be {}) -- shown before any search
@@ -1145,7 +1218,7 @@ def _artwork_picker_html(candidates_by_category):
 
 def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None, match_index=0,
                  candidates_by_category=None, resolved_url=None, chosen=None,
-                 ra_state=None, ra_candidates_by_category=None, ra_chosen=None):
+                 ra_state=None, ra_candidates_by_category=None, ra_chosen=None, ra_loading=False):
     """Single page-builder for every state (home, unresolved input, no
     matches, a real workspace) -- all three columns are always present
     and always fully populated (placeholders when empty), rather than
@@ -1239,7 +1312,19 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
     # its own console picker has been touched -- that's the clearer
     # signal that it's the flow actually in progress, same reasoning as
     # ra_ready taking priority for the Add form/button above.
-    if ra_console:
+    extra_head = ""
+    if ra_loading:
+        # Meta-refresh, not JS: an instant response (no SGDB call yet)
+        # showing spinners, immediately followed by a second request
+        # that does the real (possibly slow) search -- the zero-JS way
+        # to give visible feedback during a request that would
+        # otherwise just leave the previous page sitting there
+        # unchanged while it runs.
+        refresh_url = f"/new?{_ra_qs(ra_state, ra_resolved='1')}"
+        extra_head = f'<meta http-equiv="refresh" content="0;url={html.escape(refresh_url)}">'
+        middle = _ra_middle_column_html(ra_state, [])
+        right = f'<div class="card artwork-card">{_ra_loading_artwork_html()}</div>'
+    elif ra_console:
         middle = _ra_middle_column_html(ra_state, [ra_chosen] if ra_chosen else [])
         right = f'<div class="card artwork-card">{_artwork_picker_html(ra_candidates_by_category)}</div>'
     else:
@@ -1252,7 +1337,7 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
   <div class="gridge-middle">{middle}</div>
   <div class="gridge-right">{right}</div>
 </div>
-""")
+""", extra_head=extra_head)
 
 
 def render_login(error=None):
@@ -1608,9 +1693,18 @@ class Handler(BaseHTTPRequestHandler):
 
         if parsed.path == "/new":
             ra_state = _ra_state_from_params(params)
+            romfile = ra_state.get("ra_romfile")
+            # A freshly-picked ROM (ra_resolved not yet set for it --
+            # see _ra_list_rows, which clears ra_resolved on every new
+            # pick) gets the fast loading response first: the real SGDB
+            # search can take a few seconds, and skipping straight to it
+            # left the previous page sitting there unchanged the whole
+            # time, easy to mistake for the click not registering.
+            if romfile and not ra_state.get("ra_resolved"):
+                self._send_html(render_page(ra_state=ra_state, ra_loading=True))
+                return
             ra_chosen = None
             ra_candidates = {}
-            romfile = ra_state.get("ra_romfile")
             if romfile:
                 # Reuses _resolve_matches's own no-key/zero-results
                 # fallback (a synthetic single "match" so a shortcut is

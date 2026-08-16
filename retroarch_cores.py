@@ -23,16 +23,46 @@ RETROARCH_APP_ID = "org.libretro.RetroArch"
 _BUILDBOT_BASE = "https://buildbot.libretro.com/nightly/linux/x86_64/latest"
 
 # (console name shown in the picker, libretro core name, needs BIOS).
-# Deliberately narrow list -- systems confirmed to have a real,
-# currently-published core build, not an exhaustive libretro catalog.
+# Wider than the original 7-console starter list, but still a curated
+# pick -- one core per mainstream system RetroArch/libretro actually
+# ships a real, currently-published core build for (every name below
+# confirmed against buildbot.libretro.com/nightly/linux/x86_64/latest/
+# directly, not assumed), not the full ~150-entry libretro catalog
+# (which includes homebrew/fantasy-console/engine-port cores this
+# picker has no reason to list). BIOS flags are best-effort based on
+# each core/system's own documented requirements, not individually
+# live-tested the way PS1/mGBA were.
 CONSOLES = [
-    ("Nintendo 64", "mupen64plus_next", False),
+    ("Atari 2600", "stella", False),
+    ("Atari 7800", "prosystem", True),
+    ("Nintendo (NES)", "nestopia", False),
     ("Super Nintendo", "snes9x", False),
+    ("Nintendo 64", "mupen64plus_next", False),
+    ("Game Boy", "gambatte", False),
+    ("Game Boy Color", "gambatte", False),
     ("Game Boy Advance", "mgba", False),
-    ("PlayStation 1", "pcsx_rearmed", True),
-    ("Sega Genesis", "genesis_plus_gx", False),
     ("Nintendo DS", "melonds", False),
+    ("Sega Master System", "genesis_plus_gx", False),
+    ("Sega Game Gear", "genesis_plus_gx", False),
+    ("Sega Genesis", "genesis_plus_gx", False),
+    ("Sega CD", "genesis_plus_gx", True),
+    ("Sega 32X", "picodrive", True),
+    ("Sega Saturn", "mednafen_saturn", True),
+    ("Sega Dreamcast", "flycast", True),
+    ("PlayStation 1", "pcsx_rearmed", True),
+    ("PlayStation 2", "pcsx2", True),
     ("PSP", "ppsspp", False),
+    ("TurboGrafx-16 / PC Engine", "mednafen_pce", False),
+    ("Neo Geo", "fbneo", True),
+    ("Neo Geo Pocket", "mednafen_ngp", False),
+    ("WonderSwan", "mednafen_wswan", False),
+    ("Atari Lynx", "handy", True),
+    ("ColecoVision", "gearcoleco", True),
+    ("Intellivision", "freeintv", True),
+    ("Vectrex", "vecx", False),
+    ("MSX", "bluemsx", True),
+    ("Commodore Amiga", "puae", True),
+    ("Commodore 64", "vice_x64sc", False),
 ]
 _CORE_FOR_CONSOLE = {name: core for name, core, _ in CONSOLES}
 CONSOLES_NEEDING_BIOS = {name for name, _, needs in CONSOLES if needs}
@@ -131,4 +161,8 @@ def launch_args(console, romfile):
     core = core_path(console)
     if not flatpak or not core:
         return None
-    return [flatpak, "run", RETROARCH_APP_ID, "-L", shlex.quote(core), shlex.quote(romfile)]
+    # -f/--fullscreen: confirmed real via RetroArch's own --help output
+    # ("Start the program in fullscreen regardless of config setting")
+    # -- without it RetroArch opens windowed, which is what a shortcut
+    # meant to launch straight into a game shouldn't do.
+    return [flatpak, "run", RETROARCH_APP_ID, "-f", "-L", shlex.quote(core), shlex.quote(romfile)]
