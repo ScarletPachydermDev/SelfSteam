@@ -864,7 +864,7 @@ def _url_tab_panel_html(query="", couch_mode=False, browser="", chosen=None, nam
 # were browsing, etc.
 _RA_STATE_KEYS = [
     "ra_console", "ra_rompath", "ra_romfile", "ra_biospath", "ra_biosfile",
-    "ra_resolved",
+    "ra_resolved", "ra_sgdb_q",
 ]
 _RA_ROOT = os.path.expanduser("~")
 # Under _RA_ROOT on purpose -- uploaded files just become another real
@@ -990,10 +990,12 @@ def _ra_picker_section(prefix, label, state):
     # since anything after a URL fragment becomes part of the fragment
     # text, not a real query param the server could read.
     upload_action = f"/new/upload?{_ra_qs(state)}&slot={prefix}#tab-retroarch"
+    # Auto-submits on pick, no separate Upload button -- same
+    # onchange="this.form.submit()" pattern already used for the console
+    # select, a real user-initiated change event, not scripted navigation.
     upload_panel = f"""
     <form method="post" enctype="multipart/form-data" action="{upload_action}">
-      <input type="file" name="file">
-      <button type="submit" style="margin-top:0.5rem">Upload</button>
+      <input type="file" name="file" onchange="this.form.submit()">
     </form>"""
 
     abs_path = _ra_safe_join(rel_path)
@@ -1191,12 +1193,37 @@ def _middle_column_html(query, couch_mode, browser, sgdb_q, matches, match_index
 """
 
 
+def _ra_sgdb_search_bar_html(state):
+    # Same override search as the URL tab's own _sgdb_search_bar_html --
+    # a ROM's filename-derived guess (_ra_guess_name_from_filename) can
+    # be wrong or unhelpfully generic ("rom (1)"), so this lets a search
+    # term be typed directly, independent of the filename, same as
+    # sgdb_q already does for the URL tab. ra_sgdb_q lives in
+    # _RA_STATE_KEYS, so it's just another field carried by every
+    # existing RA link/form for free -- no separate threading needed.
+    display_term = state.get("ra_sgdb_q", "")
+    clear_href = _ra_url("/new", state, ra_sgdb_q="")
+    hidden = _ra_hidden_fields({k: v for k, v in state.items() if k != "ra_sgdb_q"})
+    return f"""
+<form action="/new#tab-retroarch" method="get">
+  {hidden}
+  <div class="search-field-row">
+    <div class="field-with-clear">
+      <input type="text" name="ra_sgdb_q" value="{html.escape(display_term)}" placeholder="SGDB search">
+      <a href="{clear_href}" class="field-clear-btn" title="Clear">&#10005;</a>
+    </div>
+    <button type="submit" class="search-submit-btn" title="Search">{_SEARCH_ICON_SVG}</button>
+  </div>
+</form>
+"""
+
+
 def _ra_middle_column_html(state, matches, extra_class=""):
-    # No override search box (unlike the URL tab's) and no match
-    # switching yet -- these rows are informational display only, self-
-    # referential <a> hrefs so they pick up the same .boxed-list/
-    # a.selected styling without adding new CSS just for this. The
-    # editable Name field is still the real way to correct a bad guess.
+    # No match switching yet (only one candidate is ever resolved) --
+    # rows are informational display only, self-referential <a> hrefs so
+    # they pick up the same .boxed-list/a.selected styling without new
+    # CSS just for this. The editable Name field is still the real way
+    # to correct a bad guess beyond re-searching SGDB outright.
     if not matches:
         list_html = _placeholder_matches_html()
     else:
@@ -1208,6 +1235,7 @@ def _ra_middle_column_html(state, matches, extra_class=""):
         list_html = f'<div class="boxed-list">{"".join(rows)}</div>'
     return f"""
 <div class="card {extra_class}">
+  {_ra_sgdb_search_bar_html(state)}
   <div class="field-group" style="flex:1;min-height:0">
     <h2>SGDB matches</h2>
     {list_html}
@@ -1846,7 +1874,9 @@ class Handler(BaseHTTPRequestHandler):
                 # contract the URL tab's own resolution already relies
                 # on, not a separate RetroArch-specific fallback.
                 guessed = _ra_guess_name_from_filename(romfile)
-                ra_matches = _resolve_matches(guessed, service_resolver.Resolved(name=guessed))
+                ra_matches = _resolve_matches(
+                    guessed, service_resolver.Resolved(name=guessed), ra_state.get("ra_sgdb_q"),
+                )
                 ra_chosen = ra_matches[0]
                 ra_candidates = _fetch_candidates(ra_chosen["id"])
             self._send_html(render_page(
