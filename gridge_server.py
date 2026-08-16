@@ -479,6 +479,15 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
   flex: 0 0 auto; width: 1.4rem; height: 1.4rem; border-radius: 50%; background: #c00; color: #fff;
   display: flex; align-items: center; justify-content: center; text-decoration: none;
 }
+/* margin-left:auto pushes this to the far right of its label row
+   regardless of what else is (or isn't) already there -- the required-
+   asterisk row has nothing else claiming that space, and the selected-
+   file row's own flex:1 filename span already eats the rest, so this
+   still lands past the remove button either way. */
+.upload-status {
+  margin-left: auto; flex: 0 0 auto; align-items: center; gap: 0.3rem;
+  color: var(--text-dim); font-size: 0.85rem; font-weight: 600; white-space: nowrap;
+}
 /* Pure CSS spinner (no JS needed for the animation) -- shown next to
    an artwork category's title while its SGDB search is still running
    (see the ra_resolved meta-refresh loading phase). */
@@ -613,9 +622,11 @@ PAGE_TAIL = """</main>
 // and the RetroArch console auto-submit): the RA Upload/host toggle
 // used to be a real navigation link, which meant a full-page reload --
 // and visible flicker -- just to flip which of two already-rendered
-// panels is showing. Purely client-side UI state now, so it resets to
-// "local" on every reload, same as it always defaulted to server-side.
-function gridgeToggleSource(prefix, mode) {
+// panels is showing. The choice itself still lives in real server
+// state (ra_romsource/ra_biossource, part of _RA_STATE_KEYS) so it
+// survives an actual reload same as everything else on the tab; this
+// only handles the *instant* visual flip for a same-page click.
+function gridgeToggleSource(prefix, mode, stateKey) {
   var upload = document.getElementById(prefix + "-upload-panel");
   var local = document.getElementById(prefix + "-local-panel");
   var uploadLabel = document.getElementById(prefix + "-upload-label");
@@ -624,6 +635,24 @@ function gridgeToggleSource(prefix, mode) {
   local.style.display = mode === "upload" ? "none" : "";
   uploadLabel.className = mode === "upload" ? "source-label active" : "source-label";
   localLabel.className = mode === "upload" ? "source-label" : "source-label active";
+  // Keeps the *next* real navigation (changing console, which
+  // auto-submits its own <form> with hidden ra_romsource/ra_biossource
+  // fields baked in at page-load time) in sync with a toggle click that
+  // happened after that load -- without this, switching consoles right
+  // after toggling would silently submit the stale, pre-toggle source.
+  var hidden = document.getElementById("ra-console-form-" + stateKey);
+  if (hidden) hidden.value = mode;
+}
+
+// Fires on the upload form's own submit -- a multi-hundred-MB ROM over
+// real wifi can take a while, and the browser gives zero visible
+// feedback of its own during that (the previous page just sits there).
+// This runs synchronously before the browser starts navigating away, so
+// it stays visible for the whole upload; the eventual redirect (see
+// _handle_ra_upload) replaces the page outright once it's done.
+function gridgeShowUploading(prefix) {
+  var status = document.getElementById(prefix + "-upload-status");
+  if (status) status.style.display = "inline-flex";
 }
 </script>
 </body></html>"""
@@ -864,7 +893,7 @@ def _url_tab_panel_html(query="", couch_mode=False, browser="", chosen=None, nam
 # were browsing, etc.
 _RA_STATE_KEYS = [
     "ra_console", "ra_rompath", "ra_romfile", "ra_biospath", "ra_biosfile",
-    "ra_resolved", "ra_sgdb_q",
+    "ra_resolved", "ra_sgdb_q", "ra_romsource", "ra_biossource",
 ]
 _RA_ROOT = os.path.expanduser("~")
 # Under _RA_ROOT on purpose -- uploaded files just become another real
@@ -946,9 +975,25 @@ def _ra_list_rows(abs_path, rel_path, state, path_key, file_key):
 def _ra_picker_section(prefix, label, state):
     path_key = f"ra_{prefix}path"
     file_key = f"ra_{prefix}file"
+    source_key = f"ra_{prefix}source"
     rel_path = state.get(path_key, "")
     selected_file = state.get(file_key, "")
     dom_prefix = f"ra-{prefix}-source"
+    # Real server state (part of _RA_STATE_KEYS), not just a same-page JS
+    # toggle -- survives a real reload (console change, upload finishing)
+    # the same way every other RA field does, instead of always resetting
+    # back to "local" the moment the page actually navigates.
+    source = state.get(source_key) or "local"
+
+    # Same-line upload-in-progress indicator, to the right of the label
+    # row -- a multi-hundred-MB ROM over real wifi can take a while, and
+    # the browser otherwise gives zero feedback that the click even
+    # registered. Hidden by default, shown by gridgeShowUploading (see
+    # PAGE_TAIL) the instant the upload form is actually submitted.
+    upload_status = (
+        f'<span id="{dom_prefix}-upload-status" class="upload-status" style="display:none">'
+        f'Uploading<span class="spinner"></span></span>'
+    )
 
     # Removing the ROM also clears ra_resolved -- the SGDB search/Name
     # field are entirely derived from ra_romfile (see the /new handler),
@@ -968,15 +1013,21 @@ def _ra_picker_section(prefix, label, state):
       <span style="flex:0 0 auto">{label}: <span class="required-asterisk">*</span></span>
       <span class="selected-file-name">&#10003; {html.escape(os.path.basename(selected_file))}</span>
       <a href="{remove_href}" class="remove-file-btn" title="Remove file">{_X_ICON_SVG}</a>
+      {upload_status}
     </label>"""
     else:
-        label_row = f'<label class="field-label">{label} <span class="required-asterisk">*</span></label>'
+        label_row = f"""
+    <label class="field-label" style="display:flex;align-items:center;gap:0.4rem;min-width:0">
+      <span style="flex:0 0 auto">{label} <span class="required-asterisk">*</span></span>
+      {upload_status}
+    </label>"""
 
-    # Both panels are always rendered now, with plain JS (gridgeToggleSource
-    # in PAGE_TAIL) swapping which is visible -- no navigation, so no
-    # reload flicker, and no source_key needed in server-side state at
-    # all (it's fine for the toggle to reset to "local" on a real reload,
-    # same as it always defaulted to before).
+    # Both panels are always rendered, with plain JS (gridgeToggleSource
+    # in PAGE_TAIL) instantly swapping which is visible on a same-page
+    # click -- no navigation, so no reload flicker. Initial visibility on
+    # an actual page load still comes from real server state (source),
+    # so which one's showing survives a real reload same as everything
+    # else on the tab.
     #
     # The rest of the RA state (which console, the other picker's own
     # path/file, etc.) rides in the action URL's own query string, not as
@@ -992,9 +1043,13 @@ def _ra_picker_section(prefix, label, state):
     upload_action = f"/new/upload?{_ra_qs(state)}&slot={prefix}#tab-retroarch"
     # Auto-submits on pick, no separate Upload button -- same
     # onchange="this.form.submit()" pattern already used for the console
-    # select, a real user-initiated change event, not scripted navigation.
+    # select, a real user-initiated change event, not scripted
+    # navigation. onsubmit fires gridgeShowUploading right before that
+    # navigation actually starts, so the indicator is visible for the
+    # whole (potentially long) upload instead of the page just sitting
+    # there looking unresponsive.
     upload_panel = f"""
-    <form method="post" enctype="multipart/form-data" action="{upload_action}">
+    <form method="post" enctype="multipart/form-data" action="{upload_action}" onsubmit="gridgeShowUploading('{dom_prefix}')">
       <input type="file" name="file" onchange="this.form.submit()">
     </form>"""
 
@@ -1006,15 +1061,20 @@ def _ra_picker_section(prefix, label, state):
         f'<div class="picker-list"><div class="boxed-list">{_ra_list_rows(abs_path, rel_path, state, path_key, file_key)}</div></div>'
     )
 
+    upload_display = "" if source == "upload" else "none"
+    local_display = "none" if source == "upload" else ""
+    upload_active = "source-label active" if source == "upload" else "source-label"
+    local_active = "source-label" if source == "upload" else "source-label active"
+
     return f"""
   <div class="field-group">
     {label_row}
     <div class="source-toggle">
-      <a class="source-label" href="javascript:void(0)" id="{dom_prefix}-upload-label" onclick="gridgeToggleSource('{dom_prefix}', 'upload')">Upload</a>
-      <a class="source-label active" href="javascript:void(0)" id="{dom_prefix}-local-label" onclick="gridgeToggleSource('{dom_prefix}', 'local')">{html.escape(_hostname())}</a>
+      <a class="{upload_active}" href="javascript:void(0)" id="{dom_prefix}-upload-label" onclick="gridgeToggleSource('{dom_prefix}', 'upload', '{source_key}')">Upload</a>
+      <a class="{local_active}" href="javascript:void(0)" id="{dom_prefix}-local-label" onclick="gridgeToggleSource('{dom_prefix}', 'local', '{source_key}')">{html.escape(_hostname())}</a>
     </div>
-    <div id="{dom_prefix}-upload-panel" style="display:none">{upload_panel}</div>
-    <div id="{dom_prefix}-local-panel">{local_panel}</div>
+    <div id="{dom_prefix}-upload-panel" style="display:{upload_display}">{upload_panel}</div>
+    <div id="{dom_prefix}-local-panel" style="display:{local_display}">{local_panel}</div>
   </div>"""
 
 
@@ -1034,8 +1094,13 @@ def _retroarch_tab_panel_html(state, chosen=None):
         f'{"Pick your console" if not c else html.escape(c)}</option>'
         for c, _core, _needs in [("", None, False)] + retroarch_cores.CONSOLES
     )
+    # id="ra-console-form-{k}" lets gridgeToggleSource (PAGE_TAIL) sync
+    # ra_romsource/ra_biossource here the instant they're toggled --
+    # otherwise a toggle click followed immediately by a console change
+    # (this form's own auto-submit) would submit the stale, pre-toggle
+    # value baked in when the page was first rendered.
     hidden_fields = "".join(
-        f'<input type="hidden" name="{k}" value="{html.escape(state.get(k, ""))}">'
+        f'<input type="hidden" name="{k}" id="ra-console-form-{k}" value="{html.escape(state.get(k, ""))}">'
         for k in _RA_STATE_KEYS if k != "ra_console"
     )
 
@@ -1195,20 +1260,25 @@ def _middle_column_html(query, couch_mode, browser, sgdb_q, matches, match_index
 """
 
 
-def _ra_display_term(state):
+def _ra_display_term(state, chosen=None):
     """Same idea as the URL tab's own _display_name: whatever's actually
     driving the current SGDB results, so the box always shows what was
-    really searched instead of sitting empty until explicitly touched --
-    the explicit override if there is one, else the ROM filename's own
-    guessed name. Lowercased, matching _resolve_matches's own lowercasing
-    of whatever it actually sends to SGDB."""
+    really searched/found instead of sitting empty until explicitly
+    touched. Priority: an explicit override > the real resolved match's
+    own name (once SGDB has actually found one -- same term already
+    cross-populating the Name field, so the two agree on what this ROM
+    actually is) > the raw filename-derived guess, before any search has
+    run yet. Lowercased throughout, matching _resolve_matches's own
+    lowercasing of whatever it actually sends to SGDB."""
     if state.get("ra_sgdb_q"):
         return state["ra_sgdb_q"].lower()
+    if chosen and chosen.get("name"):
+        return chosen["name"].lower()
     romfile = state.get("ra_romfile")
     return _ra_guess_name_from_filename(romfile).lower() if romfile else ""
 
 
-def _ra_sgdb_search_bar_html(state):
+def _ra_sgdb_search_bar_html(state, chosen=None):
     # Same override search as the URL tab's own _sgdb_search_bar_html --
     # a ROM's filename-derived guess (_ra_guess_name_from_filename) can
     # be wrong or unhelpfully generic ("rom (1)"), so this lets a search
@@ -1216,7 +1286,7 @@ def _ra_sgdb_search_bar_html(state):
     # sgdb_q already does for the URL tab. ra_sgdb_q lives in
     # _RA_STATE_KEYS, so it's just another field carried by every
     # existing RA link/form for free -- no separate threading needed.
-    display_term = _ra_display_term(state)
+    display_term = _ra_display_term(state, chosen)
     clear_href = _ra_url("/new", state, ra_sgdb_q="")
     hidden = _ra_hidden_fields({k: v for k, v in state.items() if k != "ra_sgdb_q"})
     return f"""
@@ -1250,7 +1320,7 @@ def _ra_middle_column_html(state, matches, extra_class=""):
         list_html = f'<div class="boxed-list">{"".join(rows)}</div>'
     return f"""
 <div class="card {extra_class}">
-  {_ra_sgdb_search_bar_html(state)}
+  {_ra_sgdb_search_bar_html(state, matches[0] if matches else None)}
   <div class="field-group" style="flex:1;min-height:0">
     <h2>SGDB matches</h2>
     {list_html}
@@ -2126,10 +2196,10 @@ class Handler(BaseHTTPRequestHandler):
             # window -- only actually queues the shortcut (name, url,
             # already-downloaded asset paths) for the next "Save Changes
             # and Restart Steam OS" commit, instead of stopping Steam
-            # for every single shortcut added. Redirects straight back
-            # to a blank home page ("clean slate") so the next shortcut
-            # can be added immediately without an extra confirmation
-            # step in the way.
+            # for every single shortcut added. Redirects to a blank,
+            # cleaned /new#tab-url (not the home gallery) so the next
+            # shortcut can be added immediately, on the same tab, without
+            # detouring through the gallery in between.
             slug = create_webapp.slugify(match_name)
             selections = {}
             for basename, _title, _fetch, _w, _h in ARTWORK_CATEGORIES:
@@ -2137,7 +2207,7 @@ class Handler(BaseHTTPRequestHandler):
                 selections[basename] = {"url": selection_url} if selection_url else None
             asset_paths = create_webapp.download_selected_assets(slug, selections)
             pending_queue.add(match_name, url, couch_mode, asset_paths, browser_app_id=browser or None)
-            self._redirect("/")
+            self._redirect("/new#tab-url")
         except Exception as e:  # noqa: BLE001 -- surfaced to the user, not swallowed
             self._send_html(render_done(match_name, ok=False, error=e))
 
@@ -2190,7 +2260,9 @@ class Handler(BaseHTTPRequestHandler):
                 selections[basename] = {"url": selection_url} if selection_url else None
             asset_paths = create_webapp.download_selected_assets(slug, selections)
             pending_queue.add(match_name, None, False, asset_paths, launch_args=args)
-            self._redirect("/")
+            # Same "stay on this tab, cleaned" redirect as the URL tab's
+            # own /add -- see its comment above.
+            self._redirect("/new#tab-retroarch")
         except Exception as e:  # noqa: BLE001 -- surfaced to the user, not swallowed
             self._send_html(render_done(match_name, ok=False, error=e))
 
@@ -2236,7 +2308,13 @@ class Handler(BaseHTTPRequestHandler):
 
         rel_path = os.path.relpath(dest_path, _RA_ROOT)
         file_key = "ra_romfile" if slot == "rom" else "ra_biosfile"
-        overrides = {file_key: rel_path}
+        source_key = f"ra_{slot}source"
+        # Explicit, not just carried over from ra_state -- a toggle click
+        # that happened after this page's own load (no reload in between)
+        # means the upload form's action URL was still built with the
+        # pre-toggle source baked in, even though the upload that just
+        # succeeded is unambiguously an "upload" for this slot.
+        overrides = {file_key: rel_path, source_key: "upload"}
         if slot == "rom":
             overrides["ra_resolved"] = ""
         self._redirect(_ra_url("/new", ra_state, **overrides))
