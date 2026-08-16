@@ -1127,11 +1127,13 @@ def _display_name(query, sgdb_q):
     override if there is one, else whatever the URL/service field
     itself resolved to. Purely a search term -- the separate Name field
     (see _url_tab_panel_html) is what actually gets saved, so editing
-    this doesn't rename anything on its own."""
+    this doesn't rename anything on its own. Lowercased -- SGDB search
+    terms are kept all-lowercase throughout (see _resolve_matches),
+    so this box always shows exactly what was actually searched."""
     if sgdb_q:
-        return sgdb_q
+        return sgdb_q.lower()
     resolved = service_resolver.resolve(query) if query else None
-    return resolved.name if resolved and resolved.name else ""
+    return resolved.name.lower() if resolved and resolved.name else ""
 
 
 def _sgdb_search_bar_html(query, couch_mode, browser, sgdb_q, ra_state=None):
@@ -1193,6 +1195,19 @@ def _middle_column_html(query, couch_mode, browser, sgdb_q, matches, match_index
 """
 
 
+def _ra_display_term(state):
+    """Same idea as the URL tab's own _display_name: whatever's actually
+    driving the current SGDB results, so the box always shows what was
+    really searched instead of sitting empty until explicitly touched --
+    the explicit override if there is one, else the ROM filename's own
+    guessed name. Lowercased, matching _resolve_matches's own lowercasing
+    of whatever it actually sends to SGDB."""
+    if state.get("ra_sgdb_q"):
+        return state["ra_sgdb_q"].lower()
+    romfile = state.get("ra_romfile")
+    return _ra_guess_name_from_filename(romfile).lower() if romfile else ""
+
+
 def _ra_sgdb_search_bar_html(state):
     # Same override search as the URL tab's own _sgdb_search_bar_html --
     # a ROM's filename-derived guess (_ra_guess_name_from_filename) can
@@ -1201,7 +1216,7 @@ def _ra_sgdb_search_bar_html(state):
     # sgdb_q already does for the URL tab. ra_sgdb_q lives in
     # _RA_STATE_KEYS, so it's just another field carried by every
     # existing RA link/form for free -- no separate threading needed.
-    display_term = state.get("ra_sgdb_q", "")
+    display_term = _ra_display_term(state)
     clear_href = _ra_url("/new", state, ra_sgdb_q="")
     hidden = _ra_hidden_fields({k: v for k, v in state.items() if k != "ra_sgdb_q"})
     return f"""
@@ -1648,12 +1663,15 @@ def _resolve_matches(query, resolved, sgdb_q=None):
     name = resolved.name or create_webapp.clean_shortcut_name(query)
     if not sgdb.has_api_key():
         return [{"id": None, "name": name}]
+    # Lowercased -- keeps what's actually sent to SGDB's search matching
+    # what the search box displays (_display_name/_ra_display_term), so
+    # the box is a true record of the term that produced these results.
     if sgdb_q:
-        matches = sgdb.search(sgdb_q)
+        matches = sgdb.search(sgdb_q.lower())
     elif resolved.sgdb_id is not None:
         matches = [sgdb.get_game(resolved.sgdb_id)]
     else:
-        matches = sgdb.search(name)
+        matches = sgdb.search(name.lower())
     return matches or [{"id": None, "name": name}]
 
 
