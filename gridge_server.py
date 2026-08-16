@@ -37,6 +37,7 @@ import http.cookies
 import json
 import os
 import socket
+import tempfile
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -47,6 +48,7 @@ import config
 import create_webapp
 import maintenance
 import pending_queue
+import multipart_upload
 import retroarch_cores
 import service_resolver
 import sgdb_client as sgdb
@@ -114,6 +116,14 @@ _TRASH_ICON_SVG = (
     '<path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>'
     '<path d="M10 11v6"></path><path d="M14 11v6"></path>'
     '<path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>'
+)
+# Real SVG (stroke-width/stroke-linecap control thickness and give
+# exact centering) instead of the "x" text glyph used first -- a font
+# glyph's own metrics/baseline made it look thin and slightly
+# off-center inside the circle, not reliably fixable with CSS alone.
+_X_ICON_SVG = (
+    '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round">'
+    '<path d="M5 5L19 19M19 5L5 19"></path></svg>'
 )
 
 # (basename, display title, candidate-fetcher, cell width, cell height)
@@ -429,14 +439,13 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
    overflow-y:auto), and a short list made browsing a real ROMs folder
    feel cramped. */
 .picker-list { flex: 0 0 auto; max-height: 280px; overflow-y: auto; }
-.selected-file-row { display: flex; align-items: center; gap: 0.5rem; }
 .selected-file-name {
   color: var(--success-text); font-weight: 600; font-size: 0.85rem; flex: 1; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .remove-file-btn {
   flex: 0 0 auto; width: 1.4rem; height: 1.4rem; border-radius: 50%; background: #c00; color: #fff;
-  display: flex; align-items: center; justify-content: center; font-size: 0.7rem; text-decoration: none;
+  display: flex; align-items: center; justify-content: center; text-decoration: none;
 }
 /* Pure CSS spinner (no JS needed for the animation) -- shown next to
    an artwork category's title while its SGDB search is still running
@@ -775,6 +784,10 @@ _RA_STATE_KEYS = [
     "ra_romsource", "ra_biossource", "ra_resolved",
 ]
 _RA_ROOT = os.path.expanduser("~")
+# Under _RA_ROOT on purpose -- uploaded files just become another real
+# path the existing local-picker sandbox (_ra_safe_join) already
+# handles, no special-casing needed once they land here.
+_RA_UPLOAD_DIR = os.path.join(_RA_ROOT, ".local", "share", "gridge", "uploads")
 
 
 def _ra_state_from_params(params):
@@ -855,25 +868,39 @@ def _ra_picker_section(prefix, label, state):
     # so an emptied romfile naturally means no more search on the next
     # render; removing this specific field doesn't need to reset
     # ra_resolved for BIOS (nothing there drives a search).
-    selected_row = ""
     if selected_file:
         remove_overrides = {file_key: ""}
         if prefix == "rom":
             remove_overrides["ra_resolved"] = ""
         remove_href = f"/new?{_ra_qs(state, **remove_overrides)}"
-        selected_row = f"""
-    <div class="selected-file-row">
+        # Same line as the label, not its own row -- filename is
+        # allowed to just get cropped by the label row's own overflow
+        # rather than reserving a second line for it.
+        label_row = f"""
+    <label class="field-label" style="display:flex;align-items:center;gap:0.4rem;min-width:0">
+      <span style="flex:0 0 auto">{label}:</span>
       <span class="selected-file-name">&#10003; {html.escape(os.path.basename(selected_file))}</span>
-      <a href="{remove_href}" class="remove-file-btn" title="Remove file">&#10005;</a>
-    </div>"""
+      <a href="{remove_href}" class="remove-file-btn" title="Remove file">{_X_ICON_SVG}</a>
+    </label>"""
+    else:
+        label_row = f'<label class="field-label">{label} <span class="required-asterisk">*</span></label>'
 
     if source == "upload":
-        # Not wired up yet (deliberately deferred -- see pending upload
-        # design: a plain enctype=multipart/form-data <input type=file>
-        # works with zero JS, but needs a streaming multipart parser on
-        # this end so a multi-GB ROM doesn't get buffered whole in
-        # memory the way do_POST's other handlers read their body).
-        panel = f'<input type="file" name="ra_{prefix}_upload" disabled title="Upload not wired up yet -- use {_hostname()} for now">'
+        # The rest of the RA state (which console, the other picker's
+        # own path/file, etc.) rides in the action URL's own query
+        # string, not as sibling hidden fields inside this multipart
+        # body -- keeps the body down to exactly one part (the file
+        # itself), which is all multipart_upload.py is built to stream.
+        # slot isn't part of _RA_STATE_KEYS (it's specific to this one
+        # upload action, not carried across other navigation), so it's
+        # appended directly rather than routed through _ra_qs's own
+        # state-key filtering.
+        action = f"/new/upload?{_ra_qs(state)}&slot={prefix}"
+        panel = f"""
+    <form method="post" enctype="multipart/form-data" action="{action}">
+      <input type="file" name="file">
+      <button type="submit" style="margin-top:0.5rem">Upload</button>
+    </form>"""
     else:
         abs_path = _ra_safe_join(rel_path)
         if abs_path is None or not os.path.isdir(abs_path):
@@ -885,8 +912,7 @@ def _ra_picker_section(prefix, label, state):
 
     return f"""
   <div class="field-group">
-    <label class="field-label">{label} <span class="required-asterisk">*</span></label>
-    {selected_row}
+    {label_row}
     <div class="source-toggle">
       <a class="{upload_cls}" href="{upload_href}">Upload</a>
       <a class="{local_cls}" href="{local_href}">{html.escape(_hostname())}</a>
@@ -1774,6 +1800,21 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
 
+        if parsed.path == "/new/upload":
+            # Handled before the generic body-read below: that line
+            # buffers the whole POST body in memory at once, which is
+            # exactly what a multi-GB ROM/BIOS upload can't afford --
+            # multipart_upload streams the file straight to disk
+            # instead, so this route reads self.rfile itself rather
+            # than through the shared `body` variable every other
+            # route uses.
+            if not self._is_authenticated():
+                auth_display.ensure_shown()
+                self._redirect("/login")
+                return
+            self._handle_ra_upload()
+            return
+
         length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(length).decode()
         params = urllib.parse.parse_qs(body)
@@ -1967,6 +2008,53 @@ class Handler(BaseHTTPRequestHandler):
             self._redirect("/")
         except Exception as e:  # noqa: BLE001 -- surfaced to the user, not swallowed
             self._send_html(render_done(match_name, ok=False, error=e))
+
+    def _handle_ra_upload(self):
+        parsed = urllib.parse.urlparse(self.path)
+        params = urllib.parse.parse_qs(parsed.query)
+        ra_state = _ra_state_from_params(params)
+        slot = (params.get("slot") or [""])[0]
+        if slot not in ("rom", "bios"):
+            self._send_html(render("<p>Invalid upload slot</p>"), status=400)
+            return
+
+        content_type = self.headers.get("Content-Type", "")
+        length = int(self.headers.get("Content-Length", 0))
+        dest_dir = os.path.join(_RA_UPLOAD_DIR, "roms" if slot == "rom" else "bios")
+        os.makedirs(dest_dir, exist_ok=True)
+
+        # The real filename (and whether it collides with something
+        # already there) isn't known until the multipart headers are
+        # parsed, which happens as part of streaming the body itself --
+        # so this writes to a private temp name first, then moves it
+        # into place once save_uploaded_file returns.
+        fd, tmp_path = tempfile.mkstemp(dir=dest_dir, prefix=".upload-")
+        os.close(fd)
+        try:
+            filename = multipart_upload.save_uploaded_file(self.rfile, content_type, length, tmp_path)
+        except ValueError:
+            os.remove(tmp_path)
+            self._send_html(render_done("Upload", ok=False, error="Upload failed -- please try again"))
+            return
+
+        # basename() strips any directory components a browser might
+        # send (mainly a legacy-IE thing, but cheap to guard regardless)
+        # -- this is a filename choice, not a path, so that alone is
+        # enough sanitization.
+        safe_name = os.path.basename(filename) if filename else os.path.basename(tmp_path)
+        dest_path = os.path.join(dest_dir, safe_name)
+        # Re-uploading a file with a name that's already there just
+        # overwrites it -- a retry or a newer dump replacing an old one
+        # is the more expected outcome than silently failing or picking
+        # a different name out from under the user.
+        os.replace(tmp_path, dest_path)
+
+        rel_path = os.path.relpath(dest_path, _RA_ROOT)
+        file_key = "ra_romfile" if slot == "rom" else "ra_biosfile"
+        overrides = {file_key: rel_path}
+        if slot == "rom":
+            overrides["ra_resolved"] = ""
+        self._redirect(f"/new?{_ra_qs(ra_state, **overrides)}")
 
     def _commit_pending(self):
         items = pending_queue.all_items()
