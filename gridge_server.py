@@ -913,16 +913,21 @@ def _retroarch_tab_panel_html(state, chosen=None):
 _FORM_TABS = [("tab-url", "URL"), ("tab-apps", "Apps"), ("tab-retroarch", "RetroArch"), ("tab-emulators", "Emulators")]
 
 
-def _tab_bar_html():
+def _tab_bar_html(active_tab="tab-url"):
     # Segmented control switching the four shortcut-source tabs. CSS-only
     # (radio hack): the radios sit flat alongside .tab-bar and .tab-panels
     # (not nested inside either) so the general-sibling selectors in the
     # stylesheet (#tab-url:checked ~ .tab-bar label[for="tab-url"], etc.)
     # can reach both the matching label and the matching panel from a
-    # single :checked radio. Only the URL tab is functional for now;
-    # Apps/RetroArch/Emulators are placeholders per the design handoff.
+    # single :checked radio. Only the URL and RetroArch tabs are
+    # functional for now; Apps/Emulators are placeholders per the design
+    # handoff. active_tab matters because this radio state is CSS-only,
+    # not server-persisted -- every navigation inside a tab (console
+    # select, folder browsing, the source toggle) is a full page reload,
+    # so without this the page always snapped back to showing the URL
+    # tab regardless of which one the user was actually using.
     radios = "".join(
-        f'<input type="radio" name="gridge-form-tab" id="{tab_id}" class="tab-radio"{" checked" if tab_id == "tab-url" else ""}>'
+        f'<input type="radio" name="gridge-form-tab" id="{tab_id}" class="tab-radio"{" checked" if tab_id == active_tab else ""}>'
         for tab_id, _label in _FORM_TABS
     )
     labels = "".join(f'<label for="{tab_id}" class="tab-label">{label}</label>' for tab_id, label in _FORM_TABS)
@@ -1214,7 +1219,7 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
 
     left = f"""
 <div class="card">
-  {_tab_bar_html()}
+  {_tab_bar_html("tab-retroarch" if ra_console else "tab-url")}
   <div class="tab-panels">
     <div class="tab-panel tab-panel-url">
       <form action="/search" method="get" style="display:flex;flex-direction:column;gap:0.9rem">
