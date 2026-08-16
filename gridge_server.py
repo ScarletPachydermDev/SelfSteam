@@ -608,6 +608,24 @@ PAGE_TAIL = """</main>
   });
 })();
 </script>
+<script>
+// Fourth deliberate JS exception (after dark mode, login auto-submit,
+// and the RetroArch console auto-submit): the RA Upload/host toggle
+// used to be a real navigation link, which meant a full-page reload --
+// and visible flicker -- just to flip which of two already-rendered
+// panels is showing. Purely client-side UI state now, so it resets to
+// "local" on every reload, same as it always defaulted to server-side.
+function gridgeToggleSource(prefix, mode) {
+  var upload = document.getElementById(prefix + "-upload-panel");
+  var local = document.getElementById(prefix + "-local-panel");
+  var uploadLabel = document.getElementById(prefix + "-upload-label");
+  var localLabel = document.getElementById(prefix + "-local-label");
+  upload.style.display = mode === "upload" ? "" : "none";
+  local.style.display = mode === "upload" ? "none" : "";
+  uploadLabel.className = mode === "upload" ? "source-label active" : "source-label";
+  localLabel.className = mode === "upload" ? "source-label" : "source-label active";
+}
+</script>
 </body></html>"""
 
 
@@ -683,16 +701,33 @@ def render(body, page_title="Add Steam Shortcut", show_back=True, extra_head="")
     return (head + body + tail).encode()
 
 
-def _hidden_state_fields(query, couch_mode, browser):
+def _hidden_state_fields(query, couch_mode, browser, ra_state=None):
     fields = f'<input type="hidden" name="q" value="{html.escape(query)}">'
     if couch_mode:
         fields += '<input type="hidden" name="couch_mode" value="1">'
     if browser:
         fields += f'<input type="hidden" name="browser" value="{html.escape(browser)}">'
+    # Carries any in-progress RetroArch pick (console/ROM/BIOS) across a
+    # URL-tab-only navigation like a search submit -- without this, every
+    # normal URL tab action (typing a URL and hitting Search, picking a
+    # different SGDB match, the SGDB override search) silently wiped
+    # whatever was chosen on the RetroArch tab, since /search never knew
+    # ra_* existed. Confirmed live as the real root cause of "SGDB search
+    # field gone" reports that survived the earlier Clear-button-only fix.
+    fields += _ra_hidden_fields(ra_state)
     return fields
 
 
-def _state_qs(query, couch_mode, browser, **extra):
+def _ra_hidden_fields(ra_state):
+    if not ra_state:
+        return ""
+    return "".join(
+        f'<input type="hidden" name="{k}" value="{html.escape(v)}">'
+        for k, v in ra_state.items() if v
+    )
+
+
+def _state_qs(query, couch_mode, browser, ra_state=None, **extra):
     qs = f"q={urllib.parse.quote(query)}"
     if couch_mode:
         qs += "&couch_mode=1"
@@ -701,6 +736,12 @@ def _state_qs(query, couch_mode, browser, **extra):
     for key, value in extra.items():
         if value:
             qs += f"&{key}={urllib.parse.quote(str(value))}"
+    # Same reasoning as _hidden_state_fields -- links built from this
+    # (Clear, match rows, name-reset) must not drop RetroArch state either.
+    if ra_state:
+        ra_qs = _ra_qs(ra_state)
+        if ra_qs:
+            qs += f"&{ra_qs}"
     return qs
 
 
@@ -823,7 +864,7 @@ def _url_tab_panel_html(query="", couch_mode=False, browser="", chosen=None, nam
 # were browsing, etc.
 _RA_STATE_KEYS = [
     "ra_console", "ra_rompath", "ra_romfile", "ra_biospath", "ra_biosfile",
-    "ra_romsource", "ra_biossource", "ra_resolved",
+    "ra_resolved",
 ]
 _RA_ROOT = os.path.expanduser("~")
 # Under _RA_ROOT on purpose -- uploaded files just become another real
@@ -905,15 +946,9 @@ def _ra_list_rows(abs_path, rel_path, state, path_key, file_key):
 def _ra_picker_section(prefix, label, state):
     path_key = f"ra_{prefix}path"
     file_key = f"ra_{prefix}file"
-    source_key = f"ra_{prefix}source"
     rel_path = state.get(path_key, "")
-    source = state.get(source_key) or "local"
     selected_file = state.get(file_key, "")
-
-    upload_href = _ra_url("/new", state, **{source_key: "upload"})
-    local_href = _ra_url("/new", state, **{source_key: "local"})
-    upload_cls = "source-label active" if source == "upload" else "source-label"
-    local_cls = "source-label active" if source != "upload" else "source-label"
+    dom_prefix = f"ra-{prefix}-source"
 
     # Removing the ROM also clears ra_resolved -- the SGDB search/Name
     # field are entirely derived from ra_romfile (see the /new handler),
@@ -937,42 +972,47 @@ def _ra_picker_section(prefix, label, state):
     else:
         label_row = f'<label class="field-label">{label} <span class="required-asterisk">*</span></label>'
 
-    if source == "upload":
-        # The rest of the RA state (which console, the other picker's
-        # own path/file, etc.) rides in the action URL's own query
-        # string, not as sibling hidden fields inside this multipart
-        # body -- keeps the body down to exactly one part (the file
-        # itself), which is all multipart_upload.py is built to stream.
-        # slot isn't part of _RA_STATE_KEYS (it's specific to this one
-        # upload action, not carried across other navigation), so it's
-        # appended directly rather than routed through _ra_qs's own
-        # state-key filtering -- and appended *before* the #fragment
-        # (via _ra_qs directly, not _ra_url), since anything after a
-        # URL fragment becomes part of the fragment text, not a real
-        # query param the server could read.
-        action = f"/new/upload?{_ra_qs(state)}&slot={prefix}#tab-retroarch"
-        panel = f"""
-    <form method="post" enctype="multipart/form-data" action="{action}">
+    # Both panels are always rendered now, with plain JS (gridgeToggleSource
+    # in PAGE_TAIL) swapping which is visible -- no navigation, so no
+    # reload flicker, and no source_key needed in server-side state at
+    # all (it's fine for the toggle to reset to "local" on a real reload,
+    # same as it always defaulted to before).
+    #
+    # The rest of the RA state (which console, the other picker's own
+    # path/file, etc.) rides in the action URL's own query string, not as
+    # sibling hidden fields inside this multipart body -- keeps the body
+    # down to exactly one part (the file itself), which is all
+    # multipart_upload.py is built to stream. slot isn't part of
+    # _RA_STATE_KEYS (it's specific to this one upload action, not
+    # carried across other navigation), so it's appended directly rather
+    # than routed through _ra_qs's own state-key filtering -- and
+    # appended *before* the #fragment (via _ra_qs directly, not _ra_url),
+    # since anything after a URL fragment becomes part of the fragment
+    # text, not a real query param the server could read.
+    upload_action = f"/new/upload?{_ra_qs(state)}&slot={prefix}#tab-retroarch"
+    upload_panel = f"""
+    <form method="post" enctype="multipart/form-data" action="{upload_action}">
       <input type="file" name="file">
       <button type="submit" style="margin-top:0.5rem">Upload</button>
     </form>"""
-    else:
-        abs_path = _ra_safe_join(rel_path)
-        if abs_path is None or not os.path.isdir(abs_path):
-            abs_path, rel_path = _RA_ROOT, ""
-        panel = (
-            f'<div class="breadcrumbs">{_ra_breadcrumbs_html(rel_path, state, path_key)}</div>'
-            f'<div class="picker-list"><div class="boxed-list">{_ra_list_rows(abs_path, rel_path, state, path_key, file_key)}</div></div>'
-        )
+
+    abs_path = _ra_safe_join(rel_path)
+    if abs_path is None or not os.path.isdir(abs_path):
+        abs_path, rel_path = _RA_ROOT, ""
+    local_panel = (
+        f'<div class="breadcrumbs">{_ra_breadcrumbs_html(rel_path, state, path_key)}</div>'
+        f'<div class="picker-list"><div class="boxed-list">{_ra_list_rows(abs_path, rel_path, state, path_key, file_key)}</div></div>'
+    )
 
     return f"""
   <div class="field-group">
     {label_row}
     <div class="source-toggle">
-      <a class="{upload_cls}" href="{upload_href}">Upload</a>
-      <a class="{local_cls}" href="{local_href}">{html.escape(_hostname())}</a>
+      <a class="source-label" href="javascript:void(0)" id="{dom_prefix}-upload-label" onclick="gridgeToggleSource('{dom_prefix}', 'upload')">Upload</a>
+      <a class="source-label active" href="javascript:void(0)" id="{dom_prefix}-local-label" onclick="gridgeToggleSource('{dom_prefix}', 'local')">{html.escape(_hostname())}</a>
     </div>
-    {panel}
+    <div id="{dom_prefix}-upload-panel" style="display:none">{upload_panel}</div>
+    <div id="{dom_prefix}-local-panel">{local_panel}</div>
   </div>"""
 
 
@@ -1092,7 +1132,7 @@ def _display_name(query, sgdb_q):
     return resolved.name if resolved and resolved.name else ""
 
 
-def _sgdb_search_bar_html(query, couch_mode, browser, sgdb_q):
+def _sgdb_search_bar_html(query, couch_mode, browser, sgdb_q, ra_state=None):
     # Always-visible override search (matches the design handoff's
     # column-2 "SGDB search" pill) rather than the earlier magnifying-
     # glass reveal -- lets a user search SteamGridDB directly,
@@ -1104,10 +1144,10 @@ def _sgdb_search_bar_html(query, couch_mode, browser, sgdb_q):
     # touched -- same behavior planned for the Apps/RetroArch/Emulators
     # tabs once they're built out, not just the URL tab.
     display_term = _display_name(query, sgdb_q)
-    clear_href = f"/search?{_state_qs(query, couch_mode, browser)}"
+    clear_href = f"/search?{_state_qs(query, couch_mode, browser, ra_state)}"
     return f"""
 <form action="/search" method="get">
-  {_hidden_state_fields(query, couch_mode, browser)}
+  {_hidden_state_fields(query, couch_mode, browser, ra_state)}
   <div class="search-field-row">
     <div class="field-with-clear">
       <input type="text" name="sgdb_q" value="{html.escape(display_term)}" placeholder="SGDB search">
@@ -1119,7 +1159,7 @@ def _sgdb_search_bar_html(query, couch_mode, browser, sgdb_q):
 """
 
 
-def _match_list_html(query, couch_mode, browser, sgdb_q, matches, match_index):
+def _match_list_html(query, couch_mode, browser, sgdb_q, matches, match_index, ra_state=None):
     # Plain links, not radio+submit-button: clicking one navigates
     # straight to that match's artwork (a real GET, no JS needed) --
     # a radio selection alone doesn't submit anything by itself, which
@@ -1129,7 +1169,7 @@ def _match_list_html(query, couch_mode, browser, sgdb_q, matches, match_index):
     # is chosen (the Name field, back in the left column, follows the
     # picked match's own name instead).
     rows = []
-    qs = _state_qs(query, couch_mode, browser, sgdb_q=sgdb_q)
+    qs = _state_qs(query, couch_mode, browser, ra_state, sgdb_q=sgdb_q)
     for i, m in enumerate(matches):
         selected = " selected" if i == match_index else ""
         rows.append(
@@ -1138,11 +1178,11 @@ def _match_list_html(query, couch_mode, browser, sgdb_q, matches, match_index):
     return f'<div class="boxed-list">{"".join(rows)}</div>'
 
 
-def _middle_column_html(query, couch_mode, browser, sgdb_q, matches, match_index, extra_class=""):
-    list_html = _match_list_html(query, couch_mode, browser, sgdb_q, matches, match_index) if matches else _placeholder_matches_html()
+def _middle_column_html(query, couch_mode, browser, sgdb_q, matches, match_index, extra_class="", ra_state=None):
+    list_html = _match_list_html(query, couch_mode, browser, sgdb_q, matches, match_index, ra_state) if matches else _placeholder_matches_html()
     return f"""
 <div class="card {extra_class}">
-  {_sgdb_search_bar_html(query, couch_mode, browser, sgdb_q)}
+  {_sgdb_search_bar_html(query, couch_mode, browser, sgdb_q, ra_state)}
   <div class="field-group" style="flex:1;min-height:0">
     <h2>SGDB matches</h2>
     {list_html}
@@ -1372,7 +1412,7 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
     # search box's own clear button already has, not a literal empty
     # field (there's no way to distinguish "explicitly cleared" from
     # "never touched" without JS to track that).
-    name_reset_href = f"/search?{_state_qs(query, couch_mode, browser, sgdb_q=sgdb_q)}&match_index={match_index}"
+    name_reset_href = f"/search?{_state_qs(query, couch_mode, browser, ra_state, sgdb_q=sgdb_q)}&match_index={match_index}"
 
     left = f"""
 <div class="card">
@@ -1380,6 +1420,7 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
   <div class="tab-panels">
     <div class="tab-panel tab-panel-url">
       <form action="/search" method="get" style="display:flex;flex-direction:column;gap:0.9rem">
+        {_ra_hidden_fields(ra_state)}
         {_url_tab_panel_html(query, couch_mode, browser, chosen, name_reset_href, ra_state)}
       </form>
     </div>
@@ -1417,7 +1458,7 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
         ra_middle_html = _ra_middle_column_html(ra_state, [ra_chosen] if ra_chosen else [], extra_class="middle-panel-retroarch")
         ra_right_content = _artwork_picker_html(ra_candidates_by_category)
 
-    middle_url = _middle_column_html(query, couch_mode, browser, sgdb_q, matches, match_index, extra_class="middle-panel-url")
+    middle_url = _middle_column_html(query, couch_mode, browser, sgdb_q, matches, match_index, extra_class="middle-panel-url", ra_state=ra_state)
     right_url = f'<div class="card artwork-card right-panel-url">{_artwork_picker_html(candidates_by_category)}</div>'
     right_ra = f'<div class="card artwork-card right-panel-retroarch">{ra_right_content}</div>'
 
@@ -1831,8 +1872,16 @@ class Handler(BaseHTTPRequestHandler):
             browser = (params.get("browser") or [""])[0]
             sgdb_q = (params.get("sgdb_q") or [""])[0].strip()
             match_index = int((params.get("match_index") or ["0"])[0])
+            # Every normal URL tab interaction (Search, picking a match,
+            # the SGDB override) goes through this route -- without
+            # reading and re-threading ra_state, each one silently wiped
+            # any in-progress RetroArch pick, which is what actually made
+            # the SGDB search field "disappear" after visiting the
+            # RetroArch tab (not a rendering bug -- the state was really
+            # gone by the time /new#tab-retroarch was reached again).
+            ra_state = _ra_state_from_params(params)
             if not query:
-                self._send_html(render_page(browser=browser))
+                self._send_html(render_page(browser=browser, ra_state=ra_state))
                 return
 
             # Recognized service (e.g. "netflix" -> netflix.com) or a
@@ -1845,7 +1894,7 @@ class Handler(BaseHTTPRequestHandler):
             # an invalid "https://netflix" (missing .com) shortcut URL.
             resolved = service_resolver.resolve(query)
             if not resolved.url:
-                self._send_html(render_page(query, couch_mode, browser))
+                self._send_html(render_page(query, couch_mode, browser, ra_state=ra_state))
                 return
 
             # sgdb_q (the magnifying-glass direct search) overrides
@@ -1858,6 +1907,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_html(render_page(
                 query, couch_mode, browser, sgdb_q, matches, match_index,
                 candidates, resolved.url, chosen=matches[match_index],
+                ra_state=ra_state,
             ))
             return
 
