@@ -392,10 +392,16 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
   flex: 1; padding: 0.6rem 0.25rem; border-radius: 9px; font-size: 1rem; font-weight: 600;
   text-align: center; cursor: pointer; color: var(--text-dim);
 }
-#tab-url:checked ~ .tab-bar label[for="tab-url"],
-#tab-apps:checked ~ .tab-bar label[for="tab-apps"],
-#tab-retroarch:checked ~ .tab-bar label[for="tab-retroarch"],
-#tab-emulators:checked ~ .tab-bar label[for="tab-emulators"] {
+/* ~ .gridge-columns (a descendant combinator after it, not a direct
+   sibling) -- the radios live just above .gridge-columns now, not
+   nested inside the left column's own card, specifically so this same
+   :checked state can also reach the middle/right columns below (see
+   .middle-panel-retroarch etc.) -- those aren't descendants of
+   .tab-bar/.tab-panels the way the left column's own content is. */
+#tab-url:checked ~ .gridge-columns .tab-bar label[for="tab-url"],
+#tab-apps:checked ~ .gridge-columns .tab-bar label[for="tab-apps"],
+#tab-retroarch:checked ~ .gridge-columns .tab-bar label[for="tab-retroarch"],
+#tab-emulators:checked ~ .gridge-columns .tab-bar label[for="tab-emulators"] {
   background: #fff; color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,0.12);
 }
 /* flex:1 on both so whichever tab is active can stretch to fill the
@@ -415,10 +421,19 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
    this, landing the button on top of/before its own Name field
    instead of below it. */
 .tab-panel { display: none; flex-direction: column; gap: 0.9rem; flex: 1; min-height: 0; overflow-y: auto; }
-#tab-url:checked ~ .tab-panels .tab-panel-url,
-#tab-apps:checked ~ .tab-panels .tab-panel-apps,
-#tab-retroarch:checked ~ .tab-panels .tab-panel-retroarch,
-#tab-emulators:checked ~ .tab-panels .tab-panel-emulators { display: flex; }
+#tab-url:checked ~ .gridge-columns .tab-panels .tab-panel-url,
+#tab-apps:checked ~ .gridge-columns .tab-panels .tab-panel-apps,
+#tab-retroarch:checked ~ .gridge-columns .tab-panels .tab-panel-retroarch,
+#tab-emulators:checked ~ .gridge-columns .tab-panels .tab-panel-emulators { display: flex; }
+/* Middle/right columns: URL's own content is the default (also what
+   Apps/Emulators fall back to showing, same as before RetroArch had
+   any content of its own) -- only switches away from it when
+   RetroArch is specifically the checked tab. */
+.middle-panel-retroarch, .right-panel-retroarch { display: none; }
+#tab-retroarch:checked ~ .gridge-columns .middle-panel-url,
+#tab-retroarch:checked ~ .gridge-columns .right-panel-url { display: none; }
+#tab-retroarch:checked ~ .gridge-columns .middle-panel-retroarch,
+#tab-retroarch:checked ~ .gridge-columns .right-panel-retroarch { display: flex; }
 .coming-soon { color: var(--text-dim); font-size: 0.85rem; padding: 1rem 0; text-align: center; }
 /* RetroArch tab: BIOS/ROM source toggles + embedded server file picker.
    Plain links, not a CSS-radio-hack -- that trick is client-side only
@@ -989,15 +1004,14 @@ def _retroarch_tab_panel_html(state, chosen=None):
 _FORM_TABS = [("tab-url", "URL"), ("tab-apps", "Apps"), ("tab-retroarch", "RetroArch"), ("tab-emulators", "Emulators")]
 
 
-def _tab_bar_html(active_tab="tab-url"):
-    # Segmented control switching the four shortcut-source tabs. CSS-only
-    # (radio hack): the radios sit flat alongside .tab-bar and .tab-panels
-    # (not nested inside either) so the general-sibling selectors in the
-    # stylesheet (#tab-url:checked ~ .tab-bar label[for="tab-url"], etc.)
-    # can reach both the matching label and the matching panel from a
-    # single :checked radio. Only the URL and RetroArch tabs are
-    # functional for now; Apps/Emulators are placeholders per the design
-    # handoff. active_tab matters because this radio state is CSS-only,
+def _tab_bar_radios_html(active_tab="tab-url"):
+    # Emitted just above .gridge-columns (see render_page), not nested
+    # inside the left column's own card -- these radios now drive
+    # visibility across all three columns (see .middle-panel-retroarch
+    # etc.), not just the left column's own .tab-bar/.tab-panels, so
+    # they need to be an ancestor-level sibling those CSS ~ selectors
+    # can all reach via a descendant combinator, not scoped to one
+    # column. active_tab matters because this radio state is CSS-only,
     # not server-persisted -- every navigation inside a tab (console
     # select, folder browsing, the source toggle) is a full page reload,
     # so without this the page always snapped back to showing the URL
@@ -1011,13 +1025,16 @@ def _tab_bar_html(active_tab="tab-url"):
     # group's checked state needs to be server-controlled across real
     # reloads instead of staying purely client-side for one page's
     # lifetime like the original tab bar never had to worry about.
-    radios = "".join(
+    return "".join(
         f'<input type="radio" name="gridge-form-tab" id="{tab_id}" class="tab-radio" autocomplete="off"'
         f'{" checked" if tab_id == active_tab else ""}>'
         for tab_id, _label in _FORM_TABS
     )
+
+
+def _tab_bar_html():
     labels = "".join(f'<label for="{tab_id}" class="tab-label">{label}</label>' for tab_id, label in _FORM_TABS)
-    return radios + f'<div class="tab-bar">{labels}</div>'
+    return f'<div class="tab-bar">{labels}</div>'
 
 
 # Generous fixed count, not a computed fit: row height is fixed/compact
@@ -1090,10 +1107,10 @@ def _match_list_html(query, couch_mode, browser, sgdb_q, matches, match_index):
     return f'<div class="boxed-list">{"".join(rows)}</div>'
 
 
-def _middle_column_html(query, couch_mode, browser, sgdb_q, matches, match_index):
+def _middle_column_html(query, couch_mode, browser, sgdb_q, matches, match_index, extra_class=""):
     list_html = _match_list_html(query, couch_mode, browser, sgdb_q, matches, match_index) if matches else _placeholder_matches_html()
     return f"""
-<div class="card">
+<div class="card {extra_class}">
   {_sgdb_search_bar_html(query, couch_mode, browser, sgdb_q)}
   <div class="field-group" style="flex:1;min-height:0">
     <h2>SGDB matches</h2>
@@ -1103,7 +1120,7 @@ def _middle_column_html(query, couch_mode, browser, sgdb_q, matches, match_index
 """
 
 
-def _ra_middle_column_html(state, matches):
+def _ra_middle_column_html(state, matches, extra_class=""):
     # No override search box (unlike the URL tab's) and no match
     # switching yet -- these rows are informational display only, self-
     # referential <a> hrefs so they pick up the same .boxed-list/
@@ -1119,7 +1136,7 @@ def _ra_middle_column_html(state, matches):
             rows.append(f'<a class="{cls.strip()}" href="/new?{qs}">{html.escape(m["name"])}</a>')
         list_html = f'<div class="boxed-list">{"".join(rows)}</div>'
     return f"""
-<div class="card">
+<div class="card {extra_class}">
   <div class="field-group" style="flex:1;min-height:0">
     <h2>SGDB matches</h2>
     {list_html}
@@ -1328,7 +1345,7 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
 
     left = f"""
 <div class="card">
-  {_tab_bar_html("tab-retroarch" if ra_console else "tab-url")}
+  {_tab_bar_html()}
   <div class="tab-panels">
     <div class="tab-panel tab-panel-url">
       <form action="/search" method="get" style="display:flex;flex-direction:column;gap:0.9rem">
@@ -1344,10 +1361,15 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
   {add_button}
 </div>
 """
-    # RetroArch takes over the shared middle/right columns the moment
-    # its own console picker has been touched -- that's the clearer
-    # signal that it's the flow actually in progress, same reasoning as
-    # ra_ready taking priority for the Add form/button above.
+    # Both flavors of middle/right are always rendered, CSS (not this
+    # branching) decides which one is visible -- the tab bar itself
+    # switches tabs purely client-side with no reload, so a middle/
+    # right column "chosen" server-side by which flow the *last actual
+    # page load* happened to be about would silently stay wrong the
+    # moment someone clicked a different tab label afterward without
+    # reloading. Confirmed live: that's exactly what made the SGDB
+    # search field "disappear" after visiting the RetroArch tab and
+    # clicking back to URL without a fresh request.
     extra_head = ""
     if ra_loading:
         # Meta-refresh, not JS: an instant response (no SGDB call yet)
@@ -1358,20 +1380,23 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
         # unchanged while it runs.
         refresh_url = f"/new?{_ra_qs(ra_state, ra_resolved='1')}"
         extra_head = f'<meta http-equiv="refresh" content="0;url={html.escape(refresh_url)}">'
-        middle = _ra_middle_column_html(ra_state, [])
-        right = f'<div class="card artwork-card">{_ra_loading_artwork_html()}</div>'
-    elif ra_console:
-        middle = _ra_middle_column_html(ra_state, [ra_chosen] if ra_chosen else [])
-        right = f'<div class="card artwork-card">{_artwork_picker_html(ra_candidates_by_category)}</div>'
+        ra_middle_html = _ra_middle_column_html(ra_state, [], extra_class="middle-panel-retroarch")
+        ra_right_content = _ra_loading_artwork_html()
     else:
-        middle = _middle_column_html(query, couch_mode, browser, sgdb_q, matches, match_index)
-        right = f'<div class="card artwork-card">{_artwork_picker_html(candidates_by_category)}</div>'
+        ra_middle_html = _ra_middle_column_html(ra_state, [ra_chosen] if ra_chosen else [], extra_class="middle-panel-retroarch")
+        ra_right_content = _artwork_picker_html(ra_candidates_by_category)
+
+    middle_url = _middle_column_html(query, couch_mode, browser, sgdb_q, matches, match_index, extra_class="middle-panel-url")
+    right_url = f'<div class="card artwork-card right-panel-url">{_artwork_picker_html(candidates_by_category)}</div>'
+    right_ra = f'<div class="card artwork-card right-panel-retroarch">{ra_right_content}</div>'
+
     return render(f"""
 {add_form}
+{_tab_bar_radios_html("tab-retroarch" if ra_console else "tab-url")}
 <div class="gridge-columns">
   <div class="gridge-left">{left}</div>
-  <div class="gridge-middle">{middle}</div>
-  <div class="gridge-right">{right}</div>
+  <div class="gridge-middle">{middle_url}{ra_middle_html}</div>
+  <div class="gridge-right">{right_url}{right_ra}</div>
 </div>
 """, extra_head=extra_head)
 
