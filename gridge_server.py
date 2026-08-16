@@ -47,6 +47,7 @@ import config
 import create_webapp
 import maintenance
 import pending_queue
+import retroarch_cores
 import service_resolver
 import sgdb_client as sgdb
 import steam_paths
@@ -393,6 +394,32 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
 #tab-retroarch:checked ~ .tab-panels .tab-panel-retroarch,
 #tab-emulators:checked ~ .tab-panels .tab-panel-emulators { display: flex; }
 .coming-soon { color: var(--text-dim); font-size: 0.85rem; padding: 1rem 0; text-align: center; }
+/* RetroArch tab: BIOS/ROM source toggles + embedded server file picker.
+   Plain links, not a CSS-radio-hack -- that trick is client-side only
+   and can't survive a page reload, but this toggle needs to be
+   *remembered* across every other click (console change, folder
+   navigation), which only a real server-tracked value can do. */
+.source-toggle { display: flex; gap: 4px; background: var(--bg); border-radius: 12px; padding: 4px; }
+.source-label { flex: 1; padding: 0.55rem 0.25rem; border-radius: 9px; font-size: 0.85rem; font-weight: 600;
+  text-align: center; cursor: pointer; color: var(--text-dim); text-decoration: none; display: block; }
+.source-label.active { background: #fff; color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
+.breadcrumbs { font-size: 0.8rem; color: var(--text-dim); }
+.breadcrumbs a { color: var(--accent); text-decoration: none; }
+.breadcrumbs a:hover { text-decoration: underline; }
+.folder-icon, .file-icon { flex: 0 0 auto; width: 1rem; text-align: center; }
+.picker-list { flex: 0 0 auto; max-height: 190px; overflow-y: auto; }
+/* ::file-selector-button is a real, standard CSS pseudo-element for
+   the browser's own "Choose File" button (Chromium/Firefox/Safari all
+   support it) -- themed to match the app's pill inputs/buttons without
+   any JS, unlike the native picker dialog itself (out of reach for any
+   web page regardless). */
+input[type=file] { width: 100%; padding: 0.5rem; font-size: 0.85rem; font-family: inherit; color: var(--text-dim);
+  border: 1px solid var(--input-border); border-radius: 20px; background: #fff; }
+input[type=file]::file-selector-button {
+  padding: 0.55rem 1.1rem; margin-right: 0.7rem; border: none; border-radius: 20px;
+  background: var(--accent); color: var(--accent-text); font-weight: 700; font-family: inherit;
+  font-size: 0.85rem; cursor: pointer;
+}
 /* Shortcut gallery (the real home page: "/"). main's own flex column
    already scrolls the whole page here -- unlike the 3-column workspace,
    there's no reason to bound this to the viewport height, since a
@@ -697,6 +724,169 @@ def _url_tab_panel_html(query="", couch_mode=False, browser="", chosen=None, nam
   {_browser_select_html(browser)}"""
 
 
+# RetroArch tab: all its own state lives on /new's query string
+# alongside (never colliding with) the URL tab's own q/sgdb_q/etc, all
+# ra_-prefixed. Threaded through every link/form here so nothing resets
+# on an unrelated click -- picking a ROM shouldn't forget you'd chosen
+# "Upload" for BIOS, changing console shouldn't lose the folder you
+# were browsing, etc.
+_RA_STATE_KEYS = ["ra_console", "ra_rompath", "ra_romfile", "ra_biospath", "ra_biosfile", "ra_romsource", "ra_biossource"]
+_RA_ROOT = os.path.expanduser("~")
+
+
+def _ra_state_from_params(params):
+    return {key: (params.get(key) or [""])[0] for key in _RA_STATE_KEYS}
+
+
+def _ra_qs(state, **overrides):
+    merged = dict(state)
+    merged.update(overrides)
+    return "&".join(f"{k}={urllib.parse.quote(str(merged[k]))}" for k in _RA_STATE_KEYS if merged.get(k))
+
+
+def _ra_safe_join(rel_path):
+    candidate = os.path.realpath(os.path.join(_RA_ROOT, rel_path.lstrip("/")))
+    root_real = os.path.realpath(_RA_ROOT)
+    if candidate != root_real and not candidate.startswith(root_real + os.sep):
+        return None
+    return candidate
+
+
+def _ra_breadcrumbs_html(rel_path, state, path_key):
+    parts = [p for p in rel_path.split("/") if p]
+    crumbs = [f'<a href="/new?{_ra_qs(state, **{path_key: ""})}">home</a>']
+    built = ""
+    for part in parts:
+        built += f"/{part}"
+        crumbs.append(
+            f'<a href="/new?{_ra_qs(state, **{path_key: built.lstrip("/")})}">{html.escape(part)}</a>'
+        )
+    return " / ".join(crumbs)
+
+
+def _ra_list_rows(abs_path, rel_path, state, path_key, file_key):
+    try:
+        entries = sorted(os.scandir(abs_path), key=lambda e: (not e.is_dir(), e.name.lower()))
+    except PermissionError:
+        return '<div class="row" style="color:var(--text-dim)">Permission denied</div>'
+    # Dotfiles/dot-directories omitted -- not useful ROM/BIOS candidates,
+    # and several (.ssh, .gnupg, .bash_history) shouldn't be casually
+    # listed in a picker at all.
+    entries = [e for e in entries if not e.name.startswith(".")]
+    if not entries:
+        return '<div class="row" style="color:var(--text-dim)">Nothing here.</div>'
+    rows = []
+    for entry in entries:
+        entry_rel = f"{rel_path}/{entry.name}".lstrip("/")
+        if entry.is_dir():
+            href = f"/new?{_ra_qs(state, **{path_key: entry_rel})}"
+            rows.append(f'<a href="{href}"><span class="folder-icon">&#128193;</span>{html.escape(entry.name)}</a>')
+        else:
+            href = f"/new?{_ra_qs(state, **{path_key: rel_path, file_key: entry_rel})}"
+            rows.append(f'<a href="{href}"><span class="file-icon">&#128190;</span>{html.escape(entry.name)}</a>')
+    return "".join(rows)
+
+
+def _ra_picker_section(prefix, label, state):
+    path_key = f"ra_{prefix}path"
+    file_key = f"ra_{prefix}file"
+    source_key = f"ra_{prefix}source"
+    rel_path = state.get(path_key, "")
+    source = state.get(source_key) or "local"
+
+    upload_href = f"/new?{_ra_qs(state, **{source_key: 'upload'})}"
+    local_href = f"/new?{_ra_qs(state, **{source_key: 'local'})}"
+    upload_cls = "source-label active" if source == "upload" else "source-label"
+    local_cls = "source-label active" if source != "upload" else "source-label"
+
+    if source == "upload":
+        # Not wired up yet (deliberately deferred -- see pending upload
+        # design: a plain enctype=multipart/form-data <input type=file>
+        # works with zero JS, but needs a streaming multipart parser on
+        # this end so a multi-GB ROM doesn't get buffered whole in
+        # memory the way do_POST's other handlers read their body).
+        panel = f'<input type="file" name="ra_{prefix}_upload" disabled title="Upload not wired up yet -- use {_hostname()} for now">'
+    else:
+        abs_path = _ra_safe_join(rel_path)
+        if abs_path is None or not os.path.isdir(abs_path):
+            abs_path, rel_path = _RA_ROOT, ""
+        panel = (
+            f'<div class="breadcrumbs">{_ra_breadcrumbs_html(rel_path, state, path_key)}</div>'
+            f'<div class="picker-list"><div class="boxed-list">{_ra_list_rows(abs_path, rel_path, state, path_key, file_key)}</div></div>'
+        )
+
+    return f"""
+  <div class="field-group">
+    <label class="field-label">{label} <span class="required-asterisk">*</span></label>
+    <div class="source-toggle">
+      <a class="{upload_cls}" href="{upload_href}">Upload</a>
+      <a class="{local_cls}" href="{local_href}">{html.escape(_hostname())}</a>
+    </div>
+    {panel}
+  </div>"""
+
+
+def _ra_guess_name_from_filename(rel_path):
+    base = os.path.splitext(os.path.basename(rel_path))[0]
+    for junk in ("(USA)", "(Europe)", "(World)", "(Rev 1)", "(Rev 2)", "[!]"):
+        base = base.replace(junk, "")
+    return " ".join(base.replace("_", " ").split()).strip()
+
+
+def _retroarch_tab_panel_html(state, chosen=None):
+    console = state.get("ra_console", "")
+    needs_bios = console in retroarch_cores.CONSOLES_NEEDING_BIOS
+
+    console_options = "".join(
+        f'<option value="{html.escape(c)}"{" selected" if c == console else ""}>'
+        f'{"Pick your console" if not c else html.escape(c)}</option>'
+        for c, _core, _needs in [("", None, False)] + retroarch_cores.CONSOLES
+    )
+    hidden_fields = "".join(
+        f'<input type="hidden" name="{k}" value="{html.escape(state.get(k, ""))}">'
+        for k in _RA_STATE_KEYS if k != "ra_console"
+    )
+
+    bios_block = _ra_picker_section("bios", "Select BIOS", state) if needs_bios else ""
+    rom_block = _ra_picker_section("rom", "Select ROM", state)
+
+    # Own Name field, own input name (ra_match_name, not match_name) --
+    # both tabs' Name fields exist in the DOM at once (only one visible
+    # via CSS at a time), so sharing a name would submit two values for
+    # the same field to the Add form. Cross-populated from the parsed
+    # ROM filename via SGDB (see _ra_guess_name_from_filename / the
+    # /new handler), same wand-icon/clear-to-reset pattern as the URL
+    # tab's own Name field.
+    romfile = state.get("ra_romfile", "")
+    name_default = chosen["name"] if chosen else (_ra_guess_name_from_filename(romfile) if romfile else "")
+    name_reset_href = f"/new?{_ra_qs(state)}"
+    name_field = f"""
+  <div class="field-group">
+    <label class="field-label" for="ra-name-field">Name</label>
+    <div class="field-with-clear">
+      <img class="name-field-icon" src="/vendor/name-field-wand.webp" alt="">
+      <input type="text" name="ra_match_name" id="ra-name-field" form="{_ADD_FORM_ID}"
+             value="{html.escape(name_default)}" placeholder="Shortcut name">
+      <a href="{name_reset_href}" class="field-clear-btn" title="Reset to guessed name">&#10005;</a>
+    </div>
+  </div>"""
+
+    return f"""
+  <div class="field-group">
+    <label class="field-label">Consoles <span class="required-asterisk">*</span> <span style="color:var(--text-dim);font-weight:400;font-size:0.85rem">Flatpak RetroArch Cores</span></label>
+    <form method="get" action="/new" style="margin:0;display:flex;flex-direction:column;gap:0.5rem">
+      {hidden_fields}
+      <select name="ra_console">
+        {console_options}
+      </select>
+      <button type="submit" class="secondary" style="width:auto;padding:0.5rem 1rem;font-size:0.8rem">Set console</button>
+    </form>
+  </div>
+  {bios_block}
+  {rom_block}
+  {name_field}"""
+
+
 _FORM_TABS = [("tab-url", "URL"), ("tab-apps", "Apps"), ("tab-retroarch", "RetroArch"), ("tab-emulators", "Emulators")]
 
 
@@ -791,6 +981,31 @@ def _middle_column_html(query, couch_mode, browser, sgdb_q, matches, match_index
     return f"""
 <div class="card">
   {_sgdb_search_bar_html(query, couch_mode, browser, sgdb_q)}
+  <div class="field-group" style="flex:1;min-height:0">
+    <h2>SGDB matches</h2>
+    {list_html}
+  </div>
+</div>
+"""
+
+
+def _ra_middle_column_html(state, matches):
+    # No override search box (unlike the URL tab's) and no match
+    # switching yet -- these rows are informational display only, self-
+    # referential <a> hrefs so they pick up the same .boxed-list/
+    # a.selected styling without adding new CSS just for this. The
+    # editable Name field is still the real way to correct a bad guess.
+    if not matches:
+        list_html = _placeholder_matches_html()
+    else:
+        qs = _ra_qs(state)
+        rows = []
+        for i, m in enumerate(matches):
+            cls = " selected" if i == 0 else ""
+            rows.append(f'<a class="{cls.strip()}" href="/new?{qs}">{html.escape(m["name"])}</a>')
+        list_html = f'<div class="boxed-list">{"".join(rows)}</div>'
+    return f"""
+<div class="card">
   <div class="field-group" style="flex:1;min-height:0">
     <h2>SGDB matches</h2>
     {list_html}
@@ -901,29 +1116,56 @@ def _artwork_picker_html(candidates_by_category):
 
 
 def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None, match_index=0,
-                 candidates_by_category=None, resolved_url=None, chosen=None):
+                 candidates_by_category=None, resolved_url=None, chosen=None,
+                 ra_state=None, ra_candidates_by_category=None, ra_chosen=None):
     """Single page-builder for every state (home, unresolved input, no
     matches, a real workspace) -- all three columns are always present
     and always fully populated (placeholders when empty), rather than
-    each state having its own bespoke partial layout."""
+    each state having its own bespoke partial layout.
+
+    ra_* covers the RetroArch tab's own flow, entirely separate from
+    the URL tab's (different state, different match_name field --
+    ra_match_name -- so the two never collide as same-named inputs on
+    the same Add form). Only one flow drives the single shared Add
+    button/artwork column at a time: RetroArch takes priority once its
+    own console+ROM(+BIOS) picks are complete, since that's the more
+    specific signal that it's the one actually in progress."""
     matches = matches or []
     candidates_by_category = candidates_by_category or {}
+    ra_state = ra_state or {}
+    ra_candidates_by_category = ra_candidates_by_category or {}
+
+    ra_console = ra_state.get("ra_console", "")
+    ra_needs_bios = ra_console in retroarch_cores.CONSOLES_NEEDING_BIOS
+    ra_ready = bool(
+        ra_console and ra_state.get("ra_romfile")
+        and (ra_state.get("ra_biosfile") if ra_needs_bios else True)
+    )
 
     add_form = ""
     # Always present and pinned to the bottom, per the design handoff --
     # inert (not tied to any form) until a match/artwork exists to add.
     add_button = '<button type="button" disabled style="opacity:0.45;cursor:not-allowed">Create Steam Shortcut</button>'
-    if chosen is not None:
+    # The Add form is declared standalone (no visible children) and
+    # everything that belongs to it -- the button, the artwork radios,
+    # the active tab's own Name field -- is associated via form="..."
+    # instead of DOM nesting. It must NOT visually wrap the URL tab
+    # panel's own <form action="/search">: a <form> nested inside
+    # another <form> is invalid HTML, and browsers resolve that by
+    # silently merging the inner form's fields/buttons into the outer
+    # one -- confirmed live, this made clicking "Search" submit /add
+    # (with stale data) instead of actually searching.
+    if ra_ready:
+        add_form = f"""
+<form id="{_ADD_FORM_ID}" action="/add" method="post">
+  <input type="hidden" name="ra_console" value="{html.escape(ra_console)}">
+  <input type="hidden" name="ra_romfile" value="{html.escape(ra_state.get('ra_romfile', ''))}">
+  <input type="hidden" name="ra_biosfile" value="{html.escape(ra_state.get('ra_biosfile', ''))}">
+</form>
+"""
+        add_button = f'<button type="submit" form="{_ADD_FORM_ID}">Create Steam Shortcut</button>'
+    elif chosen is not None:
         couch_field = '<input type="hidden" name="couch_mode" value="1">' if couch_mode else ""
-        # The Add form is declared standalone (no visible children) and
-        # everything that belongs to it -- the button, the artwork
-        # radios -- is associated via form="..." instead of DOM
-        # nesting. It must NOT visually wrap the URL tab panel's own
-        # <form action="/search">: a <form> nested inside another
-        # <form> is invalid HTML, and browsers resolve that by silently
-        # merging the inner form's fields/buttons into the outer one --
-        # confirmed live, this made clicking "Search" submit /add (with
-        # stale data) instead of actually searching.
         # The Name field itself (see _url_tab_panel_html) is what
         # actually carries match_name to /add -- it's a real visible
         # input tagged form="{_ADD_FORM_ID}" so its live value (whatever
@@ -957,15 +1199,25 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
       </form>
     </div>
     <div class="tab-panel tab-panel-apps"><div class="coming-soon">Apps (Flathub/Installed) -- coming soon</div></div>
-    <div class="tab-panel tab-panel-retroarch"><div class="coming-soon">RetroArch platforms -- coming soon</div></div>
+    <div class="tab-panel tab-panel-retroarch">
+      {_retroarch_tab_panel_html(ra_state, ra_chosen)}
+    </div>
     <div class="tab-panel tab-panel-emulators"><div class="coming-soon">Emulators -- coming soon</div></div>
   </div>
   <div class="gridge-spacer"></div>
   {add_button}
 </div>
 """
-    middle = _middle_column_html(query, couch_mode, browser, sgdb_q, matches, match_index)
-    right = f'<div class="card artwork-card">{_artwork_picker_html(candidates_by_category)}</div>'
+    # RetroArch takes over the shared middle/right columns the moment
+    # its own console picker has been touched -- that's the clearer
+    # signal that it's the flow actually in progress, same reasoning as
+    # ra_ready taking priority for the Add form/button above.
+    if ra_console:
+        middle = _ra_middle_column_html(ra_state, [ra_chosen] if ra_chosen else [])
+        right = f'<div class="card artwork-card">{_artwork_picker_html(ra_candidates_by_category)}</div>'
+    else:
+        middle = _middle_column_html(query, couch_mode, browser, sgdb_q, matches, match_index)
+        right = f'<div class="card artwork-card">{_artwork_picker_html(candidates_by_category)}</div>'
     return render(f"""
 {add_form}
 <div class="gridge-columns">
@@ -1328,7 +1580,24 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/new":
-            self._send_html(render_page())
+            ra_state = _ra_state_from_params(params)
+            ra_chosen = None
+            ra_candidates = {}
+            romfile = ra_state.get("ra_romfile")
+            if romfile:
+                # Reuses _resolve_matches's own no-key/zero-results
+                # fallback (a synthetic single "match" so a shortcut is
+                # still addable either way) by handing it a bare
+                # Resolved carrying just the guessed name -- same
+                # contract the URL tab's own resolution already relies
+                # on, not a separate RetroArch-specific fallback.
+                guessed = _ra_guess_name_from_filename(romfile)
+                ra_matches = _resolve_matches(guessed, service_resolver.Resolved(name=guessed))
+                ra_chosen = ra_matches[0]
+                ra_candidates = _fetch_candidates(ra_chosen["id"])
+            self._send_html(render_page(
+                ra_state=ra_state, ra_candidates_by_category=ra_candidates, ra_chosen=ra_chosen,
+            ))
             return
 
         if parsed.path.startswith("/grid-image/"):
@@ -1481,6 +1750,12 @@ class Handler(BaseHTTPRequestHandler):
             self._send_html(render("<p>Not found</p>"), status=404)
             return
 
+        ra_console = (params.get("ra_console") or [""])[0]
+        ra_romfile = (params.get("ra_romfile") or [""])[0]
+        if ra_console and ra_romfile:
+            self._add_retroarch_shortcut(params, ra_console, ra_romfile)
+            return
+
         query = (params.get("query") or [""])[0]
         couch_mode = bool(params.get("couch_mode"))
         # match_name comes straight from the Name field's own live value
@@ -1519,6 +1794,59 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:  # noqa: BLE001 -- surfaced to the user, not swallowed
             self._send_html(render_done(match_name, ok=False, error=e))
 
+    def _add_retroarch_shortcut(self, params, ra_console, ra_romfile):
+        # ra_match_name comes straight from the RetroArch tab's own
+        # Name field live value -- same reasoning as the URL tab's own
+        # match_name, a separate field/name so the two Name fields
+        # (only one visible at a time, but both real DOM inputs) never
+        # collide as two values for one field on the shared Add form.
+        ra_biosfile = (params.get("ra_biosfile") or [""])[0]
+        match_name = (params.get("ra_match_name") or [""])[0] or _ra_guess_name_from_filename(ra_romfile) or ra_console
+
+        romfile_abs = _ra_safe_join(ra_romfile)
+        if romfile_abs is None or not os.path.isfile(romfile_abs):
+            self._send_html(render_done(match_name, ok=False, error="ROM file not found -- please pick it again"))
+            return
+        biosfile_abs = None
+        if ra_biosfile:
+            biosfile_abs = _ra_safe_join(ra_biosfile)
+            if biosfile_abs is None or not os.path.isfile(biosfile_abs):
+                self._send_html(render_done(match_name, ok=False, error="BIOS file not found -- please pick it again"))
+                return
+
+        try:
+            # Installing RetroArch itself is a one-time cost (confirmed
+            # live: several minutes the first time, since it pulls a
+            # full runtime dependency alongside it) -- blocking on it
+            # here rather than a background/polling flow is a real,
+            # deliberate v1 tradeoff: simple to build, but this one
+            # click can be slow the very first time a machine ever adds
+            # a RetroArch shortcut. Every install after that is instant
+            # (already-installed check short-circuits). Core installs
+            # are fast (a few MB each from libretro's buildbot) and
+            # don't have this concern.
+            if not retroarch_cores.retroarch_installed():
+                retroarch_cores.install_retroarch()
+            if not retroarch_cores.core_installed(ra_console):
+                retroarch_cores.install_core(ra_console)
+            if biosfile_abs:
+                retroarch_cores.install_bios(biosfile_abs)
+
+            args = retroarch_cores.launch_args(ra_console, romfile_abs)
+            if args is None:
+                raise RuntimeError("flatpak isn't available on this host")
+
+            slug = create_webapp.slugify(match_name)
+            selections = {}
+            for basename, _title, _fetch, _w, _h in ARTWORK_CATEGORIES:
+                selection_url = (params.get(f"artwork_{basename}") or [None])[0]
+                selections[basename] = {"url": selection_url} if selection_url else None
+            asset_paths = create_webapp.download_selected_assets(slug, selections)
+            pending_queue.add(match_name, None, False, asset_paths, launch_args=args)
+            self._redirect("/")
+        except Exception as e:  # noqa: BLE001 -- surfaced to the user, not swallowed
+            self._send_html(render_done(match_name, ok=False, error=e))
+
     def _commit_pending(self):
         items = pending_queue.all_items()
         if not items:
@@ -1541,6 +1869,7 @@ class Handler(BaseHTTPRequestHandler):
                         create_webapp.register_steam_shortcut(
                             item["name"], item["url"], item["asset_paths"],
                             couch_mode=item["couch_mode"], browser_app_id=item.get("browser_app_id"),
+                            launch_args=item.get("launch_args"),
                         )
 
             maintenance.run_with_steam_stopped(apply, message=f"Applying {label}…")

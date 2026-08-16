@@ -299,7 +299,8 @@ YOUTUBE_TV_USER_AGENT = (
 )
 
 
-def register_steam_shortcut(name, url, asset_paths, user_id=None, couch_mode=False, browser_app_id=None):
+def register_steam_shortcut(name, url, asset_paths, user_id=None, couch_mode=False, browser_app_id=None,
+                             launch_args=None):
     """Copy fetched assets into Steam's grid folder and add/update a
     non-Steam shortcut entry in shortcuts.vdf. Returns the appid.
 
@@ -309,40 +310,50 @@ def register_steam_shortcut(name, url, asset_paths, user_id=None, couch_mode=Fal
     plain kiosk flags); anything else goes through browser_launcher.py,
     which only covers browsers confirmed to actually work in kiosk mode
     (see its own docstring) rather than guessing flags for an untested
-    one."""
-    if couch_mode:
-        url = YOUTUBE_TV_URL
+    one.
 
-    if not browser_app_id or browser_app_id == edge_launcher.FLATPAK_APP_ID:
-        edge_exe, edge_prefix_args = edge_launcher.find_edge()
-        # No --profile-directory/--user-data-dir: use Edge's own default
-        # profile, shared with the user's regular Edge browsing, so
-        # logins already saved there (Netflix, Disney+, etc.) just work
-        # without a separate sign-in per shortcut.
-        browser_args = [
-            edge_exe,
-            *edge_prefix_args,
-            f"--app={url}",
-            "--kiosk",
-            "--start-fullscreen",
-            "--hide-scrollbars",
-            "--no-first-run",
-            "--no-default-browser-check",
-        ]
-        if couch_mode:
-            # LaunchOptions is stored/parsed as one shell-like string,
-            # and the TV user-agent has spaces/parens/semicolons in it --
-            # unquoted, it gets word-split into several bogus arguments
-            # (confirmed: Edge then fails to start at all, so Steam's
-            # Play button just resets with nothing visibly happening).
-            browser_args.append(shlex.quote(f"--user-agent={YOUTUBE_TV_USER_AGENT}"))
+    launch_args bypasses url/browser_app_id entirely when given -- an
+    already-built, already-quoted argv (e.g. from
+    retroarch_cores.launch_args) for shortcuts that aren't a browser at
+    all. get_launch_wrapper_path()'s own wrapper script is generic (just
+    re-execs whatever LaunchOptions it's given on the host), so this
+    needs no separate wrapper of its own."""
+    if launch_args is not None:
+        browser_args = launch_args
     else:
-        # Already shell-quoted where needed -- browser_launcher.py owns
-        # that decision since it knows which element (if any) needs it
-        # per browser family, unlike here.
-        browser_args = browser_launcher.kiosk_launch_args(
-            browser_app_id, url, couch_mode, YOUTUBE_TV_USER_AGENT
-        )
+        if couch_mode:
+            url = YOUTUBE_TV_URL
+
+        if not browser_app_id or browser_app_id == edge_launcher.FLATPAK_APP_ID:
+            edge_exe, edge_prefix_args = edge_launcher.find_edge()
+            # No --profile-directory/--user-data-dir: use Edge's own default
+            # profile, shared with the user's regular Edge browsing, so
+            # logins already saved there (Netflix, Disney+, etc.) just work
+            # without a separate sign-in per shortcut.
+            browser_args = [
+                edge_exe,
+                *edge_prefix_args,
+                f"--app={url}",
+                "--kiosk",
+                "--start-fullscreen",
+                "--hide-scrollbars",
+                "--no-first-run",
+                "--no-default-browser-check",
+            ]
+            if couch_mode:
+                # LaunchOptions is stored/parsed as one shell-like string,
+                # and the TV user-agent has spaces/parens/semicolons in it --
+                # unquoted, it gets word-split into several bogus arguments
+                # (confirmed: Edge then fails to start at all, so Steam's
+                # Play button just resets with nothing visibly happening).
+                browser_args.append(shlex.quote(f"--user-agent={YOUTUBE_TV_USER_AGENT}"))
+        else:
+            # Already shell-quoted where needed -- browser_launcher.py owns
+            # that decision since it knows which element (if any) needs it
+            # per browser family, unlike here.
+            browser_args = browser_launcher.kiosk_launch_args(
+                browser_app_id, url, couch_mode, YOUTUBE_TV_USER_AGENT
+            )
 
     userdata_dir = steam_paths.find_userdata_dir(user_id)
     grid_dir = os.path.join(userdata_dir, "config", "grid")
