@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 import browser_launcher
 import edge_launcher
 import host_exec
+import retroarch_cores
 import sgdb_client as sgdb
 import shortcuts_vdf
 import steam_paths
@@ -428,6 +429,38 @@ def _extract_launch_url(launch_options):
     return None
 
 
+def _extract_retroarch_info(launch_options):
+    """Pulls (console, romfile) back out of a RetroArch shortcut's own
+    LaunchOptions (see retroarch_cores.launch_args) so the RetroArch
+    tab's Edit link can jump straight back into it, same as
+    _extract_launch_url already does for URL-tab shortcuts. The core
+    path is reverse-mapped to a console name via retroarch_cores' own
+    table -- several consoles share one core (Game Boy/Game Boy Color
+    both use gambatte), so this is best-effort and picks whichever
+    console using that core comes first in retroarch_cores.CONSOLES,
+    same "not a perfect restore, just a head start" contract the URL
+    tab's own edit flow already has (it re-resolves from scratch too,
+    rather than recalling the exact name/artwork picked originally).
+    Returns (None, None) for anything that isn't a RetroArch shortcut."""
+    try:
+        tokens = shlex.split(launch_options)
+    except ValueError:
+        return None, None
+    if retroarch_cores.RETROARCH_APP_ID not in tokens or "-L" not in tokens:
+        return None, None
+    idx = tokens.index("-L")
+    if idx + 2 >= len(tokens):
+        return None, None
+    core_path, romfile = tokens[idx + 1], tokens[idx + 2]
+    core_name = os.path.basename(core_path)
+    if core_name.endswith("_libretro.so"):
+        core_name = core_name[: -len("_libretro.so")]
+    for console, core, _needs_bios in retroarch_cores.CONSOLES:
+        if core == core_name:
+            return console, romfile
+    return None, None
+
+
 def find_grid_image_path(grid_dir, appid):
     """The vertical-grid image file for `appid` in `grid_dir`, whatever
     its extension actually is (SGDB candidates can be .png/.jpg/.webp) --
@@ -459,7 +492,9 @@ def list_gridge_shortcuts():
     """Every non-Steam shortcut Gridge itself created (matched via
     is_gridge_launch_wrapper on the exe field, never a user's own
     unrelated non-Steam shortcuts), across every Steam user profile.
-    Returns dicts with appid/name/url/user_id -- callers needing the
+    Returns dicts with appid/name/url/ra_console/ra_romfile/user_id --
+    ra_console/ra_romfile are None for anything but a RetroArch
+    shortcut (see _extract_retroarch_info). Callers needing the
     grid image should call find_grid_image_path themselves with the
     right per-user grid_dir, since two different users could each have
     their own art for a same-named shortcut."""
@@ -478,10 +513,13 @@ def list_gridge_shortcuts():
             if not is_gridge_launch_wrapper(exe):
                 continue
             launch_options = _field(entry, "LaunchOptions", "launchoptions") or ""
+            ra_console, ra_romfile = _extract_retroarch_info(launch_options)
             results.append({
                 "appid": _field(entry, "appid", "AppID"),
                 "name": _field(entry, "appname", "AppName") or "",
                 "url": _extract_launch_url(launch_options),
+                "ra_console": ra_console,
+                "ra_romfile": ra_romfile,
                 "user_id": uid,
             })
     results.sort(key=lambda r: r["name"].lower())

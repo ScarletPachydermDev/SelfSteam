@@ -1686,16 +1686,33 @@ def _poster_card_html(shortcut):
         # panel, show the shortcut's own name so the poster still reads
         # as *that* shortcut instead of an empty tile.
         art_html = f'<div class="poster-art poster-art-noimg"><span>{html.escape(name)}</span></div>'
-    # Reuses the exact same /search entry point real shortcut creation
-    # goes through -- searching by the shortcut's own already-known URL
-    # runs SGDB matching immediately (no re-typing), and picking new
-    # artwork or editing the Name field there and hitting Create Steam
-    # Shortcut replaces this shortcut in place rather than duplicating
-    # it: add_shortcut's own appid is deterministic from exe+name, and
-    # it already dedups any existing entry with the same name before
-    # writing. One "Edit" icon, not separate name/artwork ones -- both
-    # would point at this exact same page anyway.
-    edit_href = f"/search?q={urllib.parse.quote(shortcut['url'] or name)}"
+    # Reuses the exact same entry point real shortcut creation goes
+    # through for whichever tab actually made it -- /search for a URL
+    # tab shortcut, /new#tab-retroarch (with its console+romfile) for a
+    # RetroArch one -- so Edit always lands back on the right tab, pre-
+    # populated, instead of always dumping every shortcut into the URL
+    # tab regardless of how it was really created. Searching by the
+    # shortcut's own already-known URL/ROM runs SGDB matching
+    # immediately (no re-typing), and picking new artwork or editing the
+    # Name field there and hitting Create Steam Shortcut replaces this
+    # shortcut in place rather than duplicating it: add_shortcut's own
+    # appid is deterministic from exe+name, and it already dedups any
+    # existing entry with the same name before writing. One "Edit" icon,
+    # not separate name/artwork ones -- both would point at this exact
+    # same page anyway.
+    if shortcut.get("ra_console"):
+        # ra_romfile state is a path *relative* to _RA_ROOT (see
+        # _ra_safe_join/_ra_list_rows), but LaunchOptions stores the
+        # absolute path RetroArch actually needs -- feeding the absolute
+        # path back in as-is would double-join against _RA_ROOT inside
+        # _ra_safe_join and resolve to a bogus, always-missing path.
+        romfile_rel = os.path.relpath(shortcut["ra_romfile"], _RA_ROOT)
+        edit_href = _ra_url("/new", {
+            "ra_console": shortcut["ra_console"],
+            "ra_romfile": romfile_rel,
+        })
+    else:
+        edit_href = f"/search?q={urllib.parse.quote(shortcut['url'] or name)}"
     return f"""
 <div class="shortcut-poster">
   <div class="poster-frame"></div>
