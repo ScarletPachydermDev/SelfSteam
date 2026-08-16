@@ -655,6 +655,57 @@ function gridgeShowUploading(prefix) {
   var status = document.getElementById(prefix + "-upload-status");
   if (status) status.style.display = "inline-flex";
 }
+
+// Fifth deliberate JS exception: every other RA-tab interaction that
+// just changes which console/folder/file is picked (console select,
+// breadcrumbs, folder/file rows, remove-file) was still a full-page
+// reload -- a visible blink for what's conceptually a small in-place
+// edit, same complaint the source toggle already got the no-reload
+// treatment for. This fetches the exact same URL a real click would
+// have navigated to, then swaps just the RA-owned page regions in
+// place instead of replacing the whole document. Every element keeps
+// its real href/onchange-driven navigation as a fallback -- if fetch
+// ever fails (or JS is off entirely), it just behaves like a normal
+// link/auto-submit again, nothing here is the only way to reach a URL.
+var GRIDGE_RA_SWAP_IDS = [
+  "gridge-ra-tab-panel", "gridge-ra-middle", "gridge-ra-right",
+  "gridge-add-form-slot", "gridge-add-button",
+];
+
+function gridgeRaFetch(url) {
+  history.replaceState(null, "", url);
+  fetch(url)
+    .then(function (r) { if (!r.ok) throw new Error("bad status"); return r.text(); })
+    .then(function (htmlText) {
+      var doc = new DOMParser().parseFromString(htmlText, "text/html");
+      GRIDGE_RA_SWAP_IDS.forEach(function (id) {
+        var next = doc.getElementById(id);
+        var cur = document.getElementById(id);
+        if (next && cur) cur.replaceWith(next);
+      });
+      // A freshly-picked ROM's response is the loading-skeleton page
+      // (see the /new handler's ra_loading branch) carrying a <meta
+      // refresh> to the real, possibly-slow resolved URL -- a real
+      // browser would follow that automatically; here the swap above
+      // already showed its spinner, so this just fetches the follow-up
+      // itself instead of waiting for an actual page reload to do it.
+      var meta = doc.querySelector('meta[http-equiv="refresh"]');
+      var match = meta && /url=(.*)$/.exec(meta.getAttribute("content") || "");
+      if (match) gridgeRaFetch(match[1]);
+    })
+    .catch(function () { window.location.href = url; });
+}
+
+function gridgeRaNav(a) {
+  gridgeRaFetch(a.getAttribute("href"));
+  return false;
+}
+
+function gridgeRaFormNav(form) {
+  var qs = new URLSearchParams(new FormData(form)).toString();
+  var action = form.getAttribute("action").split("#")[0];
+  gridgeRaFetch(action + "?" + qs + "#tab-retroarch");
+}
 </script>
 </body></html>"""
 
@@ -932,13 +983,17 @@ def _ra_safe_join(rel_path):
 
 
 def _ra_breadcrumbs_html(rel_path, state, path_key):
+    # onclick="return gridgeRaNav(this)" here and on every other RA
+    # navigation link below: an in-place AJAX swap (see PAGE_TAIL) when
+    # JS is available, falling back to this same href as a real
+    # navigation otherwise -- the href is never just a decoy.
     parts = [p for p in rel_path.split("/") if p]
-    crumbs = [f'<a href="{_ra_url("/new", state, **{path_key: ""})}">home</a>']
+    crumbs = [f'<a href="{_ra_url("/new", state, **{path_key: ""})}" onclick="return gridgeRaNav(this)">home</a>']
     built = ""
     for part in parts:
         built += f"/{part}"
         crumbs.append(
-            f'<a href="{_ra_url("/new", state, **{path_key: built.lstrip("/")})}">{html.escape(part)}</a>'
+            f'<a href="{_ra_url("/new", state, **{path_key: built.lstrip("/")})}" onclick="return gridgeRaNav(this)">{html.escape(part)}</a>'
         )
     return " / ".join(crumbs)
 
@@ -959,7 +1014,7 @@ def _ra_list_rows(abs_path, rel_path, state, path_key, file_key):
         entry_rel = f"{rel_path}/{entry.name}".lstrip("/")
         if entry.is_dir():
             href = _ra_url("/new", state, **{path_key: entry_rel})
-            rows.append(f'<a href="{href}"><span class="folder-icon">&#128193;</span>{html.escape(entry.name)}</a>')
+            rows.append(f'<a href="{href}" onclick="return gridgeRaNav(this)"><span class="folder-icon">&#128193;</span>{html.escape(entry.name)}</a>')
         else:
             overrides = {path_key: rel_path, file_key: entry_rel}
             if file_key == "ra_romfile":
@@ -969,7 +1024,7 @@ def _ra_list_rows(abs_path, rel_path, state, path_key, file_key):
                 # already set for this exact pick.
                 overrides["ra_resolved"] = ""
             href = _ra_url("/new", state, **overrides)
-            rows.append(f'<a href="{href}"><span class="file-icon">&#128190;</span>{html.escape(entry.name)}</a>')
+            rows.append(f'<a href="{href}" onclick="return gridgeRaNav(this)"><span class="file-icon">&#128190;</span>{html.escape(entry.name)}</a>')
     return "".join(rows)
 
 
@@ -1013,7 +1068,7 @@ def _ra_picker_section(prefix, label, state):
     <label class="field-label" style="display:flex;align-items:center;gap:0.4rem;min-width:0">
       <span style="flex:0 0 auto">{label}: <span class="required-asterisk">*</span></span>
       <span class="selected-file-name">&#10003; {html.escape(os.path.basename(selected_file))}</span>
-      <a href="{remove_href}" class="remove-file-btn" title="Remove file">{_X_ICON_SVG}</a>
+      <a href="{remove_href}" class="remove-file-btn" title="Remove file" onclick="return gridgeRaNav(this)">{_X_ICON_SVG}</a>
       {upload_status}
     </label>"""
     else:
@@ -1137,8 +1192,13 @@ def _retroarch_tab_panel_html(state, chosen=None):
       <!-- Third deliberate JS exception (after the dark-mode toggle and
            login auto-submit) -- a <select> can't submit itself on
            change without it, and this is what the approved/tested demo
-           used once the "Set console" button was removed. -->
-      <select name="ra_console" onchange="this.form.submit()">
+           used once the "Set console" button was removed. Since this
+           already depends on JS to submit at all, routing that submit
+           through gridgeRaFormNav (fifth exception, see PAGE_TAIL) for
+           an in-place swap instead of a real navigation costs nothing
+           extra -- a JS-off browser was never going to auto-submit this
+           either way. -->
+      <select name="ra_console" onchange="gridgeRaFormNav(this.form)">
         {console_options}
       </select>
     </form>
@@ -1320,7 +1380,7 @@ def _ra_middle_column_html(state, matches, extra_class=""):
             rows.append(f'<a class="{cls.strip()}" href="{href}">{html.escape(m["name"])}</a>')
         list_html = f'<div class="boxed-list">{"".join(rows)}</div>'
     return f"""
-<div class="card {extra_class}">
+<div class="card {extra_class}" id="gridge-ra-middle">
   {_ra_sgdb_search_bar_html(state, matches[0] if matches else None)}
   <div class="field-group" style="flex:1;min-height:0">
     <h2>SGDB matches</h2>
@@ -1484,7 +1544,12 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
     add_form = ""
     # Always present and pinned to the bottom, per the design handoff --
     # inert (not tied to any form) until a match/artwork exists to add.
-    add_button = '<button type="button" disabled style="opacity:0.45;cursor:not-allowed">Create Steam Shortcut</button>'
+    # id="gridge-add-button" is a stable AJAX-swap target (see
+    # gridgeRaFetch/GRIDGE_RA_SWAP_IDS in PAGE_TAIL) -- unlike add_form
+    # this element always exists in every render_page code path, so it
+    # never needs a separately-wrapped placeholder the way add_form does
+    # below.
+    add_button = '<button type="button" id="gridge-add-button" disabled style="opacity:0.45;cursor:not-allowed">Create Steam Shortcut</button>'
     # The Add form is declared standalone (no visible children) and
     # everything that belongs to it -- the button, the artwork radios,
     # the active tab's own Name field -- is associated via form="..."
@@ -1502,7 +1567,7 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
   <input type="hidden" name="ra_biosfile" value="{html.escape(ra_state.get('ra_biosfile', ''))}">
 </form>
 """
-        add_button = f'<button type="submit" form="{_ADD_FORM_ID}">Create Steam Shortcut</button>'
+        add_button = f'<button type="submit" id="gridge-add-button" form="{_ADD_FORM_ID}">Create Steam Shortcut</button>'
     elif chosen is not None:
         couch_field = '<input type="hidden" name="couch_mode" value="1">' if couch_mode else ""
         # The Name field itself (see _url_tab_panel_html) is what
@@ -1518,7 +1583,7 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
   {couch_field}
 </form>
 """
-        add_button = f'<button type="submit" form="{_ADD_FORM_ID}">Create Steam Shortcut</button>'
+        add_button = f'<button type="submit" id="gridge-add-button" form="{_ADD_FORM_ID}">Create Steam Shortcut</button>'
 
     # Reloading with the exact same state discards whatever's currently
     # typed in the Name field and re-renders its default (chosen's own
@@ -1539,7 +1604,7 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
       </form>
     </div>
     <div class="tab-panel tab-panel-apps"><div class="coming-soon">Apps (Flathub/Installed) -- coming soon</div></div>
-    <div class="tab-panel tab-panel-retroarch">
+    <div class="tab-panel tab-panel-retroarch" id="gridge-ra-tab-panel">
       {_retroarch_tab_panel_html(ra_state, ra_chosen)}
     </div>
     <div class="tab-panel tab-panel-emulators"><div class="coming-soon">Emulators -- coming soon</div></div>
@@ -1574,10 +1639,15 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
 
     middle_url = _middle_column_html(query, couch_mode, browser, sgdb_q, matches, match_index, extra_class="middle-panel-url", ra_state=ra_state)
     right_url = f'<div class="card artwork-card right-panel-url">{_artwork_picker_html(candidates_by_category)}</div>'
-    right_ra = f'<div class="card artwork-card right-panel-retroarch">{ra_right_content}</div>'
+    right_ra = f'<div class="card artwork-card right-panel-retroarch" id="gridge-ra-right">{ra_right_content}</div>'
 
+    # id="gridge-add-form-slot" is a stable AJAX-swap target even when
+    # add_form itself is empty (no id of its own to grab in that case) --
+    # see gridgeRaFetch/GRIDGE_RA_SWAP_IDS in PAGE_TAIL, and add_button's
+    # own comment above
+    # for why that one didn't need the same wrapper treatment.
     return render(f"""
-{add_form}
+<div id="gridge-add-form-slot">{add_form}</div>
 {_tab_bar_targets_html()}
 <div class="gridge-columns">
   <div class="gridge-left">{left}</div>
