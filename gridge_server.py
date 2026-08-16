@@ -1002,8 +1002,18 @@ def _tab_bar_html(active_tab="tab-url"):
     # select, folder browsing, the source toggle) is a full page reload,
     # so without this the page always snapped back to showing the URL
     # tab regardless of which one the user was actually using.
+    # autocomplete="off" is load-bearing here, not decoration: browsers
+    # try to be "helpful" by restoring a form control's previous state
+    # across a reload/navigation, keyed off field structure rather than
+    # the server's own checked attribute -- same class of bug already
+    # hit once in this app (the login code field re-listing a
+    # previously-typed code), just resurfacing here now that this radio
+    # group's checked state needs to be server-controlled across real
+    # reloads instead of staying purely client-side for one page's
+    # lifetime like the original tab bar never had to worry about.
     radios = "".join(
-        f'<input type="radio" name="gridge-form-tab" id="{tab_id}" class="tab-radio"{" checked" if tab_id == active_tab else ""}>'
+        f'<input type="radio" name="gridge-form-tab" id="{tab_id}" class="tab-radio" autocomplete="off"'
+        f'{" checked" if tab_id == active_tab else ""}>'
         for tab_id, _label in _FORM_TABS
     )
     labels = "".join(f'<label for="{tab_id}" class="tab-label">{label}</label>' for tab_id, label in _FORM_TABS)
