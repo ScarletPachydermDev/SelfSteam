@@ -965,7 +965,7 @@ def _ra_picker_section(prefix, label, state):
         # rather than reserving a second line for it.
         label_row = f"""
     <label class="field-label" style="display:flex;align-items:center;gap:0.4rem;min-width:0">
-      <span style="flex:0 0 auto">{label}:</span>
+      <span style="flex:0 0 auto">{label}: <span class="required-asterisk">*</span></span>
       <span class="selected-file-name">&#10003; {html.escape(os.path.basename(selected_file))}</span>
       <a href="{remove_href}" class="remove-file-btn" title="Remove file">{_X_ICON_SVG}</a>
     </label>"""
@@ -1587,7 +1587,11 @@ def render_pending():
     for i, item in enumerate(items):
         is_removal = item.get("type") == "remove"
         action_label = "Removing" if is_removal else "Adding"
-        detail = "" if is_removal else f'<div style="color:var(--text-dim);font-size:0.85rem">{html.escape(item["url"])}</div>'
+        # item["url"] is None for RetroArch/launch_args-based items (no
+        # URL at all) -- html.escape(None) raises, which previously
+        # killed the /pending request thread with no response sent at
+        # all ("clicking the queue counter does nothing").
+        detail = "" if is_removal or not item.get("url") else f'<div style="color:var(--text-dim);font-size:0.85rem">{html.escape(item["url"])}</div>'
         rows.append(f"""
 <div class="card" style="width:100%;max-width:800px;margin:0 auto;flex-direction:row;align-items:center;justify-content:space-between">
   <div>
