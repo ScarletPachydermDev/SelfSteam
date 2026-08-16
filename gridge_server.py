@@ -644,11 +644,12 @@ function gridgeToggleSource(prefix, mode, stateKey) {
   if (hidden) hidden.value = mode;
 }
 
-// Fires on the upload form's own submit -- a multi-hundred-MB ROM over
-// real wifi can take a while, and the browser gives zero visible
-// feedback of its own during that (the previous page just sits there).
-// This runs synchronously before the browser starts navigating away, so
-// it stays visible for the whole upload; the eventual redirect (see
+// Called directly from the file input's own onchange, right before it
+// triggers the form's submit() -- a multi-hundred-MB ROM over real wifi
+// can take a while, and the browser gives zero visible feedback of its
+// own during that (the previous page just sits there). Runs
+// synchronously before the browser starts navigating away, so it stays
+// visible for the whole upload; the eventual redirect (see
 // _handle_ra_upload) replaces the page outright once it's done.
 function gridgeShowUploading(prefix) {
   var status = document.getElementById(prefix + "-upload-status");
@@ -1044,13 +1045,13 @@ def _ra_picker_section(prefix, label, state):
     # Auto-submits on pick, no separate Upload button -- same
     # onchange="this.form.submit()" pattern already used for the console
     # select, a real user-initiated change event, not scripted
-    # navigation. onsubmit fires gridgeShowUploading right before that
-    # navigation actually starts, so the indicator is visible for the
-    # whole (potentially long) upload instead of the page just sitting
-    # there looking unresponsive.
+    # navigation. gridgeShowUploading runs from onchange directly, not a
+    # form onsubmit handler -- HTMLFormElement.submit() (unlike the
+    # newer requestSubmit()) never fires the form's own submit event at
+    # all per spec, so an onsubmit handler here would silently never run.
     upload_panel = f"""
-    <form method="post" enctype="multipart/form-data" action="{upload_action}" onsubmit="gridgeShowUploading('{dom_prefix}')">
-      <input type="file" name="file" onchange="this.form.submit()">
+    <form method="post" enctype="multipart/form-data" action="{upload_action}">
+      <input type="file" name="file" onchange="gridgeShowUploading('{dom_prefix}'); this.form.submit()">
     </form>"""
 
     abs_path = _ra_safe_join(rel_path)
