@@ -434,7 +434,7 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
    tab's BIOS+ROM pickers together are tall enough to trigger exactly
    this, landing the button on top of/before its own Name field
    instead of below it. */
-.tab-panel { display: none; flex-direction: column; gap: 0.9rem; flex: 1; min-height: 0; overflow-y: auto; }
+.tab-panel { display: none; flex-direction: column; gap: 0.9rem; flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
 .tab-panel-url { display: flex; }
 #tab-apps:target ~ .gridge-columns .tab-panels .tab-panel-url,
 #tab-retroarch:target ~ .gridge-columns .tab-panels .tab-panel-url,
@@ -1066,7 +1066,7 @@ def _ra_picker_section(prefix, label, state):
         # rather than reserving a second line for it.
         label_row = f"""
     <label class="field-label" style="display:flex;align-items:center;gap:0.4rem;min-width:0">
-      <span style="flex:0 0 auto">{label}: <span class="required-asterisk">*</span></span>
+      <span style="flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{label}: <span class="required-asterisk">*</span></span>
       <span class="selected-file-name">&#10003; {html.escape(os.path.basename(selected_file))}</span>
       <a href="{remove_href}" class="remove-file-btn" title="Remove file" onclick="return gridgeRaNav(this)">{_X_ICON_SVG}</a>
       {upload_status}
@@ -1074,7 +1074,7 @@ def _ra_picker_section(prefix, label, state):
     else:
         label_row = f"""
     <label class="field-label" style="display:flex;align-items:center;gap:0.4rem;min-width:0">
-      <span style="flex:0 0 auto">{label} <span class="required-asterisk">*</span></span>
+      <span style="flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{label} <span class="required-asterisk">*</span></span>
       {upload_status}
     </label>"""
 
