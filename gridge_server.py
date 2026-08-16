@@ -387,8 +387,23 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
 #tab-emulators:checked ~ .tab-bar label[for="tab-emulators"] {
   background: #fff; color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,0.12);
 }
-.tab-panels { display: flex; flex-direction: column; }
-.tab-panel { display: none; flex-direction: column; gap: 0.9rem; }
+/* flex:1 on both so whichever tab is active can stretch to fill the
+   card -- needed so a tab that wants its own content pinned to the
+   bottom (RetroArch's Name field, right above Create Steam Shortcut)
+   has real height to grow a spacer into. The URL tab doesn't use this
+   (its own Name field sits near the top instead), so it just gets
+   blank space below its content -- same net look as before, since the
+   button was already being pushed to the card's bottom either way. */
+.tab-panels { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+/* overflow-y:auto here (not just relying on .card's own) -- without
+   it, content taller than the panel's flex-computed height doesn't
+   get clipped, it just visually spills out past the panel's own box
+   while the button (next sibling, outside .tab-panels) still lays out
+   based on that box's short height -- confirmed live, the RetroArch
+   tab's BIOS+ROM pickers together are tall enough to trigger exactly
+   this, landing the button on top of/before its own Name field
+   instead of below it. */
+.tab-panel { display: none; flex-direction: column; gap: 0.9rem; flex: 1; min-height: 0; overflow-y: auto; }
 #tab-url:checked ~ .tab-panels .tab-panel-url,
 #tab-apps:checked ~ .tab-panels .tab-panel-apps,
 #tab-retroarch:checked ~ .tab-panels .tab-panel-retroarch,
@@ -407,7 +422,11 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
 .breadcrumbs a { color: var(--accent); text-decoration: none; }
 .breadcrumbs a:hover { text-decoration: underline; }
 .folder-icon, .file-icon { flex: 0 0 auto; width: 1rem; text-align: center; }
-.picker-list { flex: 0 0 auto; max-height: 190px; overflow-y: auto; }
+/* Tighter than the URL tab's own list heights on purpose -- BIOS +
+   ROM pickers can both be visible at once (PS1 etc.), so each gets
+   less room to leave space for the Name field below without the whole
+   tab needing to scroll on a modest-height screen. */
+.picker-list { flex: 0 0 auto; max-height: 130px; overflow-y: auto; }
 /* ::file-selector-button is a real, standard CSS pseudo-element for
    the browser's own "Choose File" button (Chromium/Firefox/Safari all
    support it) -- themed to match the app's pill inputs/buttons without
@@ -874,16 +893,20 @@ def _retroarch_tab_panel_html(state, chosen=None):
     return f"""
   <div class="field-group">
     <label class="field-label">Consoles <span class="required-asterisk">*</span> <span style="color:var(--text-dim);font-weight:400;font-size:0.85rem">Flatpak RetroArch Cores</span></label>
-    <form method="get" action="/new" style="margin:0;display:flex;flex-direction:column;gap:0.5rem">
+    <form method="get" action="/new" style="margin:0">
       {hidden_fields}
-      <select name="ra_console">
+      <!-- Third deliberate JS exception (after the dark-mode toggle and
+           login auto-submit) -- a <select> can't submit itself on
+           change without it, and this is what the approved/tested demo
+           used once the "Set console" button was removed. -->
+      <select name="ra_console" onchange="this.form.submit()">
         {console_options}
       </select>
-      <button type="submit" class="secondary" style="width:auto;padding:0.5rem 1rem;font-size:0.8rem">Set console</button>
     </form>
   </div>
   {bios_block}
   {rom_block}
+  <div class="gridge-spacer"></div>
   {name_field}"""
 
 
@@ -1204,7 +1227,6 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
     </div>
     <div class="tab-panel tab-panel-emulators"><div class="coming-soon">Emulators -- coming soon</div></div>
   </div>
-  <div class="gridge-spacer"></div>
   {add_button}
 </div>
 """
