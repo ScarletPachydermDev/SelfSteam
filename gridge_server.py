@@ -736,7 +736,7 @@ def _browser_select_html(selected_browser):
   </div>"""
 
 
-def _url_tab_panel_html(query="", couch_mode=False, browser="", chosen=None, name_reset_href="/"):
+def _url_tab_panel_html(query="", couch_mode=False, browser="", chosen=None, name_reset_href="/", ra_state=None):
     resolved = service_resolver.resolve(query) if query else None
 
     # Couch Mode only makes sense for the plain youtube.com site --
@@ -789,13 +789,23 @@ def _url_tab_panel_html(query="", couch_mode=False, browser="", chosen=None, nam
     </div>
   </div>"""
 
+    # Only drops the URL tab's own state (q and everything derived from
+    # it) -- previously this went to a bare /new unconditionally, which
+    # also wiped any in-progress RetroArch console/ROM/BIOS pick sitting
+    # in the same query string, even though "Clear" here only reads as
+    # "clear the field I'm looking at." Confirmed live: that's what
+    # left a genuinely bare /new#tab-retroarch (no console, nothing)
+    # when the RetroArch tab was clicked back into afterward -- not a
+    # rendering bug, the state really was gone.
+    ra_qs = _ra_qs(ra_state) if ra_state else ""
+    clear_href = f"/new?{ra_qs}" if ra_qs else "/new"
     return f"""
   <div class="field-group">
     <label class="field-label">Streaming service or URL <span class="required-asterisk">*</span></label>
     <div class="search-field-row">
       <div class="field-with-clear">
         <input type="text" name="q" value="{html.escape(query)}" placeholder="e.g. Netflix or www.arte.tv" required autofocus>
-        <a href="/new" class="field-clear-btn" title="Clear">&#10005;</a>
+        <a href="{clear_href}" class="field-clear-btn" title="Clear">&#10005;</a>
       </div>
       <button type="submit" class="search-submit-btn" title="Search">{_SEARCH_ICON_SVG}</button>
     </div>
@@ -1370,7 +1380,7 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
   <div class="tab-panels">
     <div class="tab-panel tab-panel-url">
       <form action="/search" method="get" style="display:flex;flex-direction:column;gap:0.9rem">
-        {_url_tab_panel_html(query, couch_mode, browser, chosen, name_reset_href)}
+        {_url_tab_panel_html(query, couch_mode, browser, chosen, name_reset_href, ra_state)}
       </form>
     </div>
     <div class="tab-panel tab-panel-apps"><div class="coming-soon">Apps (Flathub/Installed) -- coming soon</div></div>
