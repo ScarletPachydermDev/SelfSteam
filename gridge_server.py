@@ -382,26 +382,40 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
    logos visible) matching the design handoff's own placeholder look. */
 .artwork-skeleton { background: var(--skeleton); border-radius: 8px; }
 .switch-row { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; }
-/* Segmented tab bar (URL / Apps / RetroArch / Emulators): a pure-CSS
-   radio hack, same technique as the sgdb-search reveal used to be --
-   no page reload needed to switch tabs, since nothing server-side
-   depends on which one is showing. */
-.tab-radio { position: absolute; opacity: 0; pointer-events: none; }
+/* Segmented tab bar (URL / Apps / RetroArch / Emulators): CSS :target,
+   not a radio hack -- no page reload needed to switch tabs (:target is
+   driven purely by the URL's own #fragment), and unlike a radio's
+   :checked state, no browser has any "helpful" previous-value
+   restoration behavior for :target, since it isn't form state at all.
+   (A radio-hack version of this shipped first and looked correct in
+   every direct test, including this project's own Chromium-based
+   testing tool, but still broke in real Firefox -- confirmed Firefox
+   restores a checked radio's state across navigation more aggressively
+   than autocomplete="off" reliably suppresses. :target sidesteps the
+   whole category of bug rather than chasing it further.) */
 .tab-bar { display: flex; gap: 4px; background: var(--bg); border-radius: 12px; padding: 4px; }
 .tab-label {
   flex: 1; padding: 0.6rem 0.25rem; border-radius: 9px; font-size: 1rem; font-weight: 600;
-  text-align: center; cursor: pointer; color: var(--text-dim);
+  text-align: center; cursor: pointer; color: var(--text-dim); text-decoration: none; display: block;
 }
-/* ~ .gridge-columns (a descendant combinator after it, not a direct
-   sibling) -- the radios live just above .gridge-columns now, not
-   nested inside the left column's own card, specifically so this same
-   :checked state can also reach the middle/right columns below (see
-   .middle-panel-retroarch etc.) -- those aren't descendants of
-   .tab-bar/.tab-panels the way the left column's own content is. */
-#tab-url:checked ~ .gridge-columns .tab-bar label[for="tab-url"],
-#tab-apps:checked ~ .gridge-columns .tab-bar label[for="tab-apps"],
-#tab-retroarch:checked ~ .gridge-columns .tab-bar label[for="tab-retroarch"],
-#tab-emulators:checked ~ .gridge-columns .tab-bar label[for="tab-emulators"] {
+/* URL is the default-active tab (also what Apps/Emulators, with no
+   content of their own yet, still fall back to showing) -- only
+   switches away when a *different* tab's own #target marker is
+   actually the current URL fragment. ~ .gridge-columns (a descendant
+   combinator after it, not a direct sibling) since the #tab-X marker
+   spans sit just above .gridge-columns (see _tab_bar_targets_html),
+   so this same :target state can also reach the middle/right columns
+   below (see .middle-panel-retroarch etc.), not just the left
+   column's own .tab-bar/.tab-panels. */
+.tab-bar a[href="#tab-url"] { background: #fff; color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
+#tab-apps:target ~ .gridge-columns .tab-bar a[href="#tab-url"],
+#tab-retroarch:target ~ .gridge-columns .tab-bar a[href="#tab-url"],
+#tab-emulators:target ~ .gridge-columns .tab-bar a[href="#tab-url"] {
+  background: transparent; color: var(--text-dim); box-shadow: none;
+}
+#tab-apps:target ~ .gridge-columns .tab-bar a[href="#tab-apps"],
+#tab-retroarch:target ~ .gridge-columns .tab-bar a[href="#tab-retroarch"],
+#tab-emulators:target ~ .gridge-columns .tab-bar a[href="#tab-emulators"] {
   background: #fff; color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,0.12);
 }
 /* flex:1 on both so whichever tab is active can stretch to fill the
@@ -421,19 +435,22 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
    this, landing the button on top of/before its own Name field
    instead of below it. */
 .tab-panel { display: none; flex-direction: column; gap: 0.9rem; flex: 1; min-height: 0; overflow-y: auto; }
-#tab-url:checked ~ .gridge-columns .tab-panels .tab-panel-url,
-#tab-apps:checked ~ .gridge-columns .tab-panels .tab-panel-apps,
-#tab-retroarch:checked ~ .gridge-columns .tab-panels .tab-panel-retroarch,
-#tab-emulators:checked ~ .gridge-columns .tab-panels .tab-panel-emulators { display: flex; }
+.tab-panel-url { display: flex; }
+#tab-apps:target ~ .gridge-columns .tab-panels .tab-panel-url,
+#tab-retroarch:target ~ .gridge-columns .tab-panels .tab-panel-url,
+#tab-emulators:target ~ .gridge-columns .tab-panels .tab-panel-url { display: none; }
+#tab-apps:target ~ .gridge-columns .tab-panels .tab-panel-apps,
+#tab-retroarch:target ~ .gridge-columns .tab-panels .tab-panel-retroarch,
+#tab-emulators:target ~ .gridge-columns .tab-panels .tab-panel-emulators { display: flex; }
 /* Middle/right columns: URL's own content is the default (also what
    Apps/Emulators fall back to showing, same as before RetroArch had
    any content of its own) -- only switches away from it when
-   RetroArch is specifically the checked tab. */
+   RetroArch is specifically the targeted tab. */
 .middle-panel-retroarch, .right-panel-retroarch { display: none; }
-#tab-retroarch:checked ~ .gridge-columns .middle-panel-url,
-#tab-retroarch:checked ~ .gridge-columns .right-panel-url { display: none; }
-#tab-retroarch:checked ~ .gridge-columns .middle-panel-retroarch,
-#tab-retroarch:checked ~ .gridge-columns .right-panel-retroarch { display: flex; }
+#tab-retroarch:target ~ .gridge-columns .middle-panel-url,
+#tab-retroarch:target ~ .gridge-columns .right-panel-url { display: none; }
+#tab-retroarch:target ~ .gridge-columns .middle-panel-retroarch,
+#tab-retroarch:target ~ .gridge-columns .right-panel-retroarch { display: flex; }
 .coming-soon { color: var(--text-dim); font-size: 0.85rem; padding: 1rem 0; text-align: center; }
 /* RetroArch tab: BIOS/ROM source toggles + embedded server file picker.
    Plain links, not a CSS-radio-hack -- that trick is client-side only
@@ -815,6 +832,16 @@ def _ra_qs(state, **overrides):
     return "&".join(f"{k}={urllib.parse.quote(str(merged[k]))}" for k in _RA_STATE_KEYS if merged.get(k))
 
 
+def _ra_url(path, state, **overrides):
+    # #tab-retroarch at the very end -- a URL fragment always has to be
+    # the last thing on the URL (anything appended after it becomes
+    # part of the fragment text, not a new query param), so this is the
+    # one place that appends it rather than baking it into _ra_qs
+    # itself, which some callers (the upload form's action=) still need
+    # to concatenate an extra query param onto afterward.
+    return f"{path}?{_ra_qs(state, **overrides)}#tab-retroarch"
+
+
 def _ra_safe_join(rel_path):
     candidate = os.path.realpath(os.path.join(_RA_ROOT, rel_path.lstrip("/")))
     root_real = os.path.realpath(_RA_ROOT)
@@ -825,12 +852,12 @@ def _ra_safe_join(rel_path):
 
 def _ra_breadcrumbs_html(rel_path, state, path_key):
     parts = [p for p in rel_path.split("/") if p]
-    crumbs = [f'<a href="/new?{_ra_qs(state, **{path_key: ""})}">home</a>']
+    crumbs = [f'<a href="{_ra_url("/new", state, **{path_key: ""})}">home</a>']
     built = ""
     for part in parts:
         built += f"/{part}"
         crumbs.append(
-            f'<a href="/new?{_ra_qs(state, **{path_key: built.lstrip("/")})}">{html.escape(part)}</a>'
+            f'<a href="{_ra_url("/new", state, **{path_key: built.lstrip("/")})}">{html.escape(part)}</a>'
         )
     return " / ".join(crumbs)
 
@@ -850,7 +877,7 @@ def _ra_list_rows(abs_path, rel_path, state, path_key, file_key):
     for entry in entries:
         entry_rel = f"{rel_path}/{entry.name}".lstrip("/")
         if entry.is_dir():
-            href = f"/new?{_ra_qs(state, **{path_key: entry_rel})}"
+            href = _ra_url("/new", state, **{path_key: entry_rel})
             rows.append(f'<a href="{href}"><span class="folder-icon">&#128193;</span>{html.escape(entry.name)}</a>')
         else:
             overrides = {path_key: rel_path, file_key: entry_rel}
@@ -860,7 +887,7 @@ def _ra_list_rows(abs_path, rel_path, state, path_key, file_key):
                 # skips straight to showing results when ra_resolved is
                 # already set for this exact pick.
                 overrides["ra_resolved"] = ""
-            href = f"/new?{_ra_qs(state, **overrides)}"
+            href = _ra_url("/new", state, **overrides)
             rows.append(f'<a href="{href}"><span class="file-icon">&#128190;</span>{html.escape(entry.name)}</a>')
     return "".join(rows)
 
@@ -873,8 +900,8 @@ def _ra_picker_section(prefix, label, state):
     source = state.get(source_key) or "local"
     selected_file = state.get(file_key, "")
 
-    upload_href = f"/new?{_ra_qs(state, **{source_key: 'upload'})}"
-    local_href = f"/new?{_ra_qs(state, **{source_key: 'local'})}"
+    upload_href = _ra_url("/new", state, **{source_key: "upload"})
+    local_href = _ra_url("/new", state, **{source_key: "local"})
     upload_cls = "source-label active" if source == "upload" else "source-label"
     local_cls = "source-label active" if source != "upload" else "source-label"
 
@@ -887,7 +914,7 @@ def _ra_picker_section(prefix, label, state):
         remove_overrides = {file_key: ""}
         if prefix == "rom":
             remove_overrides["ra_resolved"] = ""
-        remove_href = f"/new?{_ra_qs(state, **remove_overrides)}"
+        remove_href = _ra_url("/new", state, **remove_overrides)
         # Same line as the label, not its own row -- filename is
         # allowed to just get cropped by the label row's own overflow
         # rather than reserving a second line for it.
@@ -909,8 +936,11 @@ def _ra_picker_section(prefix, label, state):
         # slot isn't part of _RA_STATE_KEYS (it's specific to this one
         # upload action, not carried across other navigation), so it's
         # appended directly rather than routed through _ra_qs's own
-        # state-key filtering.
-        action = f"/new/upload?{_ra_qs(state)}&slot={prefix}"
+        # state-key filtering -- and appended *before* the #fragment
+        # (via _ra_qs directly, not _ra_url), since anything after a
+        # URL fragment becomes part of the fragment text, not a real
+        # query param the server could read.
+        action = f"/new/upload?{_ra_qs(state)}&slot={prefix}#tab-retroarch"
         panel = f"""
     <form method="post" enctype="multipart/form-data" action="{action}">
       <input type="file" name="file">
@@ -969,7 +999,7 @@ def _retroarch_tab_panel_html(state, chosen=None):
     # tab's own Name field.
     romfile = state.get("ra_romfile", "")
     name_default = chosen["name"] if chosen else (_ra_guess_name_from_filename(romfile) if romfile else "")
-    name_reset_href = f"/new?{_ra_qs(state)}"
+    name_reset_href = _ra_url("/new", state)
     name_field = f"""
   <div class="field-group">
     <label class="field-label" for="ra-name-field">Name</label>
@@ -984,7 +1014,7 @@ def _retroarch_tab_panel_html(state, chosen=None):
     return f"""
   <div class="field-group">
     <label class="field-label">Consoles <span class="required-asterisk">*</span> <span style="color:var(--text-dim);font-weight:400;font-size:0.85rem">Flatpak RetroArch Cores</span></label>
-    <form method="get" action="/new" style="margin:0">
+    <form method="get" action="/new#tab-retroarch" style="margin:0">
       {hidden_fields}
       <!-- Third deliberate JS exception (after the dark-mode toggle and
            login auto-submit) -- a <select> can't submit itself on
@@ -1004,36 +1034,27 @@ def _retroarch_tab_panel_html(state, chosen=None):
 _FORM_TABS = [("tab-url", "URL"), ("tab-apps", "Apps"), ("tab-retroarch", "RetroArch"), ("tab-emulators", "Emulators")]
 
 
-def _tab_bar_radios_html(active_tab="tab-url"):
-    # Emitted just above .gridge-columns (see render_page), not nested
-    # inside the left column's own card -- these radios now drive
-    # visibility across all three columns (see .middle-panel-retroarch
-    # etc.), not just the left column's own .tab-bar/.tab-panels, so
-    # they need to be an ancestor-level sibling those CSS ~ selectors
-    # can all reach via a descendant combinator, not scoped to one
-    # column. active_tab matters because this radio state is CSS-only,
-    # not server-persisted -- every navigation inside a tab (console
-    # select, folder browsing, the source toggle) is a full page reload,
-    # so without this the page always snapped back to showing the URL
-    # tab regardless of which one the user was actually using.
-    # autocomplete="off" is load-bearing here, not decoration: browsers
-    # try to be "helpful" by restoring a form control's previous state
-    # across a reload/navigation, keyed off field structure rather than
-    # the server's own checked attribute -- same class of bug already
-    # hit once in this app (the login code field re-listing a
-    # previously-typed code), just resurfacing here now that this radio
-    # group's checked state needs to be server-controlled across real
-    # reloads instead of staying purely client-side for one page's
-    # lifetime like the original tab bar never had to worry about.
-    return "".join(
-        f'<input type="radio" name="gridge-form-tab" id="{tab_id}" class="tab-radio" autocomplete="off"'
-        f'{" checked" if tab_id == active_tab else ""}>'
-        for tab_id, _label in _FORM_TABS
-    )
+def _tab_bar_targets_html():
+    # Emitted just above .gridge-columns (see render_page) -- empty
+    # :target anchor markers, not radio inputs. The radio-hack version
+    # of this (an <input type=radio checked> per tab, server-picking
+    # which one had "checked") looked right in every direct HTTP test
+    # and in this project's own Chromium-based testing tool, but still
+    # broke in real-world Firefox: Firefox restores a form control's
+    # previous checked state across navigation more aggressively than
+    # autocomplete="off" reliably suppresses (a known Firefox/Chromium
+    # behavior gap, not something fixable by trying harder on the
+    # attribute). :target sidesteps the whole category -- it's driven
+    # purely by whether the URL's own #fragment matches this element's
+    # id, nothing a browser could "helpfully" restore from a previous
+    # page, since there's no form state involved at all.
+    return "".join(f'<span id="{tab_id}"></span>' for tab_id, _label in _FORM_TABS)
 
 
 def _tab_bar_html():
-    labels = "".join(f'<label for="{tab_id}" class="tab-label">{label}</label>' for tab_id, label in _FORM_TABS)
+    # Plain links (#tab-url etc.), not radio-paired <label for=...> --
+    # see _tab_bar_targets_html for why this moved off form controls.
+    labels = "".join(f'<a href="#{tab_id}" class="tab-label">{label}</a>' for tab_id, label in _FORM_TABS)
     return f'<div class="tab-bar">{labels}</div>'
 
 
@@ -1129,11 +1150,11 @@ def _ra_middle_column_html(state, matches, extra_class=""):
     if not matches:
         list_html = _placeholder_matches_html()
     else:
-        qs = _ra_qs(state)
+        href = _ra_url("/new", state)
         rows = []
         for i, m in enumerate(matches):
             cls = " selected" if i == 0 else ""
-            rows.append(f'<a class="{cls.strip()}" href="/new?{qs}">{html.escape(m["name"])}</a>')
+            rows.append(f'<a class="{cls.strip()}" href="{href}">{html.escape(m["name"])}</a>')
         list_html = f'<div class="boxed-list">{"".join(rows)}</div>'
     return f"""
 <div class="card {extra_class}">
@@ -1378,7 +1399,7 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
         # to give visible feedback during a request that would
         # otherwise just leave the previous page sitting there
         # unchanged while it runs.
-        refresh_url = f"/new?{_ra_qs(ra_state, ra_resolved='1')}"
+        refresh_url = _ra_url("/new", ra_state, ra_resolved="1")
         extra_head = f'<meta http-equiv="refresh" content="0;url={html.escape(refresh_url)}">'
         ra_middle_html = _ra_middle_column_html(ra_state, [], extra_class="middle-panel-retroarch")
         ra_right_content = _ra_loading_artwork_html()
@@ -1392,7 +1413,7 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
 
     return render(f"""
 {add_form}
-{_tab_bar_radios_html("tab-retroarch" if ra_console else "tab-url")}
+{_tab_bar_targets_html()}
 <div class="gridge-columns">
   <div class="gridge-left">{left}</div>
   <div class="gridge-middle">{middle_url}{ra_middle_html}</div>
@@ -2089,7 +2110,7 @@ class Handler(BaseHTTPRequestHandler):
         overrides = {file_key: rel_path}
         if slot == "rom":
             overrides["ra_resolved"] = ""
-        self._redirect(f"/new?{_ra_qs(ra_state, **overrides)}")
+        self._redirect(_ra_url("/new", ra_state, **overrides))
 
     def _commit_pending(self):
         items = pending_queue.all_items()
