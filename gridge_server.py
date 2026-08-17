@@ -1200,15 +1200,24 @@ def _ra_picker_section(prefix, label, state):
     upload_active = "source-label active" if source == "upload" else "source-label"
     local_active = "source-label" if source == "upload" else "source-label active"
 
-    return f"""
-  <div class="field-group">
-    {label_row}
+    # Once something's picked, the toggle + upload/local browsing UI is
+    # dropped entirely rather than just left sitting there unused --
+    # the picked file is the whole point once it exists, and "Remove
+    # file" (the X on the label row above) is the one, deliberate way
+    # back to picking again, not a second browsing UI competing for
+    # attention alongside it.
+    picker_ui = "" if selected_file else f"""
     <div class="source-toggle">
       <a class="{upload_active}" href="javascript:void(0)" id="{dom_prefix}-upload-label" onclick="gridgeToggleSource('{dom_prefix}', 'upload', '{source_key}')">Upload</a>
       <a class="{local_active}" href="javascript:void(0)" id="{dom_prefix}-local-label" onclick="gridgeToggleSource('{dom_prefix}', 'local', '{source_key}')">{html.escape(_hostname())}</a>
     </div>
     <div id="{dom_prefix}-upload-panel" style="display:{upload_display}">{upload_panel}</div>
-    <div id="{dom_prefix}-local-panel" style="display:{local_display}">{local_panel}</div>
+    <div id="{dom_prefix}-local-panel" style="display:{local_display}">{local_panel}</div>"""
+
+    return f"""
+  <div class="field-group">
+    {label_row}
+    {picker_ui}
   </div>"""
 
 
@@ -1439,15 +1448,24 @@ def _em_picker_section(prefix, label, state, allow_folder=False):
     upload_active = "source-label active" if source == "upload" else "source-label"
     local_active = "source-label" if source == "upload" else "source-label active"
 
-    return f"""
-  <div class="field-group">
-    {label_row}
+    # Once something's picked, the toggle + upload/local browsing UI is
+    # dropped entirely rather than just left sitting there unused --
+    # the picked file is the whole point once it exists, and "Remove
+    # file" (the X on the label row above) is the one, deliberate way
+    # back to picking again, not a second browsing UI competing for
+    # attention alongside it.
+    picker_ui = "" if selected_file else f"""
     <div class="source-toggle">
       <a class="{upload_active}" href="javascript:void(0)" id="{dom_prefix}-upload-label" onclick="gridgeToggleSource('{dom_prefix}', 'upload', '{source_key}')">Upload</a>
       <a class="{local_active}" href="javascript:void(0)" id="{dom_prefix}-local-label" onclick="gridgeToggleSource('{dom_prefix}', 'local', '{source_key}')">{html.escape(_hostname())}</a>
     </div>
     <div id="{dom_prefix}-upload-panel" style="display:{upload_display}">{upload_panel}</div>
-    <div id="{dom_prefix}-local-panel" style="display:{local_display}">{local_panel}</div>
+    <div id="{dom_prefix}-local-panel" style="display:{local_display}">{local_panel}</div>"""
+
+    return f"""
+  <div class="field-group">
+    {label_row}
+    {picker_ui}
   </div>"""
 
 
