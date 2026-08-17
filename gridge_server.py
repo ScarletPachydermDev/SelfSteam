@@ -475,7 +475,7 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
 .source-label { flex: 1; padding: 0.55rem 0.25rem; border-radius: 9px; font-size: 0.85rem; font-weight: 600;
   text-align: center; cursor: pointer; color: var(--text-dim); text-decoration: none; display: block; }
 .source-label.active { background: #fff; color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
-.breadcrumbs { font-size: 0.8rem; color: var(--text-dim); }
+.breadcrumbs { font-size: 0.8rem; color: var(--text-dim); margin-bottom: 0.5rem; }
 .breadcrumbs a { color: var(--accent); text-decoration: none; }
 .breadcrumbs a:hover { text-decoration: underline; }
 .folder-icon, .file-icon { flex: 0 0 auto; width: 1rem; text-align: center; }
@@ -1014,9 +1014,11 @@ def _url_tab_panel_html(query="", couch_mode=False, browser="", chosen=None, nam
       <button type="submit" class="search-submit-btn" title="Search">{_SEARCH_ICON_SVG}</button>
     </div>
   </div>
-  {name_field}{couch_row}
+  {couch_row}
   {hint}
-  {_browser_select_html(browser)}"""
+  {_browser_select_html(browser)}
+  <div class="gridge-spacer"></div>
+  {name_field}"""
 
 
 # RetroArch tab: all its own state lives on /new's query string
@@ -1070,7 +1072,7 @@ def _ra_breadcrumbs_html(rel_path, state, path_key):
     # JS is available, falling back to this same href as a real
     # navigation otherwise -- the href is never just a decoy.
     parts = [p for p in rel_path.split("/") if p]
-    crumbs = [f'<a href="{_ra_url("/new", state, **{path_key: ""})}" onclick="return gridgeRaNav(this)">home</a>']
+    crumbs = [f'<a href="{_ra_url("/new", state, **{path_key: ""})}" onclick="return gridgeRaNav(this)">{html.escape(_RA_ROOT)}</a>']
     built = ""
     for part in parts:
         built += f"/{part}"
@@ -1215,7 +1217,7 @@ def _ra_picker_section(prefix, label, state):
       <a class="{upload_active}" href="javascript:void(0)" id="{dom_prefix}-upload-label" onclick="gridgeToggleSource('{dom_prefix}', 'upload', '{source_key}')">Upload</a>
       <a class="{local_active}" href="javascript:void(0)" id="{dom_prefix}-local-label" onclick="gridgeToggleSource('{dom_prefix}', 'local', '{source_key}')">{html.escape(_hostname())}</a>
     </div>
-    <div id="{dom_prefix}-upload-panel" style="display:{upload_display}">{upload_panel}</div>
+    <div id="{dom_prefix}-upload-panel" style="display:{upload_display};margin-top:0.6rem">{upload_panel}</div>
     <div id="{dom_prefix}-local-panel" style="display:{local_display}">{local_panel}</div>"""
 
     return f"""
@@ -1338,7 +1340,7 @@ def _em_breadcrumbs_html(rel_path, state, path_key):
     # local-file-browsing logic they implement isn't actually RA-
     # specific despite the name, just built there first.
     parts = [p for p in rel_path.split("/") if p]
-    crumbs = [f'<a href="{_em_url("/new", state, **{path_key: ""})}" onclick="return gridgeEmNav(this)">home</a>']
+    crumbs = [f'<a href="{_em_url("/new", state, **{path_key: ""})}" onclick="return gridgeEmNav(this)">{html.escape(_RA_ROOT)}</a>']
     built = ""
     for part in parts:
         built += f"/{part}"
@@ -1398,9 +1400,9 @@ def _em_picker_section(prefix, label, state, allow_folder=False):
         # can tell a folder pick apart from a file pick that happens to
         # share the same path; os.path.basename of a trailing-slash path
         # is otherwise just "". The home folder itself picks as a bare
-        # "/", whose basename is "" -- shown as "home" instead of a
-        # blank/confusing name.
-        display_name = os.path.basename(selected_file.rstrip("/")) or ("home" if selected_file.endswith("/") else selected_file)
+        # "/", whose basename is "" -- shown as the real absolute root
+        # path instead of a blank/confusing name.
+        display_name = os.path.basename(selected_file.rstrip("/")) or (_RA_ROOT if selected_file.endswith("/") else selected_file)
         label_row = f"""
     <label class="field-label" style="display:flex;align-items:center;gap:0.4rem;min-width:0">
       <span style="flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{label} <span class="required-asterisk">*</span></span>
@@ -1438,7 +1440,7 @@ def _em_picker_section(prefix, label, state, allow_folder=False):
         folder_href = _em_url("/new", state, **{path_key: rel_path, file_key: rel_path + "/"})
         select_folder = (
             f'<div style="margin-bottom:0.4rem;font-size:0.85rem">'
-            f'<a href="{folder_href}" onclick="return gridgeEmNav(this)">&#128193; Select current folder ({html.escape(rel_path or "home")})</a>'
+            f'<a href="{folder_href}" onclick="return gridgeEmNav(this)">&#128193; Select current folder ({html.escape(rel_path or _RA_ROOT)})</a>'
             f'</div>'
         )
     local_panel = (
@@ -1463,7 +1465,7 @@ def _em_picker_section(prefix, label, state, allow_folder=False):
       <a class="{upload_active}" href="javascript:void(0)" id="{dom_prefix}-upload-label" onclick="gridgeToggleSource('{dom_prefix}', 'upload', '{source_key}')">Upload</a>
       <a class="{local_active}" href="javascript:void(0)" id="{dom_prefix}-local-label" onclick="gridgeToggleSource('{dom_prefix}', 'local', '{source_key}')">{html.escape(_hostname())}</a>
     </div>
-    <div id="{dom_prefix}-upload-panel" style="display:{upload_display}">{upload_panel}</div>
+    <div id="{dom_prefix}-upload-panel" style="display:{upload_display};margin-top:0.6rem">{upload_panel}</div>
     <div id="{dom_prefix}-local-panel" style="display:{local_display}">{local_panel}</div>"""
 
     return f"""
@@ -1550,6 +1552,11 @@ def _emulators_tab_panel_html(state, chosen=None):
     </div>
   </div>"""
 
+    flathub_hint = (
+        '<div class="hint-row"><span class="info-icon">i</span>'
+        '<span>Emulators will be downloaded from Flathub if not installed</span></div>'
+    ) if install_source == "flathub" else ""
+
     return f"""
   <div class="field-group">
     <label class="field-label">Emulator <span class="required-asterisk">*</span></label>
@@ -1560,6 +1567,7 @@ def _emulators_tab_panel_html(state, chosen=None):
         {emulator_options}
       </select>
     </form>
+    {flathub_hint}
   </div>
   {bios_block}
   {keys_block}
@@ -1580,7 +1588,7 @@ def _em_display_term(state, chosen=None):
 
 def _em_sgdb_search_bar_html(state, chosen=None):
     display_term = _em_display_term(state, chosen)
-    clear_href = _em_url("/new", state, em_sgdb_q="")
+    clear_href = _em_url("/new", state, em_sgdb_q="", em_resolved="")
     # em_resolved dropped along with em_sgdb_q -- carrying it forward
     # would skip the /new handler's em_loading branch entirely (it only
     # triggers when em_resolved is falsy), meaning a real search term
@@ -1762,7 +1770,7 @@ def _ra_sgdb_search_bar_html(state, chosen=None):
     # _RA_STATE_KEYS, so it's just another field carried by every
     # existing RA link/form for free -- no separate threading needed.
     display_term = _ra_display_term(state, chosen)
-    clear_href = _ra_url("/new", state, ra_sgdb_q="")
+    clear_href = _ra_url("/new", state, ra_sgdb_q="", ra_resolved="")
     # ra_resolved dropped along with ra_sgdb_q -- see _em_sgdb_search_bar_
     # html's own comment on this exact same fix for the reasoning.
     hidden = _ra_hidden_fields({k: v for k, v in state.items() if k not in ("ra_sgdb_q", "ra_resolved")})
