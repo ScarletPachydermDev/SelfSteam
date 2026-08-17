@@ -18,8 +18,11 @@ AppImage toggle:
                logic has something real to filter on ahead of the first
                binary-type entry being added.
 """
+import os
 import shlex
+import shutil
 import subprocess
+import zipfile
 
 import host_exec
 
@@ -48,6 +51,15 @@ def _dolphin_args(romfile):
     return ["-b", "-C", "Dolphin.Display.Fullscreen=True", "-e", shlex.quote(romfile)]
 
 
+def _ryubing_args(romfile):
+    # -f/--fullscreen and the bare romfile positional arg, both confirmed
+    # real via Ryubing's own CommandLineState.cs (the actual CLI argument
+    # parser in its source, not guessed/assumed): "-f"/"--fullscreen"
+    # sets StartFullscreenArg, and anything not matching a known flag
+    # falls through to LaunchPathArg, i.e. a bare positional path.
+    return ["--fullscreen", shlex.quote(romfile)]
+
+
 # Keyed by the emulator's own name (not "<consoles> (<emulator>)") --
 # the dropdown shows "<name> - <consoles>" built from these two fields
 # directly (native <option> elements can't mix two text colors/weights
@@ -56,10 +68,11 @@ def _dolphin_args(romfile):
 #
 # Each entry: install_type ("flathub" for now), app_id (real Flathub
 # id), consoles (display string for the hint line), needs_bios/
-# needs_keys (whether the picker should show those extra fields at all
-# -- Dolphin needs neither), and args(romfile) -> argv (already shell-
-# quoted where needed, same "ready to append after flatpak run
-# <app_id>" contract as retroarch_cores.launch_args).
+# needs_keys/needs_firmware (whether the picker should show those extra
+# fields at all -- Dolphin needs none of them, Ryubing needs keys and
+# firmware but not a traditional "BIOS"), and args(romfile) -> argv
+# (already shell-quoted where needed, same "ready to append after
+# flatpak run <app_id>" contract as retroarch_cores.launch_args).
 EMULATORS = {
     "Dolphin": {
         "install_type": "flathub",
@@ -67,7 +80,17 @@ EMULATORS = {
         "consoles": "Nintendo GameCube / Wii",
         "needs_bios": False,
         "needs_keys": False,
+        "needs_firmware": False,
         "args": _dolphin_args,
+    },
+    "Ryubing": {
+        "install_type": "flathub",
+        "app_id": "io.github.ryubing.Ryujinx",
+        "consoles": "Nintendo Switch",
+        "needs_bios": False,
+        "needs_keys": True,
+        "needs_firmware": True,
+        "args": _ryubing_args,
     },
 }
 
@@ -154,3 +177,130 @@ def launch_args(name, romfile):
     if not flatpak:
         return None
     return [flatpak, "run", entry["app_id"], *entry["args"](romfile)]
+
+
+def _flatpak_config_dir(app_id, *parts):
+    # Same ~/.var/app/<app-id>/config/... layout every Flatpak app's
+    # persistent data lives under (already confirmed live against
+    # RetroArch's own real install -- see retroarch_cores._cores_dir's
+    # own comment), not assumed fresh here.
+    return os.path.join(os.path.expanduser(f"~/.var/app/{app_id}/config"), *parts)
+
+
+def keys_installed(name):
+    """Whether keys already exist for this emulator -- keys/firmware are
+    a one-time install for the emulator itself, not per-shortcut state,
+    so the Emulators tab's own Create-button gate (see render_page's
+    em_ready) only requires freshly picking them when neither is
+    present yet, letting an existing shortcut's own Edit link land back
+    on the tab without permanently blocking Create just because the
+    keys picker wasn't touched again."""
+    entry = EMULATORS.get(name)
+    if not entry:
+        return False
+    keys_dir = _flatpak_config_dir(entry["app_id"], "Ryujinx", "system")
+    return os.path.isdir(keys_dir) and any(f.endswith(".keys") for f in os.listdir(keys_dir))
+
+
+def firmware_installed(name):
+    """Same idea as keys_installed, for the registered firmware dir."""
+    entry = EMULATORS.get(name)
+    if not entry:
+        return False
+    registered_dir = _flatpak_config_dir(entry["app_id"], "Ryujinx", "bis", "system", "Contents", "registered")
+    return os.path.isdir(registered_dir) and bool(os.listdir(registered_dir))
+
+
+def install_keys(name, keys_path):
+    """Copies picked keys into Ryubing's own real keys directory --
+    confirmed via its actual source (AppDataManager.KeysDirPath =
+    BaseDirPath/system, i.e. ~/.config/Ryujinx/system on Linux,
+    ~/.var/app/<id>/config/Ryujinx/system/ under the Flatpak sandbox),
+    the same directory ContentManager.InstallKeys's own real caller
+    (MainWindowViewModel.HandleKeysInstallation) uses.
+
+    keys_path can be a single file (prod.keys alone) or a directory --
+    a real Switch key dump typically has both prod.keys (console-wide)
+    and title.keys (per-game) side by side, and ContentManager.
+    InstallKeys itself supports both shapes: a single file gets copied
+    as-is, a directory gets every *.keys file inside it copied. Ported
+    directly from that same method, not guessed. Returns the list of
+    files actually copied. No parsing/verification of the keys' own
+    contents either way -- Ryubing does that itself on next launch."""
+    entry = EMULATORS.get(name)
+    if not entry:
+        raise ValueError(f"No known standalone emulator: {name}")
+    dest_dir = _flatpak_config_dir(entry["app_id"], "Ryujinx", "system")
+    os.makedirs(dest_dir, exist_ok=True)
+
+    if os.path.isdir(keys_path):
+        copied = []
+        for entry_name in sorted(os.listdir(keys_path)):
+            if not entry_name.endswith(".keys"):
+                continue
+            src = os.path.join(keys_path, entry_name)
+            if not os.path.isfile(src):
+                continue
+            dest = os.path.join(dest_dir, entry_name)
+            shutil.copy2(src, dest)
+            copied.append(dest)
+        return copied
+
+    dest = os.path.join(dest_dir, os.path.basename(keys_path))
+    shutil.copy2(keys_path, dest)
+    return [dest]
+
+
+def install_firmware_zip(name, zip_path):
+    """Installs a Switch firmware .zip the same way Ryubing's own
+    ContentManager.InstallFirmware/InstallFromZip do for a .zip package
+    specifically (confirmed via its actual source, not guessed): each
+    zip entry's own path already encodes its NCA content id (entries
+    look like "<nca-id>.nca/00" or "<nca-id>.nca/<file>"), extracted to
+    a temp "<nca-id>.nca/00" layout, then atomically swapped in as the
+    real "registered" directory
+    (~/.var/app/<id>/config/Ryujinx/bis/system/Contents/registered).
+    Deliberately skips ContentManager.VerifyFirmwarePackage -- that's
+    real NCA decryption (needs Ryubing's own loaded keyset/LibHac, not
+    safely portable here) used only to show a nicer confirmation-dialog
+    message in the GUI flow, not required for the install itself to be
+    correct. An invalid zip here just means Ryubing finds no valid
+    firmware at next launch, same failure mode as picking the wrong
+    file in the GUI's own installer."""
+    entry = EMULATORS.get(name)
+    if not entry:
+        raise ValueError(f"No known standalone emulator: {name}")
+    contents_dir = _flatpak_config_dir(entry["app_id"], "Ryujinx", "bis", "system", "Contents")
+    registered_dir = os.path.join(contents_dir, "registered")
+    temp_dir = os.path.join(contents_dir, "temp")
+
+    if os.path.isdir(temp_dir):
+        shutil.rmtree(temp_dir)
+    os.makedirs(temp_dir, exist_ok=True)
+
+    with zipfile.ZipFile(zip_path) as z:
+        for info in z.infolist():
+            if info.is_dir():
+                continue
+            cleaned = info.filename.replace(".cnmt", "")
+            parts = [p for p in cleaned.split("/") if p]
+            if not parts:
+                continue
+            nca_id = parts[-1]
+            # Fragmented NCA: the real file is one level up from a
+            # literal "00" part-file name (same check InstallFromZip's
+            # own C# does: ncaId.Equals("00") -> use the previous
+            # path component instead).
+            if nca_id == "00" and len(parts) >= 2:
+                nca_id = parts[-2]
+            if ".nca" not in nca_id:
+                continue
+            dest_dir = os.path.join(temp_dir, nca_id)
+            os.makedirs(dest_dir, exist_ok=True)
+            with z.open(info) as src, open(os.path.join(dest_dir, "00"), "wb") as dst:
+                shutil.copyfileobj(src, dst)
+
+    if os.path.isdir(registered_dir):
+        shutil.rmtree(registered_dir)
+    shutil.move(temp_dir, registered_dir)
+    return registered_dir

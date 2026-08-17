@@ -1293,6 +1293,7 @@ _EM_STATE_KEYS = [
     "em_rompath", "em_romfile", "em_romsource",
     "em_biospath", "em_biosfile", "em_biossource",
     "em_keyspath", "em_keysfile", "em_keyssource",
+    "em_firmwarepath", "em_firmwarefile", "em_firmwaresource",
     "em_resolved", "em_sgdb_q",
 ]
 
@@ -1352,7 +1353,7 @@ def _em_list_rows(abs_path, rel_path, state, path_key, file_key):
     return "".join(rows)
 
 
-def _em_picker_section(prefix, label, state):
+def _em_picker_section(prefix, label, state, allow_folder=False):
     path_key = f"em_{prefix}path"
     file_key = f"em_{prefix}file"
     source_key = f"em_{prefix}source"
@@ -1371,10 +1372,18 @@ def _em_picker_section(prefix, label, state):
         if prefix == "rom":
             remove_overrides["em_resolved"] = ""
         remove_href = _em_url("/new", state, **remove_overrides)
+        # rstrip("/") before basename -- a folder pick (see allow_folder
+        # below) is stored with a trailing "/" so install_keys-callers
+        # can tell a folder pick apart from a file pick that happens to
+        # share the same path; os.path.basename of a trailing-slash path
+        # is otherwise just "". The home folder itself picks as a bare
+        # "/", whose basename is "" -- shown as "home" instead of a
+        # blank/confusing name.
+        display_name = os.path.basename(selected_file.rstrip("/")) or ("home" if selected_file.endswith("/") else selected_file)
         label_row = f"""
     <label class="field-label" style="display:flex;align-items:center;gap:0.4rem;min-width:0">
       <span style="flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{label}: <span class="required-asterisk">*</span></span>
-      <span class="selected-file-name">&#10003; {html.escape(os.path.basename(selected_file))}</span>
+      <span class="selected-file-name">&#10003; {html.escape(display_name)}</span>
       <a href="{remove_href}" class="remove-file-btn" title="Remove file" onclick="return gridgeEmNav(this)">{_X_ICON_SVG}</a>
       {upload_status}
     </label>"""
@@ -1394,8 +1403,26 @@ def _em_picker_section(prefix, label, state):
     abs_path = _ra_safe_join(rel_path)
     if abs_path is None or not os.path.isdir(abs_path):
         abs_path, rel_path = _RA_ROOT, ""
+    # "Select this folder" is a separate action from navigating into a
+    # folder (clicking a folder row in the list below still just
+    # browses into it) -- picks the CURRENT directory being viewed
+    # itself, same idea a native file/folder dialog's own "Select
+    # Folder" button has. Only offered where it's actually useful: a
+    # real Switch key dump often has prod.keys and title.keys side by
+    # side, and Ryubing's own InstallKeys accepts a directory of *.keys
+    # files directly (ported as-is in standalone_emulators.install_keys)
+    # -- confirmed live on a throwaway test page before wiring in here.
+    select_folder = ""
+    if allow_folder:
+        folder_href = _em_url("/new", state, **{path_key: rel_path, file_key: rel_path + "/"})
+        select_folder = (
+            f'<div style="margin-bottom:0.4rem;font-size:0.85rem">'
+            f'<a href="{folder_href}" onclick="return gridgeEmNav(this)">&#128193; Select current folder ({html.escape(rel_path or "home")})</a>'
+            f'</div>'
+        )
     local_panel = (
         f'<div class="breadcrumbs">{_em_breadcrumbs_html(rel_path, state, path_key)}</div>'
+        f'{select_folder}'
         f'<div class="picker-list"><div class="boxed-list">{_em_list_rows(abs_path, rel_path, state, path_key, file_key)}</div></div>'
     )
 
@@ -1422,6 +1449,7 @@ def _emulators_tab_panel_html(state, chosen=None):
     entry = standalone_emulators.EMULATORS.get(emulator)
     needs_bios = bool(entry and entry.get("needs_bios"))
     needs_keys = bool(entry and entry.get("needs_keys"))
+    needs_firmware = bool(entry and entry.get("needs_firmware"))
 
     names = standalone_emulators.by_install_type(install_source)
     # If the previously-picked emulator doesn't belong to whichever
@@ -1460,7 +1488,7 @@ def _emulators_tab_panel_html(state, chosen=None):
         # AppImage list would just be wrong, not merely stale.
         href = _em_url(
             "/new", state, em_install_source=value, em_emulator="",
-            em_romfile="", em_biosfile="", em_keysfile="", em_resolved="",
+            em_romfile="", em_biosfile="", em_keysfile="", em_firmwarefile="", em_resolved="",
         )
         return f'<a class="{active}" href="{href}" onclick="return gridgeEmNav(this)">{text}</a>'
 
@@ -1471,7 +1499,11 @@ def _emulators_tab_panel_html(state, chosen=None):
     </div>"""
 
     bios_block = _em_picker_section("bios", "Select BIOS", state) if needs_bios else ""
-    keys_block = _em_picker_section("keys", "Select Keys", state) if needs_keys else ""
+    # allow_folder=True: a real Switch key dump usually has prod.keys
+    # and title.keys side by side -- see _em_picker_section's own
+    # comment on why "Select current folder" exists at all.
+    keys_block = _em_picker_section("keys", "Select Keys", state, allow_folder=True) if needs_keys else ""
+    firmware_block = _em_picker_section("firmware", "Select Firmware", state) if needs_firmware else ""
     rom_block = _em_picker_section("rom", "Select ROM", state)
 
     romfile = state.get("em_romfile", "")
@@ -1501,6 +1533,7 @@ def _emulators_tab_panel_html(state, chosen=None):
   </div>
   {bios_block}
   {keys_block}
+  {firmware_block}
   {rom_block}
   <div class="gridge-spacer"></div>
   {name_field}"""
@@ -1900,10 +1933,24 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
 
     em_emulator = em_state.get("em_emulator", "")
     em_entry = standalone_emulators.EMULATORS.get(em_emulator)
+    # Keys/firmware presence falls back to a real on-disk check (see
+    # standalone_emulators.keys_installed/firmware_installed) when
+    # nothing's picked in this exact request -- they're a one-time
+    # install for the emulator itself, not per-shortcut state, so
+    # re-visiting the tab (e.g. via an existing shortcut's own Edit
+    # link) shouldn't permanently block Create just because the picker
+    # wasn't touched again this time.
     em_ready = bool(
         em_entry and em_state.get("em_romfile")
         and (em_state.get("em_biosfile") if em_entry.get("needs_bios") else True)
-        and (em_state.get("em_keysfile") if em_entry.get("needs_keys") else True)
+        and (
+            (em_state.get("em_keysfile") or standalone_emulators.keys_installed(em_emulator))
+            if em_entry.get("needs_keys") else True
+        )
+        and (
+            (em_state.get("em_firmwarefile") or standalone_emulators.firmware_installed(em_emulator))
+            if em_entry.get("needs_firmware") else True
+        )
     )
 
     add_form = ""
@@ -1957,6 +2004,7 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
   <input type="hidden" name="em_romfile" value="{html.escape(em_state.get('em_romfile', ''))}">
   <input type="hidden" name="em_biosfile" value="{html.escape(em_state.get('em_biosfile', ''))}">
   <input type="hidden" name="em_keysfile" value="{html.escape(em_state.get('em_keysfile', ''))}">
+  <input type="hidden" name="em_firmwarefile" value="{html.escape(em_state.get('em_firmwarefile', ''))}">
 </form>
 """
         add_button = f'<button type="submit" id="gridge-add-button" form="{_ADD_FORM_ID}">Create Steam Shortcut</button>'
@@ -2796,6 +2844,7 @@ class Handler(BaseHTTPRequestHandler):
         # field live value -- same reasoning as ra_match_name/match_name.
         em_biosfile = (params.get("em_biosfile") or [""])[0]
         em_keysfile = (params.get("em_keysfile") or [""])[0]
+        em_firmwarefile = (params.get("em_firmwarefile") or [""])[0]
         match_name = (params.get("em_match_name") or [""])[0] or _ra_guess_name_from_filename(em_romfile) or em_emulator
 
         romfile_abs = _ra_safe_join(em_romfile)
@@ -2805,8 +2854,17 @@ class Handler(BaseHTTPRequestHandler):
         if em_biosfile and (_ra_safe_join(em_biosfile) is None or not os.path.isfile(_ra_safe_join(em_biosfile))):
             self._send_html(render_done(match_name, ok=False, error="BIOS file not found -- please pick it again"))
             return
-        if em_keysfile and (_ra_safe_join(em_keysfile) is None or not os.path.isfile(_ra_safe_join(em_keysfile))):
-            self._send_html(render_done(match_name, ok=False, error="Keys file not found -- please pick it again"))
+        # Keys can be a file *or* a folder (see _em_picker_section's
+        # "Select current folder" and standalone_emulators.install_keys,
+        # which accepts either) -- os.path.isdir alongside os.path.isfile
+        # here, unlike every other picked path in this file.
+        em_keysfile_abs = _ra_safe_join(em_keysfile) if em_keysfile else None
+        if em_keysfile and (em_keysfile_abs is None or not (os.path.isfile(em_keysfile_abs) or os.path.isdir(em_keysfile_abs))):
+            self._send_html(render_done(match_name, ok=False, error="Keys file/folder not found -- please pick it again"))
+            return
+        em_firmwarefile_abs = _ra_safe_join(em_firmwarefile) if em_firmwarefile else None
+        if em_firmwarefile and (em_firmwarefile_abs is None or not os.path.isfile(em_firmwarefile_abs)):
+            self._send_html(render_done(match_name, ok=False, error="Firmware zip not found -- please pick it again"))
             return
 
         try:
@@ -2817,12 +2875,18 @@ class Handler(BaseHTTPRequestHandler):
             # installed check short-circuits every time after that.
             if not standalone_emulators.installed(em_emulator):
                 standalone_emulators.install(em_emulator)
-            # BIOS/keys files aren't installed anywhere by Gridge yet --
-            # no standalone emulator wired up so far (just Dolphin)
-            # needs either, so there's nowhere established to put them.
-            # This needs real per-emulator handling (matching
-            # retroarch_cores.install_bios's own real target directory)
-            # once the first BIOS/keys-needing emulator is actually added.
+            # Keys/firmware installs are real, verified (not guessed)
+            # ports of Ryubing's own ContentManager.InstallKeys/
+            # InstallFirmware -- see standalone_emulators.py's own
+            # docstrings on each. Re-run every time a matching shortcut
+            # is created, same as the emulator's own install() call
+            # above -- cheap (a file copy / zip extract) once already
+            # done, and picking up an updated keys/firmware file later
+            # just needs creating the shortcut again.
+            if em_keysfile_abs:
+                standalone_emulators.install_keys(em_emulator, em_keysfile_abs)
+            if em_firmwarefile_abs:
+                standalone_emulators.install_firmware_zip(em_emulator, em_firmwarefile_abs)
 
             args = standalone_emulators.launch_args(em_emulator, romfile_abs)
             if args is None:
@@ -2895,14 +2959,18 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_em_upload(self):
         # Same streaming-upload approach as _handle_ra_upload -- see its
         # own comments for why (never buffering a multi-GB file in
-        # memory), just with a third possible slot (keys) and its own
-        # em_-prefixed state/dest dirs so an upload never collides with
-        # the RetroArch tab's own roms/bios uploads.
+        # memory), just with extra em_-only slots (keys, firmware) and
+        # its own em_-prefixed state/dest dirs so an upload never
+        # collides with the RetroArch tab's own roms/bios uploads. A
+        # folder-of-keys pick (see _em_picker_section's "Select current
+        # folder") only ever comes from the local browser, never this
+        # upload form -- a single <input type=file> can't upload a
+        # whole directory, so "keys" here always means one file.
         parsed = urllib.parse.urlparse(self.path)
         params = urllib.parse.parse_qs(parsed.query)
         em_state = _em_state_from_params(params)
         slot = (params.get("slot") or [""])[0]
-        if slot not in ("rom", "bios", "keys"):
+        if slot not in ("rom", "bios", "keys", "firmware"):
             self._send_html(render("<p>Invalid upload slot</p>"), status=400)
             return
 
