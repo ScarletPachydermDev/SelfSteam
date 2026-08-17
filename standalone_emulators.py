@@ -48,15 +48,24 @@ def _dolphin_args(romfile):
     return ["-b", "-C", "Dolphin.Display.Fullscreen=True", "-e", shlex.quote(romfile)]
 
 
-# Each entry: install_type ("flathub" for now), app_id (real Flathub id),
-# needs_bios/needs_keys (whether the picker should show those extra
-# fields at all -- Dolphin needs neither), and args(romfile) -> argv
-# (already shell-quoted where needed, same "ready to append after
-# flatpak run <app_id>" contract as retroarch_cores.launch_args).
+# Keyed by the emulator's own name (not "<consoles> (<emulator>)") --
+# the dropdown shows this directly, with each entry's own "consoles"
+# shown as a separate grey hint line underneath the select once picked
+# (native <option> elements can't mix two text colors inside one
+# option, so this couldn't be done inline the way e.g. the browser
+# picker's own label/hint pairing works).
+#
+# Each entry: install_type ("flathub" for now), app_id (real Flathub
+# id), consoles (display string for the hint line), needs_bios/
+# needs_keys (whether the picker should show those extra fields at all
+# -- Dolphin needs neither), and args(romfile) -> argv (already shell-
+# quoted where needed, same "ready to append after flatpak run
+# <app_id>" contract as retroarch_cores.launch_args).
 EMULATORS = {
-    "Nintendo GameCube / Wii (Dolphin)": {
+    "Dolphin": {
         "install_type": "flathub",
         "app_id": "org.DolphinEmu.dolphin-emu",
+        "consoles": "Nintendo GameCube / Wii",
         "needs_bios": False,
         "needs_keys": False,
         "args": _dolphin_args,

@@ -682,7 +682,7 @@ function gridgeShowInstalling(form) {
   var button = document.getElementById("gridge-add-button");
   if (!button) return;
   button.disabled = true;
-  button.innerHTML = "Installing " + form.dataset.emulator + '<span class="spinner"></span>';
+  button.innerHTML = "Downloading/Installing " + form.dataset.emulator + '<span class="spinner"></span>';
 }
 
 // Fifth deliberate JS exception: every other RA-tab interaction that
@@ -1433,6 +1433,16 @@ def _emulators_tab_panel_html(state, chosen=None):
         for k in _EM_STATE_KEYS if k != "em_emulator"
     )
 
+    # Native <option> elements can't mix two text colors inside one
+    # option, so "Dolphin" bold + "Nintendo GameCube / Wii" grey can't
+    # be one dropdown row the way the design asked for -- this shows the
+    # currently-picked emulator's own consoles as a separate grey hint
+    # line under the select instead, same .hint-row style the URL tab's
+    # own "Shortcut for x will be added" hint already uses.
+    consoles_hint = ""
+    if entry and entry.get("consoles"):
+        consoles_hint = f'<div class="hint-row"><span class="info-icon">i</span><span>{html.escape(entry["consoles"])}</span></div>'
+
     def _source_toggle_link(value, text):
         active = "source-label active" if install_source == value else "source-label"
         # Switching source clears the emulator pick (and anything
@@ -1480,6 +1490,7 @@ def _emulators_tab_panel_html(state, chosen=None):
         {emulator_options}
       </select>
     </form>
+    {consoles_hint}
   </div>
   {bios_block}
   {keys_block}
