@@ -1136,7 +1136,7 @@ def _ra_picker_section(prefix, label, state):
         # rather than reserving a second line for it.
         label_row = f"""
     <label class="field-label" style="display:flex;align-items:center;gap:0.4rem;min-width:0">
-      <span style="flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{label}: <span class="required-asterisk">*</span></span>
+      <span style="flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{label} <span class="required-asterisk">*</span></span>
       <span class="selected-file-name">&#10003; {html.escape(os.path.basename(selected_file))}</span>
       <a href="{remove_href}" class="remove-file-btn" title="Remove file" onclick="return gridgeRaNav(this)">{_X_ICON_SVG}</a>
       {upload_status}
@@ -1382,7 +1382,7 @@ def _em_picker_section(prefix, label, state, allow_folder=False):
         display_name = os.path.basename(selected_file.rstrip("/")) or ("home" if selected_file.endswith("/") else selected_file)
         label_row = f"""
     <label class="field-label" style="display:flex;align-items:center;gap:0.4rem;min-width:0">
-      <span style="flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{label}: <span class="required-asterisk">*</span></span>
+      <span style="flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{label} <span class="required-asterisk">*</span></span>
       <span class="selected-file-name">&#10003; {html.escape(display_name)}</span>
       <a href="{remove_href}" class="remove-file-btn" title="Remove file" onclick="return gridgeEmNav(this)">{_X_ICON_SVG}</a>
       {upload_status}
@@ -2323,6 +2323,16 @@ def _poster_card_html(shortcut):
         })
     else:
         edit_href = f"/search?q={urllib.parse.quote(shortcut['url'] or name)}"
+    # Removing a RetroArch/Emulators-tab shortcut also deletes its own
+    # ROM file from disk once the removal actually commits (see
+    # _commit_pending) -- never BIOS/keys/firmware, which are shared
+    # across every shortcut using that console/emulator. No separate
+    # confirmation step for this (matches how removal already queues
+    # instead of applying immediately, itself a real undo window via
+    # /pending), but the tooltip says so plainly rather than staying
+    # silent about a real, irreversible file delete.
+    has_romfile = bool(shortcut.get("ra_romfile") or shortcut.get("em_romfile"))
+    remove_title = "Remove shortcut and delete ROM file" if has_romfile else "Remove shortcut"
     return f"""
 <div class="shortcut-poster">
   <div class="poster-frame"></div>
@@ -2332,7 +2342,7 @@ def _poster_card_html(shortcut):
     <form action="/shortcuts/remove" method="post" style="margin:0">
       <input type="hidden" name="appid" value="{html.escape(str(appid))}">
       <input type="hidden" name="name" value="{html.escape(name)}">
-      <button type="submit" class="poster-icon-btn" title="Remove shortcut">{_TRASH_ICON_SVG}</button>
+      <button type="submit" class="poster-icon-btn" title="{remove_title}">{_TRASH_ICON_SVG}</button>
     </form>
   </div>
 </div>"""
@@ -2678,7 +2688,16 @@ class Handler(BaseHTTPRequestHandler):
             appid = (params.get("appid") or [""])[0]
             name = (params.get("name") or [""])[0]
             if appid:
-                pending_queue.add_removal(appid, name)
+                # Looked up fresh (not trusted from the form's own
+                # hidden fields) so this can't be spoofed into deleting
+                # an arbitrary path -- only a romfile create_webapp
+                # itself already found by scanning the real
+                # shortcuts.vdf for this exact appid ever gets deleted.
+                romfile = None
+                match = next((s for s in create_webapp.list_gridge_shortcuts() if str(s["appid"]) == appid), None)
+                if match:
+                    romfile = match.get("ra_romfile") or match.get("em_romfile")
+                pending_queue.add_removal(appid, name, romfile=romfile)
             self._redirect("/")
             return
 
@@ -3018,6 +3037,14 @@ class Handler(BaseHTTPRequestHandler):
                 for item in items:
                     if item.get("type") == "remove":
                         create_webapp.remove_gridge_shortcut(item["appid"])
+                        # isfile guard, not a bare remove -- already
+                        # gone (removed by hand, or the same shortcut
+                        # queued for removal twice) is fine, silently
+                        # a no-op rather than a failed commit over a
+                        # file that just isn't there anymore.
+                        romfile = item.get("romfile")
+                        if romfile and os.path.isfile(romfile):
+                            os.remove(romfile)
                     else:
                         create_webapp.register_steam_shortcut(
                             item["name"], item["url"], item["asset_paths"],

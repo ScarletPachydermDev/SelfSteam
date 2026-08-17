@@ -51,17 +51,23 @@ def add(name, url, couch_mode, asset_paths, browser_app_id=None, launch_args=Non
         _save(items)
 
 
-def add_removal(appid, name):
+def add_removal(appid, name, romfile=None):
     # Removals are batchable the same way additions are -- someone
     # cleaning up several old shortcuts shouldn't need a separate Steam
     # restart per deletion any more than someone adding several new
-    # ones should.
+    # ones should. romfile (RetroArch/Emulators-tab shortcuts only, see
+    # create_webapp.list_gridge_shortcuts' own ra_romfile/em_romfile)
+    # gets deleted from disk alongside the Steam shortcut itself once
+    # this actually commits -- never BIOS/keys/firmware, which are
+    # shared across every shortcut using that console/emulator, not
+    # owned by this one shortcut the way its own ROM is.
     with _lock:
         items = _load()
         items.append({
             "type": "remove",
             "appid": appid,
             "name": name,
+            "romfile": romfile,
             "queued_at": time.time(),
         })
         _save(items)
