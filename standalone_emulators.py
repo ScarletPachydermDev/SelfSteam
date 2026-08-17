@@ -2,16 +2,21 @@
 
 Unlike retroarch_cores.py -- one RetroArch app loading many interchangeable
 cores via a single -L flag -- each entry here is its own separate, self-
-contained Flatpak application with its own CLI conventions. There's no
-shared launch pattern across them, so each gets its own small
-args-builder function rather than a generic one.
+contained application with its own CLI conventions. There's no shared
+launch pattern across them, so each gets its own small args-builder
+function rather than a generic one.
 
-Deliberately Flatpak-only for now: no AppImage/native-binary discovery
-the way EmuDeck's own per-emulator wrapper scripts do (searching a known
-folder for an AppImage, falling back to Flatpak, chmod +x, etc.) --
-that's real extra complexity worth adding later if it's actually needed,
-not assumed up front. Every entry here is a Flatpak app already
-confirmed to exist on Flathub under the id listed.
+Two install_type values, matching the Emulators tab's own Flathub/
+AppImage toggle:
+  "flathub" -- a real Flatpak app, installed via `flatpak install`.
+  "binary"  -- a portable build (AppImage or tarball) resolved fresh from
+               the emulator project's own update API/release feed each
+               time (same idea as retroarch_cores.py pulling cores from
+               libretro's buildbot), not a fixed URL. Not implemented
+               yet -- installed()/install() only handle "flathub" so
+               far; the field exists now so the tab's dropdown-filtering
+               logic has something real to filter on ahead of the first
+               binary-type entry being added.
 """
 import shlex
 
@@ -35,23 +40,31 @@ def _dolphin_args(romfile):
     return ["-b", "-C", "Dolphin.Display.Fullscreen=True", "-e", shlex.quote(romfile)]
 
 
-# Each entry: app_id (real Flathub id), needs_bios (whether the picker
-# should show a BIOS/firmware field at all -- Dolphin doesn't need one),
-# and args(romfile) -> argv (already shell-quoted where needed, same
-# "ready to append after flatpak run <app_id>" contract as
-# retroarch_cores.launch_args).
+# Each entry: install_type ("flathub" for now), app_id (real Flathub id),
+# needs_bios/needs_keys (whether the picker should show those extra
+# fields at all -- Dolphin needs neither), and args(romfile) -> argv
+# (already shell-quoted where needed, same "ready to append after
+# flatpak run <app_id>" contract as retroarch_cores.launch_args).
 EMULATORS = {
     "Nintendo GameCube / Wii (Dolphin)": {
+        "install_type": "flathub",
         "app_id": "org.DolphinEmu.dolphin-emu",
         "needs_bios": False,
+        "needs_keys": False,
         "args": _dolphin_args,
     },
 }
 
 
+def by_install_type(install_type):
+    """Emulator names filtered to one install_type -- what the Emulators
+    tab's Flathub/AppImage toggle actually switches between."""
+    return [name for name, entry in EMULATORS.items() if entry["install_type"] == install_type]
+
+
 def installed(name):
     entry = EMULATORS.get(name)
-    if not entry:
+    if not entry or entry["install_type"] != "flathub":
         return False
     flatpak = host_exec.which("flatpak")
     if not flatpak:
@@ -68,6 +81,8 @@ def install(name):
     entry = EMULATORS.get(name)
     if not entry:
         raise ValueError(f"No known standalone emulator: {name}")
+    if entry["install_type"] != "flathub":
+        raise NotImplementedError(f"install_type {entry['install_type']!r} not implemented yet")
     import subprocess
     flatpak = host_exec.which("flatpak")
     subprocess.run(
@@ -78,7 +93,7 @@ def install(name):
 
 def launch_args(name, romfile):
     entry = EMULATORS.get(name)
-    if not entry:
+    if not entry or entry["install_type"] != "flathub":
         return None
     flatpak = host_exec.which("flatpak")
     if not flatpak:

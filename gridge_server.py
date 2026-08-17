@@ -50,6 +50,7 @@ import maintenance
 import pending_queue
 import multipart_upload
 import retroarch_cores
+import standalone_emulators
 import service_resolver
 import sgdb_client as sgdb
 import steam_paths
@@ -443,14 +444,19 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
 #tab-retroarch:target ~ .gridge-columns .tab-panels .tab-panel-retroarch,
 #tab-emulators:target ~ .gridge-columns .tab-panels .tab-panel-emulators { display: flex; }
 /* Middle/right columns: URL's own content is the default (also what
-   Apps/Emulators fall back to showing, same as before RetroArch had
-   any content of its own) -- only switches away from it when
-   RetroArch is specifically the targeted tab. */
-.middle-panel-retroarch, .right-panel-retroarch { display: none; }
+   Apps falls back to showing, same as before RetroArch/Emulators had
+   any content of their own) -- only switches away from it when that
+   specific tab is the targeted one. */
+.middle-panel-retroarch, .right-panel-retroarch,
+.middle-panel-emulators, .right-panel-emulators { display: none; }
 #tab-retroarch:target ~ .gridge-columns .middle-panel-url,
 #tab-retroarch:target ~ .gridge-columns .right-panel-url { display: none; }
 #tab-retroarch:target ~ .gridge-columns .middle-panel-retroarch,
 #tab-retroarch:target ~ .gridge-columns .right-panel-retroarch { display: flex; }
+#tab-emulators:target ~ .gridge-columns .middle-panel-url,
+#tab-emulators:target ~ .gridge-columns .right-panel-url { display: none; }
+#tab-emulators:target ~ .gridge-columns .middle-panel-emulators,
+#tab-emulators:target ~ .gridge-columns .right-panel-emulators { display: flex; }
 .coming-soon { color: var(--text-dim); font-size: 0.85rem; padding: 1rem 0; text-align: center; }
 /* RetroArch tab: BIOS/ROM source toggles + embedded server file picker.
    Plain links, not a CSS-radio-hack -- that trick is client-side only
@@ -635,12 +641,16 @@ function gridgeToggleSource(prefix, mode, stateKey) {
   local.style.display = mode === "upload" ? "none" : "";
   uploadLabel.className = mode === "upload" ? "source-label active" : "source-label";
   localLabel.className = mode === "upload" ? "source-label" : "source-label active";
-  // Keeps the *next* real navigation (changing console, which
-  // auto-submits its own <form> with hidden ra_romsource/ra_biossource
-  // fields baked in at page-load time) in sync with a toggle click that
-  // happened after that load -- without this, switching consoles right
-  // after toggling would silently submit the stale, pre-toggle source.
-  var hidden = document.getElementById("ra-console-form-" + stateKey);
+  // Keeps the *next* real navigation (changing console/emulator, which
+  // auto-submits its own <form> with hidden ...source fields baked in
+  // at page-load time) in sync with a toggle click that happened after
+  // that load -- without this, switching right after toggling would
+  // silently submit the stale, pre-toggle source. prefix is always
+  // "<tab>-<field>-source" (e.g. "ra-rom-source", "em-bios-source"),
+  // so its own leading tab abbreviation picks the right console-form's
+  // hidden field without this needing a tab-specific version of itself.
+  var tabPrefix = prefix.split("-")[0];
+  var hidden = document.getElementById(tabPrefix + "-console-form-" + stateKey);
   if (hidden) hidden.value = mode;
 }
 
@@ -656,45 +666,62 @@ function gridgeShowUploading(prefix) {
   if (status) status.style.display = "inline-flex";
 }
 
+// Fires on the Create Steam Shortcut button's own click when an
+// Emulators-tab shortcut is ready -- installing a Flathub/AppImage
+// emulator on first use is a real, sometimes-slow blocking step inside
+// /add (see _add_standalone_emulator_shortcut), and the button
+// otherwise gives zero feedback that the click registered while that
+// runs. Indeterminate only (a spinner + status text, no percentage) --
+// real progress tracking would need new polling infrastructure, not
+// worth it for a first version of this tab.
+function gridgeShowInstalling(button, emulatorName) {
+  button.disabled = true;
+  button.innerHTML = "Installing " + emulatorName + '<span class="spinner"></span>';
+}
+
 // Fifth deliberate JS exception: every other RA-tab interaction that
 // just changes which console/folder/file is picked (console select,
 // breadcrumbs, folder/file rows, remove-file) was still a full-page
 // reload -- a visible blink for what's conceptually a small in-place
 // edit, same complaint the source toggle already got the no-reload
-// treatment for. This fetches the exact same URL a real click would
-// have navigated to, then swaps just the RA-owned page regions in
-// place instead of replacing the whole document. Every element keeps
-// its real href/onchange-driven navigation as a fallback -- if fetch
-// ever fails (or JS is off entirely), it just behaves like a normal
-// link/auto-submit again, nothing here is the only way to reach a URL.
-var GRIDGE_RA_SWAP_IDS = [
-  "gridge-ra-tab-panel", "gridge-ra-middle", "gridge-ra-right",
-  "gridge-add-form-slot", "gridge-add-button",
-];
-
-function gridgeRaFetch(url) {
+// treatment for. gridgeTabFetch fetches the exact URL a real click
+// would have navigated to, then swaps just the given ids' page regions
+// in place instead of replacing the whole document -- shared by every
+// tab that wants this (RA, then Emulators), parameterized by which
+// element ids belong to that tab. Every element keeps its real href/
+// onchange-driven navigation as a fallback -- if fetch ever fails (or
+// JS is off entirely), it just behaves like a normal link/auto-submit
+// again, nothing here is the only way to reach a URL.
+function gridgeTabFetch(url, swapIds) {
   history.replaceState(null, "", url);
   fetch(url)
     .then(function (r) { if (!r.ok) throw new Error("bad status"); return r.text(); })
     .then(function (htmlText) {
       var doc = new DOMParser().parseFromString(htmlText, "text/html");
-      GRIDGE_RA_SWAP_IDS.forEach(function (id) {
+      swapIds.forEach(function (id) {
         var next = doc.getElementById(id);
         var cur = document.getElementById(id);
         if (next && cur) cur.replaceWith(next);
       });
       // A freshly-picked ROM's response is the loading-skeleton page
-      // (see the /new handler's ra_loading branch) carrying a <meta
-      // refresh> to the real, possibly-slow resolved URL -- a real
-      // browser would follow that automatically; here the swap above
-      // already showed its spinner, so this just fetches the follow-up
-      // itself instead of waiting for an actual page reload to do it.
+      // (see the /new handler's ra_loading/em_loading branches) carrying
+      // a <meta refresh> to the real, possibly-slow resolved URL -- a
+      // real browser would follow that automatically; here the swap
+      // above already showed its spinner, so this just fetches the
+      // follow-up itself instead of waiting for an actual page reload.
       var meta = doc.querySelector('meta[http-equiv="refresh"]');
       var match = meta && /url=(.*)$/.exec(meta.getAttribute("content") || "");
-      if (match) gridgeRaFetch(match[1]);
+      if (match) gridgeTabFetch(match[1], swapIds);
     })
     .catch(function () { window.location.href = url; });
 }
+
+var GRIDGE_RA_SWAP_IDS = [
+  "gridge-ra-tab-panel", "gridge-ra-middle", "gridge-ra-right",
+  "gridge-add-form-slot", "gridge-add-button",
+];
+
+function gridgeRaFetch(url) { gridgeTabFetch(url, GRIDGE_RA_SWAP_IDS); }
 
 function gridgeRaNav(a) {
   gridgeRaFetch(a.getAttribute("href"));
@@ -705,6 +732,24 @@ function gridgeRaFormNav(form) {
   var qs = new URLSearchParams(new FormData(form)).toString();
   var action = form.getAttribute("action").split("#")[0];
   gridgeRaFetch(action + "?" + qs + "#tab-retroarch");
+}
+
+var GRIDGE_EM_SWAP_IDS = [
+  "gridge-em-tab-panel", "gridge-em-middle", "gridge-em-right",
+  "gridge-add-form-slot", "gridge-add-button",
+];
+
+function gridgeEmFetch(url) { gridgeTabFetch(url, GRIDGE_EM_SWAP_IDS); }
+
+function gridgeEmNav(a) {
+  gridgeEmFetch(a.getAttribute("href"));
+  return false;
+}
+
+function gridgeEmFormNav(form) {
+  var qs = new URLSearchParams(new FormData(form)).toString();
+  var action = form.getAttribute("action").split("#")[0];
+  gridgeEmFetch(action + "?" + qs + "#tab-emulators");
 }
 </script>
 </body></html>"""
@@ -782,33 +827,38 @@ def render(body, page_title="Add Steam Shortcut", show_back=True, extra_head="")
     return (head + body + tail).encode()
 
 
-def _hidden_state_fields(query, couch_mode, browser, ra_state=None):
+def _hidden_state_fields(query, couch_mode, browser, ra_state=None, em_state=None):
     fields = f'<input type="hidden" name="q" value="{html.escape(query)}">'
     if couch_mode:
         fields += '<input type="hidden" name="couch_mode" value="1">'
     if browser:
         fields += f'<input type="hidden" name="browser" value="{html.escape(browser)}">'
-    # Carries any in-progress RetroArch pick (console/ROM/BIOS) across a
-    # URL-tab-only navigation like a search submit -- without this, every
-    # normal URL tab action (typing a URL and hitting Search, picking a
+    # Carries any in-progress RetroArch/Emulators pick across a URL-tab-
+    # only navigation like a search submit -- without this, every normal
+    # URL tab action (typing a URL and hitting Search, picking a
     # different SGDB match, the SGDB override search) silently wiped
-    # whatever was chosen on the RetroArch tab, since /search never knew
-    # ra_* existed. Confirmed live as the real root cause of "SGDB search
-    # field gone" reports that survived the earlier Clear-button-only fix.
+    # whatever was chosen on another tab, since /search never knew ra_*/
+    # em_* existed. Confirmed live (for ra_*) as the real root cause of
+    # "SGDB search field gone" reports that survived an earlier Clear-
+    # button-only fix -- em_* gets the same treatment from the start.
     fields += _ra_hidden_fields(ra_state)
+    fields += _ra_hidden_fields(em_state)
     return fields
 
 
-def _ra_hidden_fields(ra_state):
-    if not ra_state:
+def _ra_hidden_fields(state):
+    # Genuinely generic despite the name (built for the RA tab first) --
+    # just turns any flat string-keyed dict into hidden inputs, reused
+    # as-is by the Emulators tab's own state too.
+    if not state:
         return ""
     return "".join(
         f'<input type="hidden" name="{k}" value="{html.escape(v)}">'
-        for k, v in ra_state.items() if v
+        for k, v in state.items() if v
     )
 
 
-def _state_qs(query, couch_mode, browser, ra_state=None, **extra):
+def _state_qs(query, couch_mode, browser, ra_state=None, em_state=None, **extra):
     qs = f"q={urllib.parse.quote(query)}"
     if couch_mode:
         qs += "&couch_mode=1"
@@ -818,11 +868,16 @@ def _state_qs(query, couch_mode, browser, ra_state=None, **extra):
         if value:
             qs += f"&{key}={urllib.parse.quote(str(value))}"
     # Same reasoning as _hidden_state_fields -- links built from this
-    # (Clear, match rows, name-reset) must not drop RetroArch state either.
+    # (Clear, match rows, name-reset) must not drop RetroArch/Emulators
+    # state either.
     if ra_state:
         ra_qs = _ra_qs(ra_state)
         if ra_qs:
             qs += f"&{ra_qs}"
+    if em_state:
+        em_qs = _em_qs(em_state)
+        if em_qs:
+            qs += f"&{em_qs}"
     return qs
 
 
@@ -858,7 +913,7 @@ def _browser_select_html(selected_browser):
   </div>"""
 
 
-def _url_tab_panel_html(query="", couch_mode=False, browser="", chosen=None, name_reset_href="/", ra_state=None):
+def _url_tab_panel_html(query="", couch_mode=False, browser="", chosen=None, name_reset_href="/", ra_state=None, em_state=None):
     resolved = service_resolver.resolve(query) if query else None
 
     # Couch Mode only makes sense for the plain youtube.com site --
@@ -913,14 +968,14 @@ def _url_tab_panel_html(query="", couch_mode=False, browser="", chosen=None, nam
 
     # Only drops the URL tab's own state (q and everything derived from
     # it) -- previously this went to a bare /new unconditionally, which
-    # also wiped any in-progress RetroArch console/ROM/BIOS pick sitting
-    # in the same query string, even though "Clear" here only reads as
-    # "clear the field I'm looking at." Confirmed live: that's what
-    # left a genuinely bare /new#tab-retroarch (no console, nothing)
-    # when the RetroArch tab was clicked back into afterward -- not a
-    # rendering bug, the state really was gone.
-    ra_qs = _ra_qs(ra_state) if ra_state else ""
-    clear_href = f"/new?{ra_qs}" if ra_qs else "/new"
+    # also wiped any in-progress RetroArch/Emulators pick sitting in the
+    # same query string, even though "Clear" here only reads as "clear
+    # the field I'm looking at." Confirmed live (for ra_*) as what left
+    # a genuinely bare /new#tab-retroarch (no console, nothing) when
+    # that tab was clicked back into afterward -- not a rendering bug,
+    # the state really was gone. em_* gets the same preservation.
+    other_qs = "&".join(q for q in (_ra_qs(ra_state) if ra_state else "", _em_qs(em_state) if em_state else "") if q)
+    clear_href = f"/new?{other_qs}" if other_qs else "/new"
     return f"""
   <div class="field-group">
     <label class="field-label">Streaming service or URL <span class="required-asterisk">*</span></label>
@@ -1209,6 +1264,272 @@ def _retroarch_tab_panel_html(state, chosen=None):
   {name_field}"""
 
 
+# Emulators tab: standalone (non-RetroArch) emulators, same picker/AJAX
+# pattern as the RetroArch tab above -- state prefixed em_ instead of
+# ra_ so the two never collide, same reasoning _RA_STATE_KEYS's own
+# comment already gives for staying clear of the URL tab's q/sgdb_q/etc.
+# em_install_source picks which half of standalone_emulators.EMULATORS
+# populates the dropdown (Flathub vs AppImage) -- both source modes
+# share this exact same rom/bios/keys picker + SGDB search flow, only
+# the auto-install mechanism differs once Create Steam Shortcut is
+# clicked (see _add_standalone_emulator_shortcut).
+_EM_STATE_KEYS = [
+    "em_install_source", "em_emulator",
+    "em_rompath", "em_romfile", "em_romsource",
+    "em_biospath", "em_biosfile", "em_biossource",
+    "em_keyspath", "em_keysfile", "em_keyssource",
+    "em_resolved", "em_sgdb_q",
+]
+
+
+def _em_state_from_params(params):
+    return {key: (params.get(key) or [""])[0] for key in _EM_STATE_KEYS}
+
+
+def _em_qs(state, **overrides):
+    merged = dict(state)
+    merged.update(overrides)
+    return "&".join(f"{k}={urllib.parse.quote(str(merged[k]))}" for k in _EM_STATE_KEYS if merged.get(k))
+
+
+def _em_url(path, state, **overrides):
+    return f"{path}?{_em_qs(state, **overrides)}#tab-emulators"
+
+
+def _em_breadcrumbs_html(rel_path, state, path_key):
+    # _ra_safe_join/_RA_ROOT are reused as-is below -- the sandboxed
+    # local-file-browsing logic they implement isn't actually RA-
+    # specific despite the name, just built there first.
+    parts = [p for p in rel_path.split("/") if p]
+    crumbs = [f'<a href="{_em_url("/new", state, **{path_key: ""})}" onclick="return gridgeEmNav(this)">home</a>']
+    built = ""
+    for part in parts:
+        built += f"/{part}"
+        crumbs.append(
+            f'<a href="{_em_url("/new", state, **{path_key: built.lstrip("/")})}" onclick="return gridgeEmNav(this)">{html.escape(part)}</a>'
+        )
+    return " / ".join(crumbs)
+
+
+def _em_list_rows(abs_path, rel_path, state, path_key, file_key):
+    try:
+        entries = sorted(os.scandir(abs_path), key=lambda e: (not e.is_dir(), e.name.lower()))
+    except PermissionError:
+        return '<div class="row" style="color:var(--text-dim)">Permission denied</div>'
+    entries = [e for e in entries if not e.name.startswith(".")]
+    if not entries:
+        return '<div class="row" style="color:var(--text-dim)">Nothing here.</div>'
+    rows = []
+    for entry in entries:
+        entry_rel = f"{rel_path}/{entry.name}".lstrip("/")
+        if entry.is_dir():
+            href = _em_url("/new", state, **{path_key: entry_rel})
+            rows.append(f'<a href="{href}" onclick="return gridgeEmNav(this)"><span class="folder-icon">&#128193;</span>{html.escape(entry.name)}</a>')
+        else:
+            overrides = {path_key: rel_path, file_key: entry_rel}
+            if file_key == "em_romfile":
+                # A freshly-picked ROM needs a fresh SGDB search -- see
+                # the /new handler's em_loading branch, mirroring the
+                # RA tab's own ra_resolved reasoning exactly.
+                overrides["em_resolved"] = ""
+            href = _em_url("/new", state, **overrides)
+            rows.append(f'<a href="{href}" onclick="return gridgeEmNav(this)"><span class="file-icon">&#128190;</span>{html.escape(entry.name)}</a>')
+    return "".join(rows)
+
+
+def _em_picker_section(prefix, label, state):
+    path_key = f"em_{prefix}path"
+    file_key = f"em_{prefix}file"
+    source_key = f"em_{prefix}source"
+    rel_path = state.get(path_key, "")
+    selected_file = state.get(file_key, "")
+    dom_prefix = f"em-{prefix}-source"
+    source = state.get(source_key) or "local"
+
+    upload_status = (
+        f'<span id="{dom_prefix}-upload-status" class="upload-status" style="display:none">'
+        f'Uploading<span class="spinner"></span></span>'
+    )
+
+    if selected_file:
+        remove_overrides = {file_key: ""}
+        if prefix == "rom":
+            remove_overrides["em_resolved"] = ""
+        remove_href = _em_url("/new", state, **remove_overrides)
+        label_row = f"""
+    <label class="field-label" style="display:flex;align-items:center;gap:0.4rem;min-width:0">
+      <span style="flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{label}: <span class="required-asterisk">*</span></span>
+      <span class="selected-file-name">&#10003; {html.escape(os.path.basename(selected_file))}</span>
+      <a href="{remove_href}" class="remove-file-btn" title="Remove file" onclick="return gridgeEmNav(this)">{_X_ICON_SVG}</a>
+      {upload_status}
+    </label>"""
+    else:
+        label_row = f"""
+    <label class="field-label" style="display:flex;align-items:center;gap:0.4rem;min-width:0">
+      <span style="flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{label} <span class="required-asterisk">*</span></span>
+      {upload_status}
+    </label>"""
+
+    upload_action = f"/new/upload-em?{_em_qs(state)}&slot={prefix}#tab-emulators"
+    upload_panel = f"""
+    <form method="post" enctype="multipart/form-data" action="{upload_action}">
+      <input type="file" name="file" onchange="gridgeShowUploading('{dom_prefix}'); this.form.submit()">
+    </form>"""
+
+    abs_path = _ra_safe_join(rel_path)
+    if abs_path is None or not os.path.isdir(abs_path):
+        abs_path, rel_path = _RA_ROOT, ""
+    local_panel = (
+        f'<div class="breadcrumbs">{_em_breadcrumbs_html(rel_path, state, path_key)}</div>'
+        f'<div class="picker-list"><div class="boxed-list">{_em_list_rows(abs_path, rel_path, state, path_key, file_key)}</div></div>'
+    )
+
+    upload_display = "" if source == "upload" else "none"
+    local_display = "none" if source == "upload" else ""
+    upload_active = "source-label active" if source == "upload" else "source-label"
+    local_active = "source-label" if source == "upload" else "source-label active"
+
+    return f"""
+  <div class="field-group">
+    {label_row}
+    <div class="source-toggle">
+      <a class="{upload_active}" href="javascript:void(0)" id="{dom_prefix}-upload-label" onclick="gridgeToggleSource('{dom_prefix}', 'upload', '{source_key}')">Upload</a>
+      <a class="{local_active}" href="javascript:void(0)" id="{dom_prefix}-local-label" onclick="gridgeToggleSource('{dom_prefix}', 'local', '{source_key}')">{html.escape(_hostname())}</a>
+    </div>
+    <div id="{dom_prefix}-upload-panel" style="display:{upload_display}">{upload_panel}</div>
+    <div id="{dom_prefix}-local-panel" style="display:{local_display}">{local_panel}</div>
+  </div>"""
+
+
+def _emulators_tab_panel_html(state, chosen=None):
+    install_source = state.get("em_install_source") or "flathub"
+    emulator = state.get("em_emulator", "")
+    entry = standalone_emulators.EMULATORS.get(emulator)
+    needs_bios = bool(entry and entry.get("needs_bios"))
+    needs_keys = bool(entry and entry.get("needs_keys"))
+
+    names = standalone_emulators.by_install_type(install_source)
+    # If the previously-picked emulator doesn't belong to whichever
+    # install source is now active (e.g. toggled from Flathub to
+    # AppImage), it's simply not a valid option in this dropdown --
+    # shows "Pick your emulator" instead of a stale/wrong selection.
+    emulator_options = "".join(
+        f'<option value="{html.escape(e)}"{" selected" if e == emulator else ""}>'
+        f'{"Pick your emulator" if not e else html.escape(e)}</option>'
+        for e in [""] + names
+    )
+
+    # id="em-console-form-{k}" mirrors the RA tab's own "ra-console-
+    # form-{k}" -- see gridgeToggleSource's own comment on why its
+    # lookup only needs the leading tab prefix, not a separate function.
+    hidden_fields = "".join(
+        f'<input type="hidden" name="{k}" id="em-console-form-{k}" value="{html.escape(state.get(k, ""))}">'
+        for k in _EM_STATE_KEYS if k != "em_emulator"
+    )
+
+    def _source_toggle_link(value, text):
+        active = "source-label active" if install_source == value else "source-label"
+        # Switching source clears the emulator pick (and anything
+        # downstream of it) rather than leaving a stale selection from
+        # the other list sitting there -- Flathub/AppImage are disjoint
+        # catalogs, so "Cemu (Flathub)" being selected while viewing the
+        # AppImage list would just be wrong, not merely stale.
+        href = _em_url(
+            "/new", state, em_install_source=value, em_emulator="",
+            em_romfile="", em_biosfile="", em_keysfile="", em_resolved="",
+        )
+        return f'<a class="{active}" href="{href}" onclick="return gridgeEmNav(this)">{text}</a>'
+
+    source_toggle = f"""
+    <div class="source-toggle" style="margin-bottom:0.6rem">
+      {_source_toggle_link("flathub", "Flathub")}
+      {_source_toggle_link("appimage", "AppImage")}
+    </div>"""
+
+    bios_block = _em_picker_section("bios", "Select BIOS", state) if needs_bios else ""
+    keys_block = _em_picker_section("keys", "Select Keys", state) if needs_keys else ""
+    rom_block = _em_picker_section("rom", "Select ROM", state)
+
+    romfile = state.get("em_romfile", "")
+    name_default = chosen["name"] if chosen else (_ra_guess_name_from_filename(romfile) if romfile else "")
+    name_reset_href = _em_url("/new", state)
+    name_field = f"""
+  <div class="field-group">
+    <label class="field-label" for="em-name-field">Name</label>
+    <div class="field-with-clear">
+      <img class="name-field-icon" src="/vendor/name-field-wand.webp" alt="">
+      <input type="text" name="em_match_name" id="em-name-field" form="{_ADD_FORM_ID}"
+             value="{html.escape(name_default)}" placeholder="Shortcut name">
+      <a href="{name_reset_href}" class="field-clear-btn" title="Reset to guessed name">&#10005;</a>
+    </div>
+  </div>"""
+
+    return f"""
+  <div class="field-group">
+    <label class="field-label">Emulator <span class="required-asterisk">*</span></label>
+    {source_toggle}
+    <form method="get" action="/new#tab-emulators" style="margin:0">
+      {hidden_fields}
+      <select name="em_emulator" onchange="gridgeEmFormNav(this.form)">
+        {emulator_options}
+      </select>
+    </form>
+  </div>
+  {bios_block}
+  {keys_block}
+  {rom_block}
+  <div class="gridge-spacer"></div>
+  {name_field}"""
+
+
+def _em_display_term(state, chosen=None):
+    if state.get("em_sgdb_q"):
+        return state["em_sgdb_q"].lower()
+    if chosen and chosen.get("name"):
+        return chosen["name"].lower()
+    romfile = state.get("em_romfile")
+    return _ra_guess_name_from_filename(romfile).lower() if romfile else ""
+
+
+def _em_sgdb_search_bar_html(state, chosen=None):
+    display_term = _em_display_term(state, chosen)
+    clear_href = _em_url("/new", state, em_sgdb_q="")
+    hidden = _ra_hidden_fields({k: v for k, v in state.items() if k != "em_sgdb_q"})
+    return f"""
+<form action="/new#tab-emulators" method="get">
+  {hidden}
+  <div class="search-field-row">
+    <div class="field-with-clear">
+      <input type="text" name="em_sgdb_q" value="{html.escape(display_term)}" placeholder="SGDB search">
+      <a href="{clear_href}" class="field-clear-btn" title="Clear">&#10005;</a>
+    </div>
+    <button type="submit" class="search-submit-btn" title="Search">{_SEARCH_ICON_SVG}</button>
+  </div>
+</form>
+"""
+
+
+def _em_middle_column_html(state, matches, extra_class=""):
+    if not matches:
+        list_html = _placeholder_matches_html()
+    else:
+        href = _em_url("/new", state)
+        rows = []
+        for i, m in enumerate(matches):
+            cls = " selected" if i == 0 else ""
+            rows.append(f'<a class="{cls.strip()}" href="{href}">{html.escape(m["name"])}</a>')
+        list_html = f'<div class="boxed-list">{"".join(rows)}</div>'
+    return f"""
+<div class="card {extra_class}" id="gridge-em-middle">
+  {_em_sgdb_search_bar_html(state, matches[0] if matches else None)}
+  <div class="field-group" style="flex:1;min-height:0">
+    <h2>SGDB matches</h2>
+    {list_html}
+  </div>
+</div>
+"""
+
+
 _FORM_TABS = [("tab-url", "URL"), ("tab-apps", "Apps"), ("tab-retroarch", "RetroArch"), ("tab-emulators", "Emulators")]
 
 
@@ -1262,7 +1583,7 @@ def _display_name(query, sgdb_q):
     return resolved.name.lower() if resolved and resolved.name else ""
 
 
-def _sgdb_search_bar_html(query, couch_mode, browser, sgdb_q, ra_state=None):
+def _sgdb_search_bar_html(query, couch_mode, browser, sgdb_q, ra_state=None, em_state=None):
     # Always-visible override search (matches the design handoff's
     # column-2 "SGDB search" pill) rather than the earlier magnifying-
     # glass reveal -- lets a user search SteamGridDB directly,
@@ -1274,10 +1595,10 @@ def _sgdb_search_bar_html(query, couch_mode, browser, sgdb_q, ra_state=None):
     # touched -- same behavior planned for the Apps/RetroArch/Emulators
     # tabs once they're built out, not just the URL tab.
     display_term = _display_name(query, sgdb_q)
-    clear_href = f"/search?{_state_qs(query, couch_mode, browser, ra_state)}"
+    clear_href = f"/search?{_state_qs(query, couch_mode, browser, ra_state, em_state)}"
     return f"""
 <form action="/search" method="get">
-  {_hidden_state_fields(query, couch_mode, browser, ra_state)}
+  {_hidden_state_fields(query, couch_mode, browser, ra_state, em_state)}
   <div class="search-field-row">
     <div class="field-with-clear">
       <input type="text" name="sgdb_q" value="{html.escape(display_term)}" placeholder="SGDB search">
@@ -1289,7 +1610,7 @@ def _sgdb_search_bar_html(query, couch_mode, browser, sgdb_q, ra_state=None):
 """
 
 
-def _match_list_html(query, couch_mode, browser, sgdb_q, matches, match_index, ra_state=None):
+def _match_list_html(query, couch_mode, browser, sgdb_q, matches, match_index, ra_state=None, em_state=None):
     # Plain links, not radio+submit-button: clicking one navigates
     # straight to that match's artwork (a real GET, no JS needed) --
     # a radio selection alone doesn't submit anything by itself, which
@@ -1299,7 +1620,7 @@ def _match_list_html(query, couch_mode, browser, sgdb_q, matches, match_index, r
     # is chosen (the Name field, back in the left column, follows the
     # picked match's own name instead).
     rows = []
-    qs = _state_qs(query, couch_mode, browser, ra_state, sgdb_q=sgdb_q)
+    qs = _state_qs(query, couch_mode, browser, ra_state, em_state, sgdb_q=sgdb_q)
     for i, m in enumerate(matches):
         selected = " selected" if i == match_index else ""
         rows.append(
@@ -1308,11 +1629,11 @@ def _match_list_html(query, couch_mode, browser, sgdb_q, matches, match_index, r
     return f'<div class="boxed-list">{"".join(rows)}</div>'
 
 
-def _middle_column_html(query, couch_mode, browser, sgdb_q, matches, match_index, extra_class="", ra_state=None):
-    list_html = _match_list_html(query, couch_mode, browser, sgdb_q, matches, match_index, ra_state) if matches else _placeholder_matches_html()
+def _middle_column_html(query, couch_mode, browser, sgdb_q, matches, match_index, extra_class="", ra_state=None, em_state=None):
+    list_html = _match_list_html(query, couch_mode, browser, sgdb_q, matches, match_index, ra_state, em_state) if matches else _placeholder_matches_html()
     return f"""
 <div class="card {extra_class}">
-  {_sgdb_search_bar_html(query, couch_mode, browser, sgdb_q, ra_state)}
+  {_sgdb_search_bar_html(query, couch_mode, browser, sgdb_q, ra_state, em_state)}
   <div class="field-group" style="flex:1;min-height:0">
     <h2>SGDB matches</h2>
     {list_html}
@@ -1516,23 +1837,27 @@ def _artwork_picker_html(candidates_by_category):
 
 def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None, match_index=0,
                  candidates_by_category=None, resolved_url=None, chosen=None,
-                 ra_state=None, ra_candidates_by_category=None, ra_chosen=None, ra_loading=False):
+                 ra_state=None, ra_candidates_by_category=None, ra_chosen=None, ra_loading=False,
+                 em_state=None, em_candidates_by_category=None, em_chosen=None, em_loading=False):
     """Single page-builder for every state (home, unresolved input, no
     matches, a real workspace) -- all three columns are always present
     and always fully populated (placeholders when empty), rather than
     each state having its own bespoke partial layout.
 
-    ra_* covers the RetroArch tab's own flow, entirely separate from
-    the URL tab's (different state, different match_name field --
-    ra_match_name -- so the two never collide as same-named inputs on
-    the same Add form). Only one flow drives the single shared Add
-    button/artwork column at a time: RetroArch takes priority once its
-    own console+ROM(+BIOS) picks are complete, since that's the more
-    specific signal that it's the one actually in progress."""
+    ra_*/em_* cover the RetroArch/Emulators tabs' own flows, entirely
+    separate from the URL tab's and each other (different state,
+    different match_name fields -- ra_match_name/em_match_name -- so
+    none of the three ever collide as same-named inputs on the same Add
+    form). Only one flow drives the single shared Add button/artwork
+    column at a time: RetroArch, then Emulators, take priority over the
+    URL tab once their own required picks are complete, since that's
+    the more specific signal one of them is actually in progress."""
     matches = matches or []
     candidates_by_category = candidates_by_category or {}
     ra_state = ra_state or {}
     ra_candidates_by_category = ra_candidates_by_category or {}
+    em_state = em_state or {}
+    em_candidates_by_category = em_candidates_by_category or {}
 
     ra_console = ra_state.get("ra_console", "")
     ra_needs_bios = ra_console in retroarch_cores.CONSOLES_NEEDING_BIOS
@@ -1541,14 +1866,22 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
         and (ra_state.get("ra_biosfile") if ra_needs_bios else True)
     )
 
+    em_emulator = em_state.get("em_emulator", "")
+    em_entry = standalone_emulators.EMULATORS.get(em_emulator)
+    em_ready = bool(
+        em_entry and em_state.get("em_romfile")
+        and (em_state.get("em_biosfile") if em_entry.get("needs_bios") else True)
+        and (em_state.get("em_keysfile") if em_entry.get("needs_keys") else True)
+    )
+
     add_form = ""
     # Always present and pinned to the bottom, per the design handoff --
     # inert (not tied to any form) until a match/artwork exists to add.
     # id="gridge-add-button" is a stable AJAX-swap target (see
-    # gridgeRaFetch/GRIDGE_RA_SWAP_IDS in PAGE_TAIL) -- unlike add_form
-    # this element always exists in every render_page code path, so it
-    # never needs a separately-wrapped placeholder the way add_form does
-    # below.
+    # gridgeTabFetch/GRIDGE_RA_SWAP_IDS/GRIDGE_EM_SWAP_IDS in PAGE_TAIL)
+    # -- unlike add_form this element always exists in every render_page
+    # code path, so it never needs a separately-wrapped placeholder the
+    # way add_form does below.
     add_button = '<button type="button" id="gridge-add-button" disabled style="opacity:0.45;cursor:not-allowed">Create Steam Shortcut</button>'
     # The Add form is declared standalone (no visible children) and
     # everything that belongs to it -- the button, the artwork radios,
@@ -1568,6 +1901,26 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
 </form>
 """
         add_button = f'<button type="submit" id="gridge-add-button" form="{_ADD_FORM_ID}">Create Steam Shortcut</button>'
+    elif em_ready:
+        add_form = f"""
+<form id="{_ADD_FORM_ID}" action="/add" method="post">
+  <input type="hidden" name="em_emulator" value="{html.escape(em_emulator)}">
+  <input type="hidden" name="em_romfile" value="{html.escape(em_state.get('em_romfile', ''))}">
+  <input type="hidden" name="em_biosfile" value="{html.escape(em_state.get('em_biosfile', ''))}">
+  <input type="hidden" name="em_keysfile" value="{html.escape(em_state.get('em_keysfile', ''))}">
+</form>
+"""
+        # onclick here (not the form's own onsubmit, which never fires
+        # for the ROM/BIOS upload forms' this.form.submit() calls but
+        # DOES fire for a real submit-button click like this one) shows
+        # the same "doing something, please wait" feedback the upload
+        # indicator already has -- installing a Flathub/AppImage
+        # emulator on first use can take a while, and the button
+        # otherwise gives zero sign the click registered.
+        add_button = (
+            f'<button type="submit" id="gridge-add-button" form="{_ADD_FORM_ID}" '
+            f'onclick="gridgeShowInstalling(this, {html.escape(json.dumps(em_emulator))})">Create Steam Shortcut</button>'
+        )
     elif chosen is not None:
         couch_field = '<input type="hidden" name="couch_mode" value="1">' if couch_mode else ""
         # The Name field itself (see _url_tab_panel_html) is what
@@ -1591,7 +1944,7 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
     # search box's own clear button already has, not a literal empty
     # field (there's no way to distinguish "explicitly cleared" from
     # "never touched" without JS to track that).
-    name_reset_href = f"/search?{_state_qs(query, couch_mode, browser, ra_state, sgdb_q=sgdb_q)}&match_index={match_index}"
+    name_reset_href = f"/search?{_state_qs(query, couch_mode, browser, ra_state, em_state, sgdb_q=sgdb_q)}&match_index={match_index}"
 
     left = f"""
 <div class="card">
@@ -1600,19 +1953,22 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
     <div class="tab-panel tab-panel-url">
       <form action="/search" method="get" style="display:flex;flex-direction:column;gap:0.9rem">
         {_ra_hidden_fields(ra_state)}
-        {_url_tab_panel_html(query, couch_mode, browser, chosen, name_reset_href, ra_state)}
+        {_ra_hidden_fields(em_state)}
+        {_url_tab_panel_html(query, couch_mode, browser, chosen, name_reset_href, ra_state, em_state)}
       </form>
     </div>
     <div class="tab-panel tab-panel-apps"><div class="coming-soon">Apps (Flathub/Installed) -- coming soon</div></div>
     <div class="tab-panel tab-panel-retroarch" id="gridge-ra-tab-panel">
       {_retroarch_tab_panel_html(ra_state, ra_chosen)}
     </div>
-    <div class="tab-panel tab-panel-emulators"><div class="coming-soon">Emulators -- coming soon</div></div>
+    <div class="tab-panel tab-panel-emulators" id="gridge-em-tab-panel">
+      {_emulators_tab_panel_html(em_state, em_chosen)}
+    </div>
   </div>
   {add_button}
 </div>
 """
-    # Both flavors of middle/right are always rendered, CSS (not this
+    # Every flavor of middle/right is always rendered, CSS (not this
     # branching) decides which one is visible -- the tab bar itself
     # switches tabs purely client-side with no reload, so a middle/
     # right column "chosen" server-side by which flow the *last actual
@@ -1637,22 +1993,35 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
         ra_middle_html = _ra_middle_column_html(ra_state, [ra_chosen] if ra_chosen else [], extra_class="middle-panel-retroarch")
         ra_right_content = _artwork_picker_html(ra_candidates_by_category)
 
-    middle_url = _middle_column_html(query, couch_mode, browser, sgdb_q, matches, match_index, extra_class="middle-panel-url", ra_state=ra_state)
+    if em_loading:
+        em_refresh_url = _em_url("/new", em_state, em_resolved="1")
+        # ra_loading and em_loading are never both true at once (each
+        # only triggers from that tab's own /new request), so the plain
+        # "last one wins" overwrite here never actually loses one.
+        extra_head = f'<meta http-equiv="refresh" content="0;url={html.escape(em_refresh_url)}">'
+        em_middle_html = _em_middle_column_html(em_state, [], extra_class="middle-panel-emulators")
+        em_right_content = _ra_loading_artwork_html()
+    else:
+        em_middle_html = _em_middle_column_html(em_state, [em_chosen] if em_chosen else [], extra_class="middle-panel-emulators")
+        em_right_content = _artwork_picker_html(em_candidates_by_category)
+
+    middle_url = _middle_column_html(query, couch_mode, browser, sgdb_q, matches, match_index, extra_class="middle-panel-url", ra_state=ra_state, em_state=em_state)
     right_url = f'<div class="card artwork-card right-panel-url">{_artwork_picker_html(candidates_by_category)}</div>'
     right_ra = f'<div class="card artwork-card right-panel-retroarch" id="gridge-ra-right">{ra_right_content}</div>'
+    right_em = f'<div class="card artwork-card right-panel-emulators" id="gridge-em-right">{em_right_content}</div>'
 
     # id="gridge-add-form-slot" is a stable AJAX-swap target even when
     # add_form itself is empty (no id of its own to grab in that case) --
-    # see gridgeRaFetch/GRIDGE_RA_SWAP_IDS in PAGE_TAIL, and add_button's
-    # own comment above
-    # for why that one didn't need the same wrapper treatment.
+    # see gridgeTabFetch/GRIDGE_RA_SWAP_IDS/GRIDGE_EM_SWAP_IDS in
+    # PAGE_TAIL, and add_button's own comment above for why that one
+    # didn't need the same wrapper treatment.
     return render(f"""
 <div id="gridge-add-form-slot">{add_form}</div>
 {_tab_bar_targets_html()}
 <div class="gridge-columns">
   <div class="gridge-left">{left}</div>
-  <div class="gridge-middle">{middle_url}{ra_middle_html}</div>
-  <div class="gridge-right">{right_url}{right_ra}</div>
+  <div class="gridge-middle">{middle_url}{ra_middle_html}{em_middle_html}</div>
+  <div class="gridge-right">{right_url}{right_ra}{right_em}</div>
 </div>
 """, extra_head=extra_head)
 
@@ -2034,15 +2403,24 @@ class Handler(BaseHTTPRequestHandler):
 
         if parsed.path == "/new":
             ra_state = _ra_state_from_params(params)
+            em_state = _em_state_from_params(params)
             romfile = ra_state.get("ra_romfile")
-            # A freshly-picked ROM (ra_resolved not yet set for it --
-            # see _ra_list_rows, which clears ra_resolved on every new
-            # pick) gets the fast loading response first: the real SGDB
-            # search can take a few seconds, and skipping straight to it
-            # left the previous page sitting there unchanged the whole
-            # time, easy to mistake for the click not registering.
+            em_romfile = em_state.get("em_romfile")
+            # A freshly-picked ROM (ra_resolved/em_resolved not yet set
+            # for it -- see _ra_list_rows/_em_list_rows, which clear it
+            # on every new pick) gets the fast loading response first:
+            # the real SGDB search can take a few seconds, and skipping
+            # straight to it left the previous page sitting there
+            # unchanged the whole time, easy to mistake for the click
+            # not registering. Only one of ra_*/em_* is ever the one
+            # actually driving a given request (each tab's own links
+            # only ever set its own romfile), so checking ra's first and
+            # falling through to em's never actually races.
             if romfile and not ra_state.get("ra_resolved"):
-                self._send_html(render_page(ra_state=ra_state, ra_loading=True))
+                self._send_html(render_page(ra_state=ra_state, ra_loading=True, em_state=em_state))
+                return
+            if em_romfile and not em_state.get("em_resolved"):
+                self._send_html(render_page(ra_state=ra_state, em_state=em_state, em_loading=True))
                 return
             ra_chosen = None
             ra_candidates = {}
@@ -2059,8 +2437,18 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 ra_chosen = ra_matches[0]
                 ra_candidates = _fetch_candidates(ra_chosen["id"])
+            em_chosen = None
+            em_candidates = {}
+            if em_romfile:
+                em_guessed = _ra_guess_name_from_filename(em_romfile)
+                em_matches = _resolve_matches(
+                    em_guessed, service_resolver.Resolved(name=em_guessed), em_state.get("em_sgdb_q"),
+                )
+                em_chosen = em_matches[0]
+                em_candidates = _fetch_candidates(em_chosen["id"])
             self._send_html(render_page(
                 ra_state=ra_state, ra_candidates_by_category=ra_candidates, ra_chosen=ra_chosen,
+                em_state=em_state, em_candidates_by_category=em_candidates, em_chosen=em_chosen,
             ))
             return
 
@@ -2084,14 +2472,16 @@ class Handler(BaseHTTPRequestHandler):
             match_index = int((params.get("match_index") or ["0"])[0])
             # Every normal URL tab interaction (Search, picking a match,
             # the SGDB override) goes through this route -- without
-            # reading and re-threading ra_state, each one silently wiped
-            # any in-progress RetroArch pick, which is what actually made
-            # the SGDB search field "disappear" after visiting the
-            # RetroArch tab (not a rendering bug -- the state was really
-            # gone by the time /new#tab-retroarch was reached again).
+            # reading and re-threading ra_state/em_state, each one
+            # silently wiped any in-progress RetroArch/Emulators pick,
+            # which is what actually made the SGDB search field
+            # "disappear" after visiting the RetroArch tab (not a
+            # rendering bug -- the state was really gone by the time
+            # /new#tab-retroarch was reached again).
             ra_state = _ra_state_from_params(params)
+            em_state = _em_state_from_params(params)
             if not query:
-                self._send_html(render_page(browser=browser, ra_state=ra_state))
+                self._send_html(render_page(browser=browser, ra_state=ra_state, em_state=em_state))
                 return
 
             # Recognized service (e.g. "netflix" -> netflix.com) or a
@@ -2104,7 +2494,7 @@ class Handler(BaseHTTPRequestHandler):
             # an invalid "https://netflix" (missing .com) shortcut URL.
             resolved = service_resolver.resolve(query)
             if not resolved.url:
-                self._send_html(render_page(query, couch_mode, browser, ra_state=ra_state))
+                self._send_html(render_page(query, couch_mode, browser, ra_state=ra_state, em_state=em_state))
                 return
 
             # sgdb_q (the magnifying-glass direct search) overrides
@@ -2117,7 +2507,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_html(render_page(
                 query, couch_mode, browser, sgdb_q, matches, match_index,
                 candidates, resolved.url, chosen=matches[match_index],
-                ra_state=ra_state,
+                ra_state=ra_state, em_state=em_state,
             ))
             return
 
@@ -2139,6 +2529,16 @@ class Handler(BaseHTTPRequestHandler):
                 self._redirect("/login")
                 return
             self._handle_ra_upload()
+            return
+
+        if parsed.path == "/new/upload-em":
+            # Same streaming-upload reasoning as /new/upload above, for
+            # the Emulators tab's own ROM/BIOS/keys pickers.
+            if not self._is_authenticated():
+                auth_display.ensure_shown()
+                self._redirect("/login")
+                return
+            self._handle_em_upload()
             return
 
         length = int(self.headers.get("Content-Length", 0))
@@ -2244,6 +2644,12 @@ class Handler(BaseHTTPRequestHandler):
             self._add_retroarch_shortcut(params, ra_console, ra_romfile)
             return
 
+        em_emulator = (params.get("em_emulator") or [""])[0]
+        em_romfile = (params.get("em_romfile") or [""])[0]
+        if em_emulator and em_romfile:
+            self._add_standalone_emulator_shortcut(params, em_emulator, em_romfile)
+            return
+
         query = (params.get("query") or [""])[0]
         couch_mode = bool(params.get("couch_mode"))
         # match_name comes straight from the Name field's own live value
@@ -2337,6 +2743,54 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:  # noqa: BLE001 -- surfaced to the user, not swallowed
             self._send_html(render_done(match_name, ok=False, error=e))
 
+    def _add_standalone_emulator_shortcut(self, params, em_emulator, em_romfile):
+        # em_match_name comes straight from the Emulators tab's own Name
+        # field live value -- same reasoning as ra_match_name/match_name.
+        em_biosfile = (params.get("em_biosfile") or [""])[0]
+        em_keysfile = (params.get("em_keysfile") or [""])[0]
+        match_name = (params.get("em_match_name") or [""])[0] or _ra_guess_name_from_filename(em_romfile) or em_emulator
+
+        romfile_abs = _ra_safe_join(em_romfile)
+        if romfile_abs is None or not os.path.isfile(romfile_abs):
+            self._send_html(render_done(match_name, ok=False, error="ROM file not found -- please pick it again"))
+            return
+        if em_biosfile and (_ra_safe_join(em_biosfile) is None or not os.path.isfile(_ra_safe_join(em_biosfile))):
+            self._send_html(render_done(match_name, ok=False, error="BIOS file not found -- please pick it again"))
+            return
+        if em_keysfile and (_ra_safe_join(em_keysfile) is None or not os.path.isfile(_ra_safe_join(em_keysfile))):
+            self._send_html(render_done(match_name, ok=False, error="Keys file not found -- please pick it again"))
+            return
+
+        try:
+            # Installing the emulator itself is a one-time cost (same
+            # deliberate v1 tradeoff as RetroArch's own install above:
+            # blocking here keeps this simple, at the cost of the first
+            # click for any given emulator being slow) -- already-
+            # installed check short-circuits every time after that.
+            if not standalone_emulators.installed(em_emulator):
+                standalone_emulators.install(em_emulator)
+            # BIOS/keys files aren't installed anywhere by Gridge yet --
+            # no standalone emulator wired up so far (just Dolphin)
+            # needs either, so there's nowhere established to put them.
+            # This needs real per-emulator handling (matching
+            # retroarch_cores.install_bios's own real target directory)
+            # once the first BIOS/keys-needing emulator is actually added.
+
+            args = standalone_emulators.launch_args(em_emulator, romfile_abs)
+            if args is None:
+                raise RuntimeError("flatpak isn't available on this host, or this emulator isn't installable yet")
+
+            slug = create_webapp.slugify(match_name)
+            selections = {}
+            for basename, _title, _fetch, _w, _h in ARTWORK_CATEGORIES:
+                selection_url = (params.get(f"artwork_{basename}") or [None])[0]
+                selections[basename] = {"url": selection_url} if selection_url else None
+            asset_paths = create_webapp.download_selected_assets(slug, selections)
+            pending_queue.add(match_name, None, False, asset_paths, launch_args=args)
+            self._redirect("/new#tab-emulators")
+        except Exception as e:  # noqa: BLE001 -- surfaced to the user, not swallowed
+            self._send_html(render_done(match_name, ok=False, error=e))
+
     def _handle_ra_upload(self):
         parsed = urllib.parse.urlparse(self.path)
         params = urllib.parse.parse_qs(parsed.query)
@@ -2389,6 +2843,46 @@ class Handler(BaseHTTPRequestHandler):
         if slot == "rom":
             overrides["ra_resolved"] = ""
         self._redirect(_ra_url("/new", ra_state, **overrides))
+
+    def _handle_em_upload(self):
+        # Same streaming-upload approach as _handle_ra_upload -- see its
+        # own comments for why (never buffering a multi-GB file in
+        # memory), just with a third possible slot (keys) and its own
+        # em_-prefixed state/dest dirs so an upload never collides with
+        # the RetroArch tab's own roms/bios uploads.
+        parsed = urllib.parse.urlparse(self.path)
+        params = urllib.parse.parse_qs(parsed.query)
+        em_state = _em_state_from_params(params)
+        slot = (params.get("slot") or [""])[0]
+        if slot not in ("rom", "bios", "keys"):
+            self._send_html(render("<p>Invalid upload slot</p>"), status=400)
+            return
+
+        content_type = self.headers.get("Content-Type", "")
+        length = int(self.headers.get("Content-Length", 0))
+        dest_dir = os.path.join(_RA_UPLOAD_DIR, f"em-{slot}")
+        os.makedirs(dest_dir, exist_ok=True)
+
+        fd, tmp_path = tempfile.mkstemp(dir=dest_dir, prefix=".upload-")
+        os.close(fd)
+        try:
+            filename = multipart_upload.save_uploaded_file(self.rfile, content_type, length, tmp_path)
+        except ValueError:
+            os.remove(tmp_path)
+            self._send_html(render_done("Upload", ok=False, error="Upload failed -- please try again"))
+            return
+
+        safe_name = os.path.basename(filename) if filename else os.path.basename(tmp_path)
+        dest_path = os.path.join(dest_dir, safe_name)
+        os.replace(tmp_path, dest_path)
+
+        rel_path = os.path.relpath(dest_path, _RA_ROOT)
+        file_key = f"em_{slot}file"
+        source_key = f"em_{slot}source"
+        overrides = {file_key: rel_path, source_key: "upload"}
+        if slot == "rom":
+            overrides["em_resolved"] = ""
+        self._redirect(_em_url("/new", em_state, **overrides))
 
     def _commit_pending(self):
         items = pending_queue.all_items()
