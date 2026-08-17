@@ -2242,9 +2242,11 @@ def _poster_card_html(shortcut):
     # Reuses the exact same entry point real shortcut creation goes
     # through for whichever tab actually made it -- /search for a URL
     # tab shortcut, /new#tab-retroarch (with its console+romfile) for a
-    # RetroArch one -- so Edit always lands back on the right tab, pre-
-    # populated, instead of always dumping every shortcut into the URL
-    # tab regardless of how it was really created. Searching by the
+    # RetroArch one, /new#tab-emulators (with its emulator+romfile) for
+    # a standalone-emulator one -- so Edit always lands back on the
+    # right tab, pre-populated, instead of always dumping every
+    # shortcut into the URL tab regardless of how it was really
+    # created. Searching by the
     # shortcut's own already-known URL/ROM runs SGDB matching
     # immediately (no re-typing), and picking new artwork or editing the
     # Name field there and hitting Create Steam Shortcut replaces this
@@ -2263,6 +2265,13 @@ def _poster_card_html(shortcut):
         edit_href = _ra_url("/new", {
             "ra_console": shortcut["ra_console"],
             "ra_romfile": romfile_rel,
+        })
+    elif shortcut.get("em_emulator"):
+        # Same relative-vs-absolute reasoning as ra_romfile above.
+        romfile_rel = os.path.relpath(shortcut["em_romfile"], _RA_ROOT)
+        edit_href = _em_url("/new", {
+            "em_emulator": shortcut["em_emulator"],
+            "em_romfile": romfile_rel,
         })
     else:
         edit_href = f"/search?q={urllib.parse.quote(shortcut['url'] or name)}"

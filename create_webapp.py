@@ -19,6 +19,7 @@ import host_exec
 import retroarch_cores
 import sgdb_client as sgdb
 import shortcuts_vdf
+import standalone_emulators
 import steam_paths
 
 # XDG_CACHE_HOME, not a path next to the source files -- the latter
@@ -461,6 +462,31 @@ def _extract_retroarch_info(launch_options):
     return None, None
 
 
+def _extract_standalone_emulator_info(launch_options):
+    """Pulls (emulator_name, romfile) back out of a standalone-emulator
+    shortcut's own LaunchOptions (see standalone_emulators.launch_args)
+    so the Emulators tab's own Edit link can jump straight back into it,
+    same contract as _extract_retroarch_info above. The Flatpak app id
+    (argv[2] of "flatpak run <app_id> ...") is reverse-mapped to its
+    emulator name via standalone_emulators.EMULATORS; the romfile is
+    then assumed to be the argv's own last token -- true for every
+    entry's args() function so far (each one appends the romfile last,
+    same as Dolphin's own -e <romfile>), not something enforced
+    generically the way RetroArch's -L <core> <romfile> pattern is.
+    Returns (None, None) for anything else."""
+    try:
+        tokens = shlex.split(launch_options)
+    except ValueError:
+        return None, None
+    if len(tokens) < 3 or tokens[1] != "run":
+        return None, None
+    app_id = tokens[2]
+    for name, entry in standalone_emulators.EMULATORS.items():
+        if entry.get("app_id") == app_id:
+            return name, tokens[-1]
+    return None, None
+
+
 def find_grid_image_path(grid_dir, appid):
     """The vertical-grid image file for `appid` in `grid_dir`, whatever
     its extension actually is (SGDB candidates can be .png/.jpg/.webp) --
@@ -492,9 +518,11 @@ def list_gridge_shortcuts():
     """Every non-Steam shortcut Gridge itself created (matched via
     is_gridge_launch_wrapper on the exe field, never a user's own
     unrelated non-Steam shortcuts), across every Steam user profile.
-    Returns dicts with appid/name/url/ra_console/ra_romfile/user_id --
-    ra_console/ra_romfile are None for anything but a RetroArch
-    shortcut (see _extract_retroarch_info). Callers needing the
+    Returns dicts with appid/name/url/ra_console/ra_romfile/em_emulator/
+    em_romfile/user_id -- ra_console/ra_romfile are None for anything
+    but a RetroArch shortcut (see _extract_retroarch_info), em_emulator/
+    em_romfile are None for anything but a standalone-emulator shortcut
+    (see _extract_standalone_emulator_info). Callers needing the
     grid image should call find_grid_image_path themselves with the
     right per-user grid_dir, since two different users could each have
     their own art for a same-named shortcut."""
@@ -514,12 +542,15 @@ def list_gridge_shortcuts():
                 continue
             launch_options = _field(entry, "LaunchOptions", "launchoptions") or ""
             ra_console, ra_romfile = _extract_retroarch_info(launch_options)
+            em_emulator, em_romfile = _extract_standalone_emulator_info(launch_options)
             results.append({
                 "appid": _field(entry, "appid", "AppID"),
                 "name": _field(entry, "appname", "AppName") or "",
                 "url": _extract_launch_url(launch_options),
                 "ra_console": ra_console,
                 "ra_romfile": ra_romfile,
+                "em_emulator": em_emulator,
+                "em_romfile": em_romfile,
                 "user_id": uid,
             })
     results.sort(key=lambda r: r["name"].lower())
