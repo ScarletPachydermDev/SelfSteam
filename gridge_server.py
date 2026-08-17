@@ -542,6 +542,10 @@ input[type=file]::file-selector-button {
    background through the cut) that would have shown it. The image
    approach has no such gap: it's just always visibly there. */
 .shortcut-poster { position: relative; width: 230px; height: 270px; flex: 0 0 auto; }
+/* Queued for removal (not yet committed) -- Edit/Remove stay clickable
+   (still a real /pending item, cancelable there), this is purely a
+   visible "this is going away" signal on the gallery itself. */
+.shortcut-poster.pending-removal { opacity: 0.4; filter: grayscale(1); }
 .poster-frame {
   position: absolute; left: 0; top: 0; width: 230px; height: 270px;
   background: url(/vendor/poster-frame.webp) no-repeat; background-size: 100% 100%;
@@ -2302,7 +2306,7 @@ def _resolve_matches(query, resolved, sgdb_q=None):
     return matches or [{"id": None, "name": name}]
 
 
-def _poster_card_html(shortcut):
+def _poster_card_html(shortcut, pending_removal_appids):
     appid = shortcut["appid"]
     name = shortcut["name"]
     has_artwork = appid is not None and create_webapp.find_grid_image_for_appid(appid) is not None
@@ -2349,29 +2353,71 @@ def _poster_card_html(shortcut):
         })
     else:
         edit_href = f"/search?q={urllib.parse.quote(shortcut['url'] or name)}"
-    # Removing a RetroArch/Emulators-tab shortcut also deletes its own
-    # ROM file from disk once the removal actually commits (see
-    # _commit_pending) -- never BIOS/keys/firmware, which are shared
-    # across every shortcut using that console/emulator. No separate
-    # confirmation step for this (matches how removal already queues
-    # instead of applying immediately, itself a real undo window via
-    # /pending), but the tooltip says so plainly rather than staying
-    # silent about a real, irreversible file delete.
+    # A RetroArch/Emulators-tab shortcut's ROM might be a local pick
+    # (referenced in place, wherever it already lives -- see the local
+    # file browser) rather than something Gridge uploaded itself, so
+    # "delete on remove" isn't automatically safe the way it'd be for a
+    # copy Gridge owns: it could be the user's own real ROM sitting
+    # somewhere in their existing library. A real confirmation page
+    # (see render_remove_confirm) asks which they actually want instead
+    # of ever silently deleting a file Gridge doesn't own the lifecycle
+    # of. URL-tab shortcuts have no file at stake at all, so they skip
+    # straight to the one-click removal below, same as before.
     has_romfile = bool(shortcut.get("ra_romfile") or shortcut.get("em_romfile"))
-    remove_title = "Remove shortcut and delete ROM file" if has_romfile else "Remove shortcut"
+    if has_romfile:
+        remove_control = (
+            f'<a href="/shortcuts/remove-confirm?appid={urllib.parse.quote(str(appid))}&name={urllib.parse.quote(name)}" '
+            f'class="poster-icon-btn" title="Remove shortcut">{_TRASH_ICON_SVG}</a>'
+        )
+    else:
+        remove_control = f"""
+    <form action="/shortcuts/remove" method="post" style="margin:0">
+      <input type="hidden" name="appid" value="{html.escape(str(appid))}">
+      <input type="hidden" name="name" value="{html.escape(name)}">
+      <button type="submit" class="poster-icon-btn" title="Remove shortcut">{_TRASH_ICON_SVG}</button>
+    </form>"""
+    # Greyed out once queued for removal (not yet committed -- see
+    # _commit_pending/the "Save changes and restart Steam" button) so
+    # the gallery visibly reflects a pending change instead of looking
+    # like nothing happened until the next actual commit.
+    pending_class = " pending-removal" if str(appid) in pending_removal_appids else ""
     return f"""
-<div class="shortcut-poster">
+<div class="shortcut-poster{pending_class}">
   <div class="poster-frame"></div>
   {art_html}
   <div class="poster-icons">
     <a href="{edit_href}" class="poster-icon-btn" title="Edit">{_EDIT_NAME_ICON_SVG}</a>
-    <form action="/shortcuts/remove" method="post" style="margin:0">
-      <input type="hidden" name="appid" value="{html.escape(str(appid))}">
-      <input type="hidden" name="name" value="{html.escape(name)}">
-      <button type="submit" class="poster-icon-btn" title="{remove_title}">{_TRASH_ICON_SVG}</button>
-    </form>
+    {remove_control}
   </div>
 </div>"""
+
+
+def render_remove_confirm(appid, name):
+    # Only reachable for shortcuts that actually have a romfile (see
+    # _poster_card_html's has_romfile branch) -- URL-tab shortcuts skip
+    # this page entirely and go straight to the one-click POST, since
+    # there's no file to ask about. delete_file is opt-in, not the
+    # default action, because a locally-picked ROM is referenced in
+    # place wherever it already lives on disk, not copied into a
+    # Gridge-owned folder -- deleting it by default could destroy a
+    # file the user never asked Gridge to own.
+    appid_html = html.escape(str(appid))
+    name_html = html.escape(name)
+    return render(f"""
+<div class="card" style="width:100%;max-width:420px;margin:2rem auto">
+  <h2>Remove shortcut</h2>
+  <p>Remove <strong>{name_html}</strong>? Its ROM file lives outside Gridge's own
+  storage if it was picked from your library rather than uploaded, so choose whether
+  to delete that file too.</p>
+  <form action="/shortcuts/remove" method="post" style="display:flex;flex-direction:column;gap:0.6rem">
+    <input type="hidden" name="appid" value="{appid_html}">
+    <input type="hidden" name="name" value="{name_html}">
+    <button type="submit" class="btn">Remove shortcut only</button>
+    <button type="submit" name="delete_file" value="1" class="btn" style="background:#c00;color:#fff">Remove shortcut and delete ROM file</button>
+    <a href="/" class="btn" style="text-align:center;text-decoration:none">Cancel</a>
+  </form>
+</div>
+""", page_title=_hostname(), show_back=False)
 
 
 def render_gallery():
@@ -2380,7 +2426,10 @@ def render_gallery():
     # subset. CSS grid + the browser's own image lazy-loading is what
     # keeps that reasonable, not limiting the query.
     shortcuts = create_webapp.list_gridge_shortcuts()
-    cards_html = "".join(_poster_card_html(s) for s in shortcuts)
+    pending_removal_appids = {
+        str(item["appid"]) for item in pending_queue.all_items() if item.get("type") == "remove"
+    }
+    cards_html = "".join(_poster_card_html(s, pending_removal_appids) for s in shortcuts)
     return render(f"""
 <div class="gallery-header">
   <h2>Non Steam shortcuts</h2>
@@ -2596,6 +2645,12 @@ class Handler(BaseHTTPRequestHandler):
             self._send_html(render_settings())
             return
 
+        if parsed.path == "/shortcuts/remove-confirm":
+            appid = (params.get("appid") or [""])[0]
+            name = (params.get("name") or [""])[0]
+            self._send_html(render_remove_confirm(appid, name))
+            return
+
         if parsed.path == "/search":
             query = (params.get("q") or [""])[0].strip()
             couch_mode = bool(params.get("couch_mode"))
@@ -2713,16 +2768,24 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/shortcuts/remove":
             appid = (params.get("appid") or [""])[0]
             name = (params.get("name") or [""])[0]
+            delete_file = bool(params.get("delete_file"))
             if appid:
-                # Looked up fresh (not trusted from the form's own
-                # hidden fields) so this can't be spoofed into deleting
-                # an arbitrary path -- only a romfile create_webapp
-                # itself already found by scanning the real
-                # shortcuts.vdf for this exact appid ever gets deleted.
+                # romfile is only ever looked up (and only ever deleted
+                # at commit time) when the user explicitly opted into it
+                # on the /shortcuts/remove-confirm page -- a locally
+                # picked ROM is referenced in place, not copied, so
+                # deleting it by default could destroy a file the user
+                # never asked Gridge to own. Looked up fresh (not
+                # trusted from the form's own hidden fields) so this
+                # can't be spoofed into deleting an arbitrary path --
+                # only a romfile create_webapp itself already found by
+                # scanning the real shortcuts.vdf for this exact appid
+                # is ever considered.
                 romfile = None
-                match = next((s for s in create_webapp.list_gridge_shortcuts() if str(s["appid"]) == appid), None)
-                if match:
-                    romfile = match.get("ra_romfile") or match.get("em_romfile")
+                if delete_file:
+                    match = next((s for s in create_webapp.list_gridge_shortcuts() if str(s["appid"]) == appid), None)
+                    if match:
+                        romfile = match.get("ra_romfile") or match.get("em_romfile")
                 pending_queue.add_removal(appid, name, romfile=romfile)
             self._redirect("/")
             return
