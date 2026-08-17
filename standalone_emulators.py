@@ -19,8 +19,16 @@ AppImage toggle:
                binary-type entry being added.
 """
 import shlex
+import subprocess
 
 import host_exec
+
+# Official, stable URL for Flathub's own repo file -- same one Flathub's
+# own "Quick Setup" instructions use. Needed because a fresh machine
+# (never having installed anything from Flathub before) doesn't have
+# this remote configured at all, and `flatpak install ... flathub <id>`
+# fails outright with "specified remote not found" until it is.
+FLATHUB_REPO_URL = "https://flathub.org/repo/flathub.flatpakrepo"
 
 
 def _dolphin_args(romfile):
@@ -63,18 +71,33 @@ def by_install_type(install_type):
 
 
 def installed(name):
+    # Callers (see _add_standalone_emulator_shortcut) check this first
+    # and only call install() when it's False -- a real Flatpak app,
+    # once present, is never reinstalled on a later shortcut for the
+    # same emulator.
     entry = EMULATORS.get(name)
     if not entry or entry["install_type"] != "flathub":
         return False
     flatpak = host_exec.which("flatpak")
     if not flatpak:
         return False
-    import subprocess
     result = subprocess.run(
         host_exec.wrap([flatpak, "info", entry["app_id"]]),
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
     return result.returncode == 0
+
+
+def _ensure_flathub_remote(flatpak):
+    # --if-not-exists makes this safe to run every install unconditionally
+    # -- a no-op on the common case (flathub's already configured, e.g.
+    # SteamOS and most desktop distros ship it by default), a real
+    # remote-add on a genuinely fresh machine that's never installed
+    # anything from Flathub before.
+    subprocess.run(
+        host_exec.wrap([flatpak, "remote-add", "--if-not-exists", "--user", "flathub", FLATHUB_REPO_URL]),
+        check=True,
+    )
 
 
 def install(name):
@@ -83,8 +106,8 @@ def install(name):
         raise ValueError(f"No known standalone emulator: {name}")
     if entry["install_type"] != "flathub":
         raise NotImplementedError(f"install_type {entry['install_type']!r} not implemented yet")
-    import subprocess
     flatpak = host_exec.which("flatpak")
+    _ensure_flathub_remote(flatpak)
     subprocess.run(
         host_exec.wrap([flatpak, "install", "--user", "-y", "flathub", entry["app_id"]]),
         check=True,

@@ -666,17 +666,23 @@ function gridgeShowUploading(prefix) {
   if (status) status.style.display = "inline-flex";
 }
 
-// Fires on the Create Steam Shortcut button's own click when an
-// Emulators-tab shortcut is ready -- installing a Flathub/AppImage
-// emulator on first use is a real, sometimes-slow blocking step inside
-// /add (see _add_standalone_emulator_shortcut), and the button
-// otherwise gives zero feedback that the click registered while that
-// runs. Indeterminate only (a spinner + status text, no percentage) --
-// real progress tracking would need new polling infrastructure, not
-// worth it for a first version of this tab.
-function gridgeShowInstalling(button, emulatorName) {
+// Fires on the Add form's own submit (not the button's click -- see the
+// form's own onsubmit comment in _emulators_tab_panel_html's caller for
+// why) when an Emulators-tab shortcut is ready -- installing a Flathub/
+// AppImage emulator on first use is a real, sometimes-slow blocking
+// step inside /add (see _add_standalone_emulator_shortcut), and the
+// button otherwise gives zero feedback that the click registered while
+// that runs. Indeterminate only (a spinner + status text, no
+// percentage) -- real progress tracking would need new polling
+// infrastructure, not worth it for a first version of this tab. The
+// button lives outside this form in the DOM (associated via its own
+// form="..." attribute, not nesting), so it's looked up by id rather
+// than assumed to be a child of the form the event fired on.
+function gridgeShowInstalling(form) {
+  var button = document.getElementById("gridge-add-button");
+  if (!button) return;
   button.disabled = true;
-  button.innerHTML = "Installing " + emulatorName + '<span class="spinner"></span>';
+  button.innerHTML = "Installing " + form.dataset.emulator + '<span class="spinner"></span>';
 }
 
 // Fifth deliberate JS exception: every other RA-tab interaction that
@@ -1902,25 +1908,22 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
 """
         add_button = f'<button type="submit" id="gridge-add-button" form="{_ADD_FORM_ID}">Create Steam Shortcut</button>'
     elif em_ready:
+        # onsubmit here, not onclick on the button: disabling a submit
+        # button synchronously inside its own onclick can stop that same
+        # click's default action (the actual form submission) from ever
+        # firing, in which case the button just sits showing "Installing
+        # ..." forever with no request ever having gone out. onsubmit
+        # fires as part of the submission itself, so disabling there is
+        # always safe -- the submission already happened by that point.
         add_form = f"""
-<form id="{_ADD_FORM_ID}" action="/add" method="post">
+<form id="{_ADD_FORM_ID}" action="/add" method="post" onsubmit="gridgeShowInstalling(this)" data-emulator="{html.escape(em_emulator)}">
   <input type="hidden" name="em_emulator" value="{html.escape(em_emulator)}">
   <input type="hidden" name="em_romfile" value="{html.escape(em_state.get('em_romfile', ''))}">
   <input type="hidden" name="em_biosfile" value="{html.escape(em_state.get('em_biosfile', ''))}">
   <input type="hidden" name="em_keysfile" value="{html.escape(em_state.get('em_keysfile', ''))}">
 </form>
 """
-        # onclick here (not the form's own onsubmit, which never fires
-        # for the ROM/BIOS upload forms' this.form.submit() calls but
-        # DOES fire for a real submit-button click like this one) shows
-        # the same "doing something, please wait" feedback the upload
-        # indicator already has -- installing a Flathub/AppImage
-        # emulator on first use can take a while, and the button
-        # otherwise gives zero sign the click registered.
-        add_button = (
-            f'<button type="submit" id="gridge-add-button" form="{_ADD_FORM_ID}" '
-            f'onclick="gridgeShowInstalling(this, {html.escape(json.dumps(em_emulator))})">Create Steam Shortcut</button>'
-        )
+        add_button = f'<button type="submit" id="gridge-add-button" form="{_ADD_FORM_ID}">Create Steam Shortcut</button>'
     elif chosen is not None:
         couch_field = '<input type="hidden" name="couch_mode" value="1">' if couch_mode else ""
         # The Name field itself (see _url_tab_panel_html) is what
