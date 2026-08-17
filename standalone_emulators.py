@@ -18,6 +18,8 @@ AppImage toggle:
                logic has something real to filter on ahead of the first
                binary-type entry being added.
 """
+import configparser
+import json
 import os
 import shlex
 import shutil
@@ -51,6 +53,71 @@ def _dolphin_args(romfile):
     return ["-b", "-C", "Dolphin.Display.Fullscreen=True", "-e", shlex.quote(romfile)]
 
 
+def _dolphin_configure_game_dir(entry, game_dir):
+    # Dolphin.ini, [General] section, count-then-indexed-keys pattern
+    # (ISOPaths=<count>, ISOPath0=..., ISOPath1=..., ...) -- confirmed
+    # via Dolphin's own real source (Source/Core/Core/Config/
+    # MainSettings.cpp's GetIsoPaths()/SetIsoPaths()), not guessed.
+    #
+    # Only touches an existing ini file -- a fresh install (this
+    # emulator has never actually run yet) has no Dolphin.ini at all,
+    # and Dolphin creates its own on first launch with a full set of
+    # its own defaults; writing a partial one ourselves ahead of that
+    # isn't necessary for Dolphin specifically (its ini format is
+    # tolerant of missing keys/sections), but staying consistent with
+    # every other emulator's own same rule here keeps this one
+    # predictable rather than a special case.
+    ini_path = _flatpak_config_dir(entry["app_id"], "dolphin-emu", "Dolphin.ini")
+    if not os.path.isfile(ini_path):
+        return
+    cp = configparser.ConfigParser(interpolation=None)
+    cp.optionxform = str  # preserve exact key casing -- Dolphin's own keys are case-sensitive PascalCase, not the case-insensitive convention configparser assumes by default
+    cp.read(ini_path)
+    if not cp.has_section("General"):
+        cp.add_section("General")
+    count = int(cp.get("General", "ISOPaths", fallback="0") or "0")
+    existing = {cp.get("General", f"ISOPath{i}", fallback="") for i in range(count)}
+    if game_dir in existing:
+        return
+    cp.set("General", f"ISOPath{count}", game_dir)
+    cp.set("General", "ISOPaths", str(count + 1))
+    with open(ini_path, "w") as f:
+        cp.write(f, space_around_delimiters=True)
+
+
+def _ryubing_configure_game_dir(entry, game_dir):
+    # Config.json, top-level "game_dirs" array -- the C# field is
+    # GameDirs, but Ryubing serializes everything through a real
+    # SnakeCaseNamingPolicy (confirmed in its own JsonHelper.cs), so
+    # the actual on-disk key is game_dirs, not GameDirs. Confirmed via
+    # source, not assumed the C# name and the JSON key would match.
+    config_path = _flatpak_config_dir(entry["app_id"], "Ryujinx", "Config.json")
+    if not os.path.isfile(config_path):
+        # Same reasoning as Dolphin's own -- nothing to safely add to
+        # yet. More load-bearing here than for Dolphin: Ryubing's own
+        # ConfigurationFileFormat.TryLoad treats Version == 0 (or a
+        # missing file) as invalid and silently regenerates its own
+        # defaults, discarding anything written -- so even attempting
+        # to bootstrap a minimal file here would just get thrown away
+        # the moment Ryubing actually starts, not merely be unnecessary
+        # the way it is for Dolphin.
+        return
+    try:
+        with open(config_path) as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return
+    if not data.get("version"):
+        return
+    game_dirs = data.get("game_dirs") or []
+    if game_dir in game_dirs:
+        return
+    game_dirs.append(game_dir)
+    data["game_dirs"] = game_dirs
+    with open(config_path, "w") as f:
+        json.dump(data, f, indent=2)
+
+
 def _ryubing_args(romfile):
     # -f/--fullscreen and the bare romfile positional arg, both confirmed
     # real via Ryubing's own CommandLineState.cs (the actual CLI argument
@@ -70,9 +137,15 @@ def _ryubing_args(romfile):
 # id), consoles (display string for the hint line), needs_bios/
 # needs_keys/needs_firmware (whether the picker should show those extra
 # fields at all -- Dolphin needs none of them, Ryubing needs keys and
-# firmware but not a traditional "BIOS"), and args(romfile) -> argv
-# (already shell-quoted where needed, same "ready to append after
-# flatpak run <app_id>" contract as retroarch_cores.launch_args).
+# firmware but not a traditional "BIOS"), args(romfile) -> argv (already
+# shell-quoted where needed, same "ready to append after flatpak run
+# <app_id>" contract as retroarch_cores.launch_args), and
+# configure_game_dir(entry, game_dir) -- optional (None if an emulator
+# doesn't have one yet), called once right after a fresh install() (see
+# configure_game_dir's own docstring below) to register Gridge's own
+# upload folder as a watched game directory in the emulator's own
+# settings, so uploaded games show up in its own game list too, not
+# just as Steam shortcuts.
 EMULATORS = {
     "Dolphin": {
         "install_type": "flathub",
@@ -82,6 +155,7 @@ EMULATORS = {
         "needs_keys": False,
         "needs_firmware": False,
         "args": _dolphin_args,
+        "configure_game_dir": _dolphin_configure_game_dir,
     },
     "Ryubing": {
         "install_type": "flathub",
@@ -91,6 +165,7 @@ EMULATORS = {
         "needs_keys": True,
         "needs_firmware": True,
         "args": _ryubing_args,
+        "configure_game_dir": _ryubing_configure_game_dir,
     },
 }
 
@@ -177,6 +252,27 @@ def launch_args(name, romfile):
     if not flatpak:
         return None
     return [flatpak, "run", entry["app_id"], *entry["args"](romfile)]
+
+
+def configure_game_dir(name, game_dir):
+    """Registers game_dir as a watched ROM folder in the emulator's own
+    settings, so games Gridge uploaded show up in the emulator's own
+    game list too, not just as a Steam shortcut -- additive only (never
+    removes/replaces anything already there), and each per-emulator
+    configurator only ever touches an EXISTING config file (see their
+    own docstrings for why bootstrapping one from scratch isn't safe in
+    general, especially for a version-gated format like Ryubing's).
+
+    Callers should only call this once, right after a fresh install()
+    -- not on every shortcut creation -- so an emulator the user
+    already had installed (and already configured however they like)
+    never gets touched. No-op for an emulator with no
+    configure_game_dir entry yet (not every emulator needs one, and
+    none is required for the tab to otherwise work)."""
+    entry = EMULATORS.get(name)
+    configurator = entry.get("configure_game_dir") if entry else None
+    if configurator:
+        configurator(entry, game_dir)
 
 
 def _flatpak_config_dir(app_id, *parts):

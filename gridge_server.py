@@ -435,7 +435,15 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
    tab's BIOS+ROM pickers together are tall enough to trigger exactly
    this, landing the button on top of/before its own Name field
    instead of below it. */
-.tab-panel { display: none; flex-direction: column; gap: 0.9rem; flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+.tab-panel { display: none; flex-direction: column; gap: 0.9rem; flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-gutter: stable; }
+/* Firefox's own scrollbar-width covers it there; Chromium/WebKit need
+   this instead -- both together make the scrollbar an always-visible,
+   easy-to-notice thin bar rather than the OS's own auto-hide/overlay
+   style, which is easy to miss entirely once there's enough content
+   (multiple file pickers stacked) to actually need scrolling. */
+.tab-panel::-webkit-scrollbar { width: 8px; }
+.tab-panel::-webkit-scrollbar-track { background: transparent; }
+.tab-panel::-webkit-scrollbar-thumb { background: var(--text-dim); border-radius: 4px; }
 .tab-panel-url { display: flex; }
 #tab-apps:target ~ .gridge-columns .tab-panels .tab-panel-url,
 #tab-retroarch:target ~ .gridge-columns .tab-panels .tab-panel-url,
@@ -2892,8 +2900,17 @@ class Handler(BaseHTTPRequestHandler):
             # blocking here keeps this simple, at the cost of the first
             # click for any given emulator being slow) -- already-
             # installed check short-circuits every time after that.
-            if not standalone_emulators.installed(em_emulator):
+            was_already_installed = standalone_emulators.installed(em_emulator)
+            if not was_already_installed:
                 standalone_emulators.install(em_emulator)
+                # Only right after Gridge itself did a fresh install --
+                # never for an emulator the user already had, whose own
+                # game-directory settings (if any) stay untouched. See
+                # configure_game_dir's own docstring for why this is
+                # additive-only and safe to call unconditionally here.
+                standalone_emulators.configure_game_dir(
+                    em_emulator, os.path.join(_RA_UPLOAD_DIR, "em-rom"),
+                )
             # Keys/firmware installs are real, verified (not guessed)
             # ports of Ryubing's own ContentManager.InstallKeys/
             # InstallFirmware -- see standalone_emulators.py's own
