@@ -672,17 +672,26 @@ function gridgeShowUploading(prefix) {
 // AppImage emulator on first use is a real, sometimes-slow blocking
 // step inside /add (see _add_standalone_emulator_shortcut), and the
 // button otherwise gives zero feedback that the click registered while
-// that runs. Indeterminate only (a spinner + status text, no
-// percentage) -- real progress tracking would need new polling
-// infrastructure, not worth it for a first version of this tab. The
-// button lives outside this form in the DOM (associated via its own
-// form="..." attribute, not nesting), so it's looked up by id rather
-// than assumed to be a child of the form the event fired on.
+// that runs. Skipped entirely when data-installed says it's already
+// there (set from a real standalone_emulators.installed() check at
+// render time) -- /add still re-checks that for real regardless, but
+// that check alone is fast (one `flatpak info`), not the actual
+// multi-minute first-time download this spinner exists for. "Downloading"
+// is the one phase actually shown -- a single `flatpak install` call is
+// one opaque blocking step with no real download-vs-install boundary we
+// can observe (confirming a real percentage was already ruled out for
+// the same reason), and download is genuinely almost all of its wall-
+// clock time. A future binary/AppImage-type emulator (download an
+// archive, then extract/chmod it -- a real, distinct second phase, the
+// same shape retroarch_cores.py's own core install already has) is
+// where switching this to "Installing" partway through would actually
+// mean something.
 function gridgeShowInstalling(form) {
+  if (form.dataset.installed) return;
   var button = document.getElementById("gridge-add-button");
   if (!button) return;
   button.disabled = true;
-  button.innerHTML = "Downloading/Installing " + form.dataset.emulator + '<span class="spinner"></span>';
+  button.innerHTML = "Downloading " + form.dataset.emulator + '<span class="spinner"></span>';
 }
 
 // Fifth deliberate JS exception: every other RA-tab interaction that
@@ -1419,9 +1428,18 @@ def _emulators_tab_panel_html(state, chosen=None):
     # install source is now active (e.g. toggled from Flathub to
     # AppImage), it's simply not a valid option in this dropdown --
     # shows "Pick your emulator" instead of a stale/wrong selection.
+    # "<emulator> - <consoles>" as one plain-text label -- native
+    # <option> elements can't mix two text colors/weights inside a
+    # single option, so a separate grey "consoles" line was the other
+    # option; this is what was actually asked for instead.
+    def _emulator_option_label(name):
+        e = standalone_emulators.EMULATORS.get(name, {})
+        consoles = e.get("consoles")
+        return f"{name} - {consoles}" if consoles else name
+
     emulator_options = "".join(
         f'<option value="{html.escape(e)}"{" selected" if e == emulator else ""}>'
-        f'{"Pick your emulator" if not e else html.escape(e)}</option>'
+        f'{"Pick your emulator" if not e else html.escape(_emulator_option_label(e))}</option>'
         for e in [""] + names
     )
 
@@ -1432,16 +1450,6 @@ def _emulators_tab_panel_html(state, chosen=None):
         f'<input type="hidden" name="{k}" id="em-console-form-{k}" value="{html.escape(state.get(k, ""))}">'
         for k in _EM_STATE_KEYS if k != "em_emulator"
     )
-
-    # Native <option> elements can't mix two text colors inside one
-    # option, so "Dolphin" bold + "Nintendo GameCube / Wii" grey can't
-    # be one dropdown row the way the design asked for -- this shows the
-    # currently-picked emulator's own consoles as a separate grey hint
-    # line under the select instead, same .hint-row style the URL tab's
-    # own "Shortcut for x will be added" hint already uses.
-    consoles_hint = ""
-    if entry and entry.get("consoles"):
-        consoles_hint = f'<div class="hint-row"><span class="info-icon">i</span><span>{html.escape(entry["consoles"])}</span></div>'
 
     def _source_toggle_link(value, text):
         active = "source-label active" if install_source == value else "source-label"
@@ -1490,7 +1498,6 @@ def _emulators_tab_panel_html(state, chosen=None):
         {emulator_options}
       </select>
     </form>
-    {consoles_hint}
   </div>
   {bios_block}
   {keys_block}
@@ -1511,7 +1518,13 @@ def _em_display_term(state, chosen=None):
 def _em_sgdb_search_bar_html(state, chosen=None):
     display_term = _em_display_term(state, chosen)
     clear_href = _em_url("/new", state, em_sgdb_q="")
-    hidden = _ra_hidden_fields({k: v for k, v in state.items() if k != "em_sgdb_q"})
+    # em_resolved dropped along with em_sgdb_q -- carrying it forward
+    # would skip the /new handler's em_loading branch entirely (it only
+    # triggers when em_resolved is falsy), meaning a real search term
+    # change would run its whole SGDB search synchronously in one
+    # request with zero loading feedback, not just the very first
+    # search a fresh ROM pick already triggers on its own.
+    hidden = _ra_hidden_fields({k: v for k, v in state.items() if k not in ("em_sgdb_q", "em_resolved")})
     return f"""
 <form action="/new#tab-emulators" method="get">
   {hidden}
@@ -1687,7 +1700,9 @@ def _ra_sgdb_search_bar_html(state, chosen=None):
     # existing RA link/form for free -- no separate threading needed.
     display_term = _ra_display_term(state, chosen)
     clear_href = _ra_url("/new", state, ra_sgdb_q="")
-    hidden = _ra_hidden_fields({k: v for k, v in state.items() if k != "ra_sgdb_q"})
+    # ra_resolved dropped along with ra_sgdb_q -- see _em_sgdb_search_bar_
+    # html's own comment on this exact same fix for the reasoning.
+    hidden = _ra_hidden_fields({k: v for k, v in state.items() if k not in ("ra_sgdb_q", "ra_resolved")})
     return f"""
 <form action="/new#tab-retroarch" method="get">
   {hidden}
@@ -1926,8 +1941,18 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
         # ..." forever with no request ever having gone out. onsubmit
         # fires as part of the submission itself, so disabling there is
         # always safe -- the submission already happened by that point.
+        #
+        # data-installed lets gridgeShowInstalling skip the spinner
+        # entirely when the emulator's already there -- Create still
+        # blocks briefly on _add_standalone_emulator_shortcut's own
+        # already-installed check either way, but that's fast (a single
+        # `flatpak info`), not the multi-minute-first-time-only download
+        # the spinner exists for. Checked fresh at render time; /add
+        # re-checks it again for real regardless of what this says.
+        em_already_installed = standalone_emulators.installed(em_emulator)
         add_form = f"""
-<form id="{_ADD_FORM_ID}" action="/add" method="post" onsubmit="gridgeShowInstalling(this)" data-emulator="{html.escape(em_emulator)}">
+<form id="{_ADD_FORM_ID}" action="/add" method="post" onsubmit="gridgeShowInstalling(this)"
+      data-emulator="{html.escape(em_emulator)}" data-installed="{"1" if em_already_installed else ""}">
   <input type="hidden" name="em_emulator" value="{html.escape(em_emulator)}">
   <input type="hidden" name="em_romfile" value="{html.escape(em_state.get('em_romfile', ''))}">
   <input type="hidden" name="em_biosfile" value="{html.escape(em_state.get('em_biosfile', ''))}">
