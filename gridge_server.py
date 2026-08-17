@@ -2363,10 +2363,12 @@ def _poster_card_html(shortcut, pending_removal_appids):
     # of ever silently deleting a file Gridge doesn't own the lifecycle
     # of. URL-tab shortcuts have no file at stake at all, so they skip
     # straight to the one-click removal below, same as before.
-    has_romfile = bool(shortcut.get("ra_romfile") or shortcut.get("em_romfile"))
+    romfile = shortcut.get("ra_romfile") or shortcut.get("em_romfile")
+    has_romfile = bool(romfile)
     if has_romfile:
         remove_control = (
-            f'<a href="/shortcuts/remove-confirm?appid={urllib.parse.quote(str(appid))}&name={urllib.parse.quote(name)}" '
+            f'<a href="/shortcuts/remove-confirm?appid={urllib.parse.quote(str(appid))}&name={urllib.parse.quote(name)}'
+            f'&romfile={urllib.parse.quote(romfile)}" '
             f'class="poster-icon-btn" title="Remove shortcut">{_TRASH_ICON_SVG}</a>'
         )
     else:
@@ -2392,7 +2394,7 @@ def _poster_card_html(shortcut, pending_removal_appids):
 </div>"""
 
 
-def render_remove_confirm(appid, name):
+def render_remove_confirm(appid, name, romfile):
     # Only reachable for shortcuts that actually have a romfile (see
     # _poster_card_html's has_romfile branch) -- URL-tab shortcuts skip
     # this page entirely and go straight to the one-click POST, since
@@ -2403,18 +2405,16 @@ def render_remove_confirm(appid, name):
     # file the user never asked Gridge to own.
     appid_html = html.escape(str(appid))
     name_html = html.escape(name)
+    romfile_html = html.escape(romfile)
     return render(f"""
 <div class="card" style="width:100%;max-width:420px;margin:2rem auto">
   <h2>Remove shortcut</h2>
-  <p>Remove <strong>{name_html}</strong>? Its ROM file lives outside Gridge's own
-  storage if it was picked from your library rather than uploaded, so choose whether
-  to delete that file too.</p>
+  <p style="word-break:break-all;color:var(--text-dim)">{romfile_html}</p>
   <form action="/shortcuts/remove" method="post" style="display:flex;flex-direction:column;gap:0.6rem">
     <input type="hidden" name="appid" value="{appid_html}">
     <input type="hidden" name="name" value="{name_html}">
     <button type="submit" class="btn">Remove shortcut only</button>
     <button type="submit" name="delete_file" value="1" class="btn" style="background:#c00;color:#fff">Remove shortcut and delete ROM file</button>
-    <a href="/" class="btn" style="text-align:center;text-decoration:none">Cancel</a>
   </form>
 </div>
 """, page_title=_hostname(), show_back=False)
@@ -2648,7 +2648,8 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/shortcuts/remove-confirm":
             appid = (params.get("appid") or [""])[0]
             name = (params.get("name") or [""])[0]
-            self._send_html(render_remove_confirm(appid, name))
+            romfile = (params.get("romfile") or [""])[0]
+            self._send_html(render_remove_confirm(appid, name, romfile))
             return
 
         if parsed.path == "/search":
