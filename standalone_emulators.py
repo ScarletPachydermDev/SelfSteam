@@ -49,11 +49,10 @@ def _dolphin_args(romfile):
 
 
 # Keyed by the emulator's own name (not "<consoles> (<emulator>)") --
-# the dropdown shows this directly, with each entry's own "consoles"
-# shown as a separate grey hint line underneath the select once picked
-# (native <option> elements can't mix two text colors inside one
-# option, so this couldn't be done inline the way e.g. the browser
-# picker's own label/hint pairing works).
+# the dropdown shows "<name> - <consoles>" built from these two fields
+# directly (native <option> elements can't mix two text colors/weights
+# inside one option, so this is plain text, not a styled label+hint
+# pairing the way e.g. the browser picker's own label works).
 #
 # Each entry: install_type ("flathub" for now), app_id (real Flathub
 # id), consoles (display string for the hint line), needs_bios/
@@ -109,6 +108,16 @@ def _ensure_flathub_remote(flatpak):
     )
 
 
+# A large Flatpak download failing partway through on a real "peer
+# reset"/dropped-packet blip is common enough (confirmed live: "[56]
+# Failure when receiving data from the peer" on X1, on an otherwise
+# fine connection) to just retry rather than surface as a one-shot
+# failure -- flatpak install itself is naturally resumable/idempotent
+# (re-running it after a partial failure doesn't redownload objects it
+# already has), so a retry here is cheap when it does help.
+_INSTALL_ATTEMPTS = 3
+
+
 def install(name):
     entry = EMULATORS.get(name)
     if not entry:
@@ -117,9 +126,23 @@ def install(name):
         raise NotImplementedError(f"install_type {entry['install_type']!r} not implemented yet")
     flatpak = host_exec.which("flatpak")
     _ensure_flathub_remote(flatpak)
-    subprocess.run(
-        host_exec.wrap([flatpak, "install", "--user", "-y", "flathub", entry["app_id"]]),
-        check=True,
+
+    last_result = None
+    for attempt in range(1, _INSTALL_ATTEMPTS + 1):
+        # capture_output (not check=True) -- CalledProcessError's own
+        # .stderr is None without this, which is exactly why the actual
+        # flatpak error ("[56] Failure when receiving data from the
+        # peer", "specified remote not found", etc.) was getting lost
+        # behind a useless bare "returned non-zero exit status 1".
+        last_result = subprocess.run(
+            host_exec.wrap([flatpak, "install", "--user", "-y", "flathub", entry["app_id"]]),
+            capture_output=True, text=True,
+        )
+        if last_result.returncode == 0:
+            return
+    raise RuntimeError(
+        f"flatpak install failed after {_INSTALL_ATTEMPTS} attempts: "
+        f"{last_result.stderr.strip() or last_result.stdout.strip()}"
     )
 
 
