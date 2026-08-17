@@ -1578,12 +1578,15 @@ def _emulators_tab_panel_html(state, chosen=None):
 
 
 def _em_display_term(state, chosen=None):
-    if state.get("em_sgdb_q"):
-        return state["em_sgdb_q"].lower()
-    if chosen and chosen.get("name"):
-        return chosen["name"].lower()
-    romfile = state.get("em_romfile")
-    return _ra_guess_name_from_filename(romfile).lower() if romfile else ""
+    # Literally just the override, blank when there isn't one -- this
+    # used to fall back to the resolved match's own name (or the raw
+    # filename guess) so the box always showed what was really driving
+    # results, but that meant Clear never actually produced an empty
+    # field: dropping the override just fell straight through to
+    # showing chosen["name"] again, which read as "Clear doesn't work"
+    # (confirmed live -- a user clearing this with a ROM already
+    # resolved saw the field repopulate right back).
+    return state.get("em_sgdb_q", "").lower()
 
 
 def _em_sgdb_search_bar_html(state, chosen=None):
@@ -1670,18 +1673,15 @@ def _placeholder_matches_html():
     return f'<div class="boxed-list">{"".join(rows)}</div>'
 
 
-def _display_name(query, sgdb_q):
-    """What's actually driving the current SGDB results: the explicit
-    override if there is one, else whatever the URL/service field
-    itself resolved to. Purely a search term -- the separate Name field
-    (see _url_tab_panel_html) is what actually gets saved, so editing
-    this doesn't rename anything on its own. Lowercased -- SGDB search
-    terms are kept all-lowercase throughout (see _resolve_matches),
-    so this box always shows exactly what was actually searched."""
-    if sgdb_q:
-        return sgdb_q.lower()
-    resolved = service_resolver.resolve(query) if query else None
-    return resolved.name.lower() if resolved and resolved.name else ""
+def _display_name(sgdb_q):
+    # Literally just the override, blank when there isn't one -- see
+    # _em_display_term's own comment for why this dropped its old
+    # fallback to the resolved service name (that made Clear repopulate
+    # the field right back instead of actually clearing it). Purely a
+    # search term -- the separate Name field (see _url_tab_panel_html)
+    # is what actually gets saved, so editing this doesn't rename
+    # anything on its own.
+    return sgdb_q.lower()
 
 
 def _sgdb_search_bar_html(query, couch_mode, browser, sgdb_q, ra_state=None, em_state=None):
@@ -1695,7 +1695,7 @@ def _sgdb_search_bar_html(query, couch_mode, browser, sgdb_q, ra_state=None, em_
     # service field itself resolved to) rather than sitting empty until
     # touched -- same behavior planned for the Apps/RetroArch/Emulators
     # tabs once they're built out, not just the URL tab.
-    display_term = _display_name(query, sgdb_q)
+    display_term = _display_name(sgdb_q)
     clear_href = f"/search?{_state_qs(query, couch_mode, browser, ra_state, em_state)}"
     return f"""
 <form action="/search" method="get">
@@ -1744,21 +1744,13 @@ def _middle_column_html(query, couch_mode, browser, sgdb_q, matches, match_index
 
 
 def _ra_display_term(state, chosen=None):
-    """Same idea as the URL tab's own _display_name: whatever's actually
-    driving the current SGDB results, so the box always shows what was
-    really searched/found instead of sitting empty until explicitly
-    touched. Priority: an explicit override > the real resolved match's
-    own name (once SGDB has actually found one -- same term already
-    cross-populating the Name field, so the two agree on what this ROM
-    actually is) > the raw filename-derived guess, before any search has
-    run yet. Lowercased throughout, matching _resolve_matches's own
-    lowercasing of whatever it actually sends to SGDB."""
-    if state.get("ra_sgdb_q"):
-        return state["ra_sgdb_q"].lower()
-    if chosen and chosen.get("name"):
-        return chosen["name"].lower()
-    romfile = state.get("ra_romfile")
-    return _ra_guess_name_from_filename(romfile).lower() if romfile else ""
+    # Literally just the override, blank when there isn't one -- see
+    # _em_display_term's own comment for why this dropped its old
+    # fallback to the resolved match's name/filename guess (that made
+    # Clear repopulate the field right back instead of actually
+    # clearing it). Lowercased, matching _resolve_matches's own
+    # lowercasing of whatever it actually sends to SGDB.
+    return state.get("ra_sgdb_q", "").lower()
 
 
 def _ra_sgdb_search_bar_html(state, chosen=None):
@@ -2076,7 +2068,7 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
   {_tab_bar_html()}
   <div class="tab-panels">
     <div class="tab-panel tab-panel-url">
-      <form action="/search" method="get" style="display:flex;flex-direction:column;gap:0.9rem">
+      <form action="/search" method="get" style="display:flex;flex-direction:column;gap:0.9rem;flex:1;min-height:0">
         {_ra_hidden_fields(ra_state)}
         {_ra_hidden_fields(em_state)}
         {_url_tab_panel_html(query, couch_mode, browser, chosen, name_reset_href, ra_state, em_state)}
