@@ -2,7 +2,7 @@
 
 A headless companion, a small web UI for adding Steam shortcuts (with SteamGridDB artwork) from another device, while the target machine stays in Steam's Game Mode.
 
-![](screenshots/screenshot-2026-08-18.webp)
+![](screenshots/main.png)
 
 ## Status
 
