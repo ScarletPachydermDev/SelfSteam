@@ -239,6 +239,52 @@ def _cemu_keys_path(entry):
     return _flatpak_data_dir(entry["app_id"], "Cemu", "keys.txt")
 
 
+def _flycast_args(romfile):
+    # A bare positional disc image path plus -config window:fullscreen=yes,
+    # both confirmed real via Flycast's own source and man page (not
+    # guessed): core/cfg/cl.cpp's parseCommandLine takes any non-flag
+    # argument as the content path directly (no -g/--game flag exists),
+    # and shell/linux/man/flycast.1 documents "-config
+    # window:fullscreen=yes" as the real, working way to start in
+    # fullscreen ("-config section:option=value" is a transient config
+    # override, not persisted to emu.cfg).
+    return ["-config", "window:fullscreen=yes", shlex.quote(romfile)]
+
+
+def _flycast_configure_game_dir(entry, game_dir):
+    # emu.cfg, [config] section, key "Dreamcast.ContentPath" -- a
+    # semicolon-separated list of directories Flycast's own game browser
+    # scans (core/ui/game_scanner.cpp reads config::ContentPath.get()).
+    # Confirmed via source, including the exact on-disk section/key
+    # split: Option's constructor defaults its own `section` argument to
+    # "config" unless explicitly overridden (see core/cfg/option.cpp's
+    # ContentPath("Dreamcast.ContentPath") call, only one arg passed),
+    # so the dotted name is a literal key string under [config], not a
+    # nested [Dreamcast] section the way it might look at a glance.
+    #
+    # Only touches an existing emu.cfg -- same "don't bootstrap a config
+    # file the app hasn't initialized yet" rule as Dolphin's own
+    # configurator (no evidence, unlike Cemu, that pre-creating one here
+    # would suppress anything -- not verified either way, so this stays
+    # on the conservative default).
+    config_path = _flatpak_config_dir(entry["app_id"], "flycast", "emu.cfg")
+    if not os.path.isfile(config_path):
+        return
+    cp = configparser.ConfigParser(interpolation=None)
+    cp.optionxform = str
+    cp.read(config_path)
+    if not cp.has_section("config"):
+        cp.add_section("config")
+    existing = cp.get("config", "Dreamcast.ContentPath", fallback="")
+    paths = [p for p in existing.split(";") if p]
+    if game_dir in paths:
+        return
+    paths.append(game_dir)
+    cp.set("config", "Dreamcast.ContentPath", ";".join(paths))
+    with open(config_path, "w") as f:
+        cp.write(f, space_around_delimiters=True)
+
+
 def _cemu_keys_installed(entry):
     keys_path = _cemu_keys_path(entry)
     if not os.path.isfile(keys_path):
@@ -327,6 +373,21 @@ EMULATORS = {
         "keys_installed": _cemu_keys_installed,
         "install_keys": _cemu_install_keys,
         "keys_tooltip": "Pick your keys.txt -- most real Wii U game dumps (WUD/WUX) are encrypted and need this to decrypt.",
+    },
+    "Flycast": {
+        "install_type": "flathub",
+        "app_id": "org.flycast.Flycast",
+        "consoles": "Sega Dreamcast",
+        # No BIOS gate -- confirmed via Flycast's own man page: "The
+        # Dreamcast BIOS isn't needed in most cases but is recommended."
+        # Genuinely optional (unlike Ryubing/Cemu's keys), same category
+        # as Dolphin's own built-in GameCube/Wii IPL HLE, so this
+        # doesn't block Create the way needs_bios=True would.
+        "needs_bios": False,
+        "needs_keys": False,
+        "needs_firmware": False,
+        "args": _flycast_args,
+        "configure_game_dir": _flycast_configure_game_dir,
     },
 }
 
