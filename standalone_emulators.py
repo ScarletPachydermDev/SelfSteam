@@ -143,20 +143,32 @@ def _cemu_configure_game_dir(entry, game_dir):
     # -- a flat list of directories, not per-game entries, same shape as
     # Dolphin's own ISOPaths.
     #
-    # Only touches an existing settings.xml -- same reasoning as
-    # Dolphin's own configure_game_dir: a fresh install (never actually
-    # run yet) has no settings.xml, and Cemu's own CemuApp.cpp treats a
-    # missing file as "first start", writing its own complete set of
-    # defaults on next launch. Writing a partial one ourselves ahead of
-    # that would just needlessly race Cemu's own first-run setup.
+    # Unlike Dolphin/Ryubing's own configurators, this DOES bootstrap a
+    # fresh settings.xml if one doesn't exist yet -- deliberately, not
+    # an oversight. Confirmed via Cemu's own source (CemuApp.cpp): the
+    # "Getting Started" first-run wizard (the "library path and game
+    # mods" window) is gated purely on
+    # `!fs::exists(GetConfigPath("settings.xml"))`, nothing more --
+    # every field CemuConfig::Load reads back out of it falls back to a
+    # built-in default if missing, and the on-first-run MLC setup
+    # (CreateDefaultMLCFiles) runs identically whether settings.xml
+    # existed beforehand or not. So a settings.xml existing before
+    # Cemu's own first launch safely skips the wizard outright, which is
+    # exactly what a shortcut meant to launch straight into a game
+    # should do -- verified from source, not a guess. (Ryubing's own
+    # config is version-gated and gets silently discarded if malformed,
+    # which is why that one still stays read-only-if-missing.)
     settings_path = _flatpak_config_dir(entry["app_id"], "Cemu", "settings.xml")
-    if not os.path.isfile(settings_path):
-        return
-    try:
-        tree = ET.parse(settings_path)
-    except ET.ParseError:
-        return
-    root = tree.getroot()
+    if os.path.isfile(settings_path):
+        try:
+            tree = ET.parse(settings_path)
+            root = tree.getroot()
+        except ET.ParseError:
+            return
+    else:
+        os.makedirs(os.path.dirname(settings_path), exist_ok=True)
+        root = ET.Element("content")
+        tree = ET.ElementTree(root)
     game_paths = root.find("GamePaths")
     if game_paths is None:
         game_paths = ET.SubElement(root, "GamePaths")
