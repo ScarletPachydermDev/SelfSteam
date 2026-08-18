@@ -166,16 +166,30 @@ def bios_installed(console):
     already has its BIOS in place skip picking it again. Returns the
     real filename(s) actually found (comma-joined for "all"-mode
     consoles needing more than one), or None -- the picker shows this
-    directly rather than a vague "installed" label."""
+    directly rather than a vague "installed" label.
+
+    Matched case-insensitively against what's actually on disk --
+    install_bios keeps whatever case the picked file originally had
+    (real BIOS dumps routinely ship as e.g. "SCPH1001.BIN", not the
+    lowercase "scph1001.bin" _BIOS_FILENAMES lists), and this runs on a
+    case-sensitive filesystem, so a naive os.path.isfile against the
+    lowercase name alone missed a BIOS that was genuinely already
+    there -- confirmed live, a real install left behind on disk as
+    "SCPH1001.BIN" kept showing the picker again instead of "already
+    installed"."""
     entry = _BIOS_FILENAMES.get(console)
     if not entry:
         return None
     mode, filenames = entry
     system_dir = _system_dir()
-    present = [fn for fn in filenames if os.path.isfile(os.path.join(system_dir, fn))]
+    try:
+        on_disk = {f.lower(): f for f in os.listdir(system_dir)}
+    except FileNotFoundError:
+        on_disk = {}
+    present = [on_disk[fn.lower()] for fn in filenames if fn.lower() in on_disk]
     if mode == "all":
-        return ", ".join(os.path.basename(fn) for fn in filenames) if len(present) == len(filenames) else None
-    return os.path.basename(present[0]) if present else None
+        return ", ".join(present) if len(present) == len(filenames) else None
+    return present[0] if present else None
 
 
 def install_bios(bios_src_path):
