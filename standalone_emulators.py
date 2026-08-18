@@ -24,6 +24,7 @@ import os
 import shlex
 import shutil
 import subprocess
+import xml.etree.ElementTree as ET
 import zipfile
 
 import host_exec
@@ -127,6 +128,130 @@ def _ryubing_args(romfile):
     return ["--fullscreen", shlex.quote(romfile)]
 
 
+def _cemu_args(romfile):
+    # -f/--fullscreen and -g/--game <path>, both confirmed real via
+    # Cemu's own src/config/LaunchSettings.cpp (boost::program_options
+    # definitions, not guessed): "fullscreen,f" takes an implicit true
+    # value (bare -f is enough), "game,g" takes the path of the title to
+    # launch directly, bypassing Cemu's own game-list UI.
+    return ["-f", "-g", shlex.quote(romfile)]
+
+
+def _cemu_configure_game_dir(entry, game_dir):
+    # settings.xml, <content><GamePaths><Entry>...</Entry></GamePaths>,
+    # confirmed via Cemu's own source (config/CemuConfig.cpp's Load/Save)
+    # -- a flat list of directories, not per-game entries, same shape as
+    # Dolphin's own ISOPaths.
+    #
+    # Only touches an existing settings.xml -- same reasoning as
+    # Dolphin's own configure_game_dir: a fresh install (never actually
+    # run yet) has no settings.xml, and Cemu's own CemuApp.cpp treats a
+    # missing file as "first start", writing its own complete set of
+    # defaults on next launch. Writing a partial one ourselves ahead of
+    # that would just needlessly race Cemu's own first-run setup.
+    settings_path = _flatpak_config_dir(entry["app_id"], "Cemu", "settings.xml")
+    if not os.path.isfile(settings_path):
+        return
+    try:
+        tree = ET.parse(settings_path)
+    except ET.ParseError:
+        return
+    root = tree.getroot()
+    game_paths = root.find("GamePaths")
+    if game_paths is None:
+        game_paths = ET.SubElement(root, "GamePaths")
+    if any((e.text or "") == game_dir for e in game_paths.findall("Entry")):
+        return
+    entry_el = ET.SubElement(game_paths, "Entry")
+    entry_el.text = game_dir
+    tree.write(settings_path, encoding="utf-8", xml_declaration=True)
+
+
+def _ryubing_keys_installed(entry):
+    keys_dir = _flatpak_config_dir(entry["app_id"], "Ryujinx", "system")
+    if not os.path.isdir(keys_dir):
+        return None
+    found = sorted(f for f in os.listdir(keys_dir) if f.endswith(".keys"))
+    return ", ".join(found) if found else None
+
+
+def _ryubing_install_keys(entry, keys_path):
+    """Copies picked keys into Ryubing's own real keys directory --
+    confirmed via its actual source (AppDataManager.KeysDirPath =
+    BaseDirPath/system, i.e. ~/.config/Ryujinx/system on Linux,
+    ~/.var/app/<id>/config/Ryujinx/system/ under the Flatpak sandbox),
+    the same directory ContentManager.InstallKeys's own real caller
+    (MainWindowViewModel.HandleKeysInstallation) uses.
+
+    keys_path is a single picked file (prod.keys) -- a real Switch key
+    dump typically has title.keys (per-game) sitting right alongside it
+    too, so this also auto-picks up title.keys from that same folder if
+    it's there, without the user needing to pick it separately (see
+    _em_picker_section's own "keys" display for the matching UI side of
+    this). Returns the list of files actually copied. No parsing/
+    verification of the keys' own contents either way -- Ryubing does
+    that itself on next launch."""
+    dest_dir = _flatpak_config_dir(entry["app_id"], "Ryujinx", "system")
+    os.makedirs(dest_dir, exist_ok=True)
+
+    copied = []
+    dest = os.path.join(dest_dir, os.path.basename(keys_path))
+    shutil.copy2(keys_path, dest)
+    copied.append(dest)
+
+    sibling = os.path.join(os.path.dirname(keys_path), "title.keys")
+    if os.path.basename(keys_path) != "title.keys" and os.path.isfile(sibling):
+        sibling_dest = os.path.join(dest_dir, "title.keys")
+        shutil.copy2(sibling, sibling_dest)
+        copied.append(sibling_dest)
+
+    return copied
+
+
+# The single commented-out line Cemu's own KeyCache.cpp writes into a
+# freshly-created keys.txt on first run ("541b9889519b27d363cd21604b97c67a
+# # example key (can be deleted)") -- confirmed via source. keys.txt
+# existing at all doesn't mean a usable key was ever added, since Cemu
+# creates this file itself before the user has done anything.
+_CEMU_EXAMPLE_KEY = "541b9889519b27d363cd21604b97c67a"
+
+
+def _cemu_keys_path(entry):
+    # keys.txt lives under Cemu's *data* path, not its config path --
+    # confirmed via source (ActiveSettings::GetUserDataPath("keys.txt")
+    # in KeyCache.cpp; CemuApp.cpp sets user_data_path from
+    # XDG_DATA_HOME, separately from config_path's XDG_CONFIG_HOME).
+    # Under Flatpak that's ~/.var/app/<id>/data/Cemu/keys.txt, a
+    # genuinely different subtree than the ~/.var/app/<id>/config one
+    # Ryubing's keys and Cemu's own settings.xml both live under.
+    return _flatpak_data_dir(entry["app_id"], "Cemu", "keys.txt")
+
+
+def _cemu_keys_installed(entry):
+    keys_path = _cemu_keys_path(entry)
+    if not os.path.isfile(keys_path):
+        return None
+    with open(keys_path) as f:
+        for line in f:
+            line = line.split("#", 1)[0].strip()
+            if line and line.lower() != _CEMU_EXAMPLE_KEY.lower():
+                return "keys.txt"
+    return None
+
+
+def _cemu_install_keys(entry, keys_path):
+    """Copies a picked keys.txt into Cemu's own real data directory --
+    same file KeyCache.cpp itself reads from (one AES-128 key per line,
+    hex, '#'/';' start a comment) and creates with just the example key
+    commented out if missing entirely. Overwrites whatever's there,
+    same "last pick wins" behavior as every other keys/firmware picker
+    in this app."""
+    dest = _cemu_keys_path(entry)
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    shutil.copy2(keys_path, dest)
+    return [dest]
+
+
 # Keyed by the emulator's own name (not "<consoles> (<emulator>)") --
 # the dropdown shows "<name> - <consoles>" built from these two fields
 # directly (native <option> elements can't mix two text colors/weights
@@ -166,9 +291,30 @@ EMULATORS = {
         "needs_firmware": True,
         "args": _ryubing_args,
         "configure_game_dir": _ryubing_configure_game_dir,
+        "keys_installed": _ryubing_keys_installed,
+        "install_keys": _ryubing_install_keys,
+        "keys_tooltip": "Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
         # .nsp omitted from the ROM picker -- not supported by Ryubing
         # (or Eden, its other fork) per real user testing, not guessed.
         "rom_exclude_extensions": {".nsp"},
+    },
+    "Cemu": {
+        "install_type": "flathub",
+        "app_id": "info.cemu.Cemu",
+        "consoles": "Nintendo Wii U",
+        # No traditional BIOS and no separate firmware dump needed --
+        # unlike Ryubing/Switch, Cemu boots and runs games without any
+        # official Wii U system files at all. keys.txt is needed for
+        # most real commercial dumps (WUD/WUX are typically encrypted),
+        # but is a single small text file, not a firmware install.
+        "needs_bios": False,
+        "needs_keys": True,
+        "needs_firmware": False,
+        "args": _cemu_args,
+        "configure_game_dir": _cemu_configure_game_dir,
+        "keys_installed": _cemu_keys_installed,
+        "install_keys": _cemu_install_keys,
+        "keys_tooltip": "Pick your keys.txt -- most real Wii U game dumps (WUD/WUX) are encrypted and need this to decrypt.",
     },
 }
 
@@ -286,6 +432,15 @@ def _flatpak_config_dir(app_id, *parts):
     return os.path.join(os.path.expanduser(f"~/.var/app/{app_id}/config"), *parts)
 
 
+def _flatpak_data_dir(app_id, *parts):
+    # Flatpak's own separate redirect for XDG_DATA_HOME (~/.local/share
+    # unsandboxed), distinct from _flatpak_config_dir's XDG_CONFIG_HOME
+    # one -- needed because not every app keeps everything under config
+    # the way RetroArch/Ryubing do (see Cemu's keys.txt, confirmed via
+    # its own source to live under XDG_DATA_HOME specifically).
+    return os.path.join(os.path.expanduser(f"~/.var/app/{app_id}/data"), *parts)
+
+
 def keys_installed(name):
     """Whether keys already exist for this emulator -- keys/firmware are
     a one-time install for the emulator itself, not per-shortcut state,
@@ -293,17 +448,18 @@ def keys_installed(name):
     em_ready) only requires freshly picking them when neither is
     present yet, letting an existing shortcut's own Edit link land back
     on the tab without permanently blocking Create just because the
-    keys picker wasn't touched again. Returns the real .keys filename(s)
-    found, comma-joined (e.g. "prod.keys, title.keys"), or None -- the
-    picker shows this directly rather than a vague "installed" label."""
+    keys picker wasn't touched again. Returns a real, user-meaningful
+    label (filename(s) for Ryubing, "keys.txt" for Cemu) or None -- the
+    picker shows this directly rather than a vague "installed" label.
+
+    Dispatches to each entry's own "keys_installed" handler (see
+    EMULATORS) rather than a single shared implementation -- Ryubing's
+    keys are a folder of *.keys files under its config dir, Cemu's is
+    one keys.txt under its data dir with a real-key-vs-example-line
+    distinction to make; there's no shared layout to generalize over."""
     entry = EMULATORS.get(name)
-    if not entry:
-        return None
-    keys_dir = _flatpak_config_dir(entry["app_id"], "Ryujinx", "system")
-    if not os.path.isdir(keys_dir):
-        return None
-    found = sorted(f for f in os.listdir(keys_dir) if f.endswith(".keys"))
-    return ", ".join(found) if found else None
+    handler = entry.get("keys_installed") if entry else None
+    return handler(entry) if handler else None
 
 
 def _firmware_marker_path(entry):
@@ -351,39 +507,18 @@ def firmware_installed(name):
 
 
 def install_keys(name, keys_path):
-    """Copies picked keys into Ryubing's own real keys directory --
-    confirmed via its actual source (AppDataManager.KeysDirPath =
-    BaseDirPath/system, i.e. ~/.config/Ryujinx/system on Linux,
-    ~/.var/app/<id>/config/Ryujinx/system/ under the Flatpak sandbox),
-    the same directory ContentManager.InstallKeys's own real caller
-    (MainWindowViewModel.HandleKeysInstallation) uses.
-
-    keys_path is a single picked file (prod.keys) -- a real Switch key
-    dump typically has title.keys (per-game) sitting right alongside it
-    too, so this also auto-picks up title.keys from that same folder if
-    it's there, without the user needing to pick it separately (see
-    _em_picker_section's own "keys" display for the matching UI side of
-    this). Returns the list of files actually copied. No parsing/
-    verification of the keys' own contents either way -- Ryubing does
-    that itself on next launch."""
+    """Copies a picked keys file into wherever this emulator actually
+    keeps them -- dispatches to each entry's own "install_keys" handler
+    (see EMULATORS and keys_installed's own comment for why there's no
+    shared implementation). Returns whatever that handler returns (the
+    list of files actually copied)."""
     entry = EMULATORS.get(name)
     if not entry:
         raise ValueError(f"No known standalone emulator: {name}")
-    dest_dir = _flatpak_config_dir(entry["app_id"], "Ryujinx", "system")
-    os.makedirs(dest_dir, exist_ok=True)
-
-    copied = []
-    dest = os.path.join(dest_dir, os.path.basename(keys_path))
-    shutil.copy2(keys_path, dest)
-    copied.append(dest)
-
-    sibling = os.path.join(os.path.dirname(keys_path), "title.keys")
-    if os.path.basename(keys_path) != "title.keys" and os.path.isfile(sibling):
-        sibling_dest = os.path.join(dest_dir, "title.keys")
-        shutil.copy2(sibling, sibling_dest)
-        copied.append(sibling_dest)
-
-    return copied
+    handler = entry.get("install_keys")
+    if not handler:
+        raise NotImplementedError(f"{name} has no install_keys handler")
+    return handler(entry, keys_path)
 
 
 def install_firmware_zip(name, zip_path):

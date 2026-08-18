@@ -1559,8 +1559,9 @@ def _em_picker_section(prefix, label, state, already_installed=None, info_toolti
         # alongside the picked prod.keys -- install_keys already copies
         # it too automatically when it's there (see its own docstring),
         # so the display reflects that instead of only ever showing the
-        # one file the user actually clicked.
-        if prefix == "keys":
+        # one file the user actually clicked. Ryubing-specific (Cemu's
+        # own keys.txt has no sibling-file concept at all).
+        if prefix == "keys" and state.get("em_emulator") == "Ryubing":
             abs_selected = _ra_safe_join(selected_file)
             if abs_selected:
                 sibling = os.path.join(os.path.dirname(abs_selected), "title.keys")
@@ -1689,7 +1690,7 @@ def _emulators_tab_panel_html(state, chosen=None):
         _em_picker_section(
             "keys", "Select Keys", state,
             already_installed=standalone_emulators.keys_installed(emulator),
-            info_tooltip="Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
+            info_tooltip=standalone_emulators.EMULATORS.get(emulator, {}).get("keys_tooltip"),
         )
         if needs_keys else ""
     )
