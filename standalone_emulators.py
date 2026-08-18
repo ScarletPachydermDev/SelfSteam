@@ -303,12 +303,26 @@ def keys_installed(name):
     return found
 
 
+# Mirrors gridge_server._RA_UPLOAD_DIR (not imported directly -- that'd
+# be a circular import, gridge_server already imports this module) --
+# where an uploaded firmware zip lands, and stays (install_firmware_zip
+# only ever reads from it, never deletes it -- a deliberate choice, see
+# its own docstring). Only uploads land here; a locally-picked zip stays
+# wherever it already lived and isn't found by this lookup.
+_UPLOAD_FIRMWARE_DIR = os.path.expanduser("~/.local/share/gridge/uploads/em-firmware")
+
+
 def firmware_installed(name):
     """Same idea as keys_installed, for the registered firmware dir --
     but a firmware .zip install (see install_firmware_zip) explodes into
-    a directory of NCA-id-named content folders, not anything with a
-    real user-facing filename, so this returns a count-based label
-    ("148 titles") instead of a filename, or None."""
+    a directory of NCA-id-named content folders with no real user-facing
+    filename of its own, so this instead looks for the actual uploaded
+    zip that's still sitting in Gridge's own upload folder (the most
+    recently modified one, if more than one was ever uploaded) and shows
+    its real filename -- falling back to a count-based label ("148
+    titles") only when nothing uploaded is found there (e.g. the
+    firmware was picked from somewhere else on the local filesystem
+    instead of uploaded)."""
     entry = EMULATORS.get(name)
     if not entry:
         return None
@@ -316,7 +330,14 @@ def firmware_installed(name):
     if not os.path.isdir(registered_dir):
         return None
     count = len(os.listdir(registered_dir))
-    return f"{count} titles" if count else None
+    if not count:
+        return None
+    if os.path.isdir(_UPLOAD_FIRMWARE_DIR):
+        uploads = [f for f in os.listdir(_UPLOAD_FIRMWARE_DIR) if not f.startswith(".upload-")]
+        if uploads:
+            newest = max(uploads, key=lambda f: os.path.getmtime(os.path.join(_UPLOAD_FIRMWARE_DIR, f)))
+            return newest
+    return f"{count} titles"
 
 
 def install_keys(name, keys_path):
