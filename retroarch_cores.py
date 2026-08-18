@@ -136,6 +136,43 @@ def _system_dir():
     return os.path.expanduser(f"~/.var/app/{RETROARCH_APP_ID}/config/retroarch/system")
 
 
+# Real expected BIOS filenames per console, confirmed against each
+# core's own page under docs.libretro.com/library/<core> (not guessed) --
+# ("any", [...]) means any one of these satisfies the requirement
+# (region variants, alternate dumps); ("all", [...]) means every one of
+# them has to be present (FreeIntv's exec.bin/grom.bin are two separate,
+# both-required files, not alternatives of each other). A console
+# missing from this dict has no single reliably-checkable filename (PS2's
+# LRPS2 core accepts any filename at all; Neo Geo/FBNeo and MSX/blueMSX
+# both need a whole romset/folder dropped in, not one system-dir file;
+# Sega 32X's own BIOS docs list no required file at all) -- those consoles
+# just always show the picker, same as before this existed.
+_BIOS_FILENAMES = {
+    "Atari 7800": ("any", ["7800 BIOS (U).rom"]),
+    "Sega CD": ("any", ["bios_CD_U.bin", "bios_CD_E.bin", "bios_CD_J.bin"]),
+    "Sega Saturn": ("any", ["sega_101.bin", "mpr-17933.bin"]),
+    "Sega Dreamcast": ("any", ["dc/dc_boot.bin"]),
+    "PlayStation 1": ("any", ["scph5501.bin", "scph1001.bin", "scph7001.bin", "scph101.bin", "PSXONPSP660.bin"]),
+    "Atari Lynx": ("any", ["lynxboot.img"]),
+    "ColecoVision": ("any", ["colecovision.rom", "coleco.rom"]),
+    "Intellivision": ("all", ["exec.bin", "grom.bin"]),
+    "Commodore Amiga": ("any", ["kick34005.A500", "kick37175.A500", "kick40063.A600", "kick39106.A1200", "kick40068.A1200", "kick33180.A500"]),
+}
+
+
+def bios_installed(console):
+    """Real on-disk check, same idea as standalone_emulators.keys_installed/
+    firmware_installed -- lets a second/third/... game for a console that
+    already has its BIOS in place skip picking it again."""
+    entry = _BIOS_FILENAMES.get(console)
+    if not entry:
+        return False
+    mode, filenames = entry
+    system_dir = _system_dir()
+    hits = [os.path.isfile(os.path.join(system_dir, fn)) for fn in filenames]
+    return all(hits) if mode == "all" else any(hits)
+
+
 def install_bios(bios_src_path):
     """Copies a picked BIOS file into RetroArch's system directory,
     keeping its own filename -- the picker never needs to know each

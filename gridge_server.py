@@ -1029,7 +1029,7 @@ def _url_tab_panel_html(query="", couch_mode=False, browser="", chosen=None, nam
 # were browsing, etc.
 _RA_STATE_KEYS = [
     "ra_console", "ra_rompath", "ra_romfile", "ra_biospath", "ra_biosfile",
-    "ra_resolved", "ra_sgdb_q", "ra_romsource", "ra_biossource",
+    "ra_resolved", "ra_sgdb_q", "ra_romsource", "ra_biossource", "ra_bios_skip",
 ]
 _RA_ROOT = os.path.expanduser("~")
 # Under _RA_ROOT on purpose -- uploaded files just become another real
@@ -1112,13 +1112,24 @@ def _ra_list_rows(abs_path, rel_path, state, path_key, file_key):
     return "".join(rows)
 
 
-def _ra_picker_section(prefix, label, state):
+def _ra_picker_section(prefix, label, state, already_installed=False):
     path_key = f"ra_{prefix}path"
     file_key = f"ra_{prefix}file"
     source_key = f"ra_{prefix}source"
+    skip_key = f"ra_{prefix}_skip"
     rel_path = state.get(path_key, "")
     selected_file = state.get(file_key, "")
     dom_prefix = f"ra-{prefix}-source"
+    # A console's BIOS is a one-time install shared by every game that
+    # uses it, not per-shortcut state (same idea as standalone_emulators.
+    # keys_installed/firmware_installed) -- so a second/third game for a
+    # console that's already got its BIOS in place shows it as already
+    # provided instead of demanding it be picked again. skip_key is the
+    # one, deliberate way back to the real picker: clicking its own
+    # "Remove" doesn't delete anything on disk (nothing was freshly
+    # picked to remove), it just says "let me choose a different one"
+    # for this session.
+    show_installed = bool(already_installed and not selected_file and not state.get(skip_key))
     # Real server state (part of _RA_STATE_KEYS), not just a same-page JS
     # toggle -- survives a real reload (console change, upload finishing)
     # the same way every other RA field does, instead of always resetting
@@ -1153,6 +1164,15 @@ def _ra_picker_section(prefix, label, state):
       <span style="flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{label} <span class="required-asterisk">*</span></span>
       <span class="selected-file-name">&#10003; {html.escape(os.path.basename(selected_file))}</span>
       <a href="{remove_href}" class="remove-file-btn" title="Remove file" onclick="return gridgeRaNav(this)">{_X_ICON_SVG}</a>
+      {upload_status}
+    </label>"""
+    elif show_installed:
+        remove_href = _ra_url("/new", state, **{skip_key: "1"})
+        label_row = f"""
+    <label class="field-label" style="display:flex;align-items:center;gap:0.4rem;min-width:0">
+      <span style="flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{label} <span class="required-asterisk">*</span></span>
+      <span class="selected-file-name">&#10003; Already installed</span>
+      <a href="{remove_href}" class="remove-file-btn" title="Pick a different file" onclick="return gridgeRaNav(this)">{_X_ICON_SVG}</a>
       {upload_status}
     </label>"""
     else:
@@ -1212,7 +1232,7 @@ def _ra_picker_section(prefix, label, state):
     # file" (the X on the label row above) is the one, deliberate way
     # back to picking again, not a second browsing UI competing for
     # attention alongside it.
-    picker_ui = "" if selected_file else f"""
+    picker_ui = "" if (selected_file or show_installed) else f"""
     <div class="source-toggle">
       <a class="{upload_active}" href="javascript:void(0)" id="{dom_prefix}-upload-label" onclick="gridgeToggleSource('{dom_prefix}', 'upload', '{source_key}')">Upload</a>
       <a class="{local_active}" href="javascript:void(0)" id="{dom_prefix}-local-label" onclick="gridgeToggleSource('{dom_prefix}', 'local', '{source_key}')">{html.escape(_hostname())}</a>
@@ -1253,7 +1273,10 @@ def _retroarch_tab_panel_html(state, chosen=None):
         for k in _RA_STATE_KEYS if k != "ra_console"
     )
 
-    bios_block = _ra_picker_section("bios", "Select BIOS", state) if needs_bios else ""
+    bios_block = (
+        _ra_picker_section("bios", "Select BIOS", state, already_installed=retroarch_cores.bios_installed(console))
+        if needs_bios else ""
+    )
     rom_block = _ra_picker_section("rom", "Select ROM", state)
 
     # Own Name field, own input name (ra_match_name, not match_name) --
@@ -1315,8 +1338,8 @@ _EM_STATE_KEYS = [
     "em_install_source", "em_emulator",
     "em_rompath", "em_romfile", "em_romsource",
     "em_biospath", "em_biosfile", "em_biossource",
-    "em_keyspath", "em_keysfile", "em_keyssource",
-    "em_firmwarepath", "em_firmwarefile", "em_firmwaresource",
+    "em_keyspath", "em_keysfile", "em_keyssource", "em_keys_skip",
+    "em_firmwarepath", "em_firmwarefile", "em_firmwaresource", "em_firmware_skip",
     "em_resolved", "em_sgdb_q",
 ]
 
@@ -1376,14 +1399,23 @@ def _em_list_rows(abs_path, rel_path, state, path_key, file_key):
     return "".join(rows)
 
 
-def _em_picker_section(prefix, label, state, allow_folder=False):
+def _em_picker_section(prefix, label, state, allow_folder=False, already_installed=False):
     path_key = f"em_{prefix}path"
     file_key = f"em_{prefix}file"
     source_key = f"em_{prefix}source"
+    skip_key = f"em_{prefix}_skip"
     rel_path = state.get(path_key, "")
     selected_file = state.get(file_key, "")
     dom_prefix = f"em-{prefix}-source"
     source = state.get(source_key) or "local"
+    # Keys/firmware are a one-time install for the emulator itself, not
+    # per-shortcut state (see standalone_emulators.keys_installed/
+    # firmware_installed) -- a second/third game for an emulator that's
+    # already set up shows them as already provided instead of demanding
+    # a re-pick every time. skip_key is the deliberate way back to the
+    # real picker (see _ra_picker_section's own comment on the same
+    # pattern for BIOS).
+    show_installed = bool(already_installed and not selected_file and not state.get(skip_key))
 
     upload_status = (
         f'<span id="{dom_prefix}-upload-status" class="upload-status" style="display:none">'
@@ -1408,6 +1440,15 @@ def _em_picker_section(prefix, label, state, allow_folder=False):
       <span style="flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{label} <span class="required-asterisk">*</span></span>
       <span class="selected-file-name">&#10003; {html.escape(display_name)}</span>
       <a href="{remove_href}" class="remove-file-btn" title="Remove file" onclick="return gridgeEmNav(this)">{_X_ICON_SVG}</a>
+      {upload_status}
+    </label>"""
+    elif show_installed:
+        remove_href = _em_url("/new", state, **{skip_key: "1"})
+        label_row = f"""
+    <label class="field-label" style="display:flex;align-items:center;gap:0.4rem;min-width:0">
+      <span style="flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{label} <span class="required-asterisk">*</span></span>
+      <span class="selected-file-name">&#10003; Already installed</span>
+      <a href="{remove_href}" class="remove-file-btn" title="Pick a different file" onclick="return gridgeEmNav(this)">{_X_ICON_SVG}</a>
       {upload_status}
     </label>"""
     else:
@@ -1460,7 +1501,7 @@ def _em_picker_section(prefix, label, state, allow_folder=False):
     # file" (the X on the label row above) is the one, deliberate way
     # back to picking again, not a second browsing UI competing for
     # attention alongside it.
-    picker_ui = "" if selected_file else f"""
+    picker_ui = "" if (selected_file or show_installed) else f"""
     <div class="source-toggle">
       <a class="{upload_active}" href="javascript:void(0)" id="{dom_prefix}-upload-label" onclick="gridgeToggleSource('{dom_prefix}', 'upload', '{source_key}')">Upload</a>
       <a class="{local_active}" href="javascript:void(0)" id="{dom_prefix}-local-label" onclick="gridgeToggleSource('{dom_prefix}', 'local', '{source_key}')">{html.escape(_hostname())}</a>
@@ -1534,8 +1575,16 @@ def _emulators_tab_panel_html(state, chosen=None):
     # allow_folder=True: a real Switch key dump usually has prod.keys
     # and title.keys side by side -- see _em_picker_section's own
     # comment on why "Select current folder" exists at all.
-    keys_block = _em_picker_section("keys", "Select Keys", state, allow_folder=True) if needs_keys else ""
-    firmware_block = _em_picker_section("firmware", "Select Firmware", state) if needs_firmware else ""
+    keys_block = (
+        _em_picker_section("keys", "Select Keys", state, allow_folder=True,
+                           already_installed=standalone_emulators.keys_installed(emulator))
+        if needs_keys else ""
+    )
+    firmware_block = (
+        _em_picker_section("firmware", "Select Firmware", state,
+                           already_installed=standalone_emulators.firmware_installed(emulator))
+        if needs_firmware else ""
+    )
     rom_block = _em_picker_section("rom", "Select ROM", state)
 
     romfile = state.get("em_romfile", "")
@@ -1956,9 +2005,17 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
 
     ra_console = ra_state.get("ra_console", "")
     ra_needs_bios = ra_console in retroarch_cores.CONSOLES_NEEDING_BIOS
+    # Same fallback as em_ready's own keys/firmware -- a console whose
+    # BIOS is already in place (see retroarch_cores.bios_installed)
+    # shouldn't block Create just because this particular game didn't
+    # pick it again, unless the user explicitly asked to override it via
+    # ra_bios_skip (see _ra_picker_section).
     ra_ready = bool(
         ra_console and ra_state.get("ra_romfile")
-        and (ra_state.get("ra_biosfile") if ra_needs_bios else True)
+        and (
+            (ra_state.get("ra_biosfile") or (retroarch_cores.bios_installed(ra_console) and not ra_state.get("ra_bios_skip")))
+            if ra_needs_bios else True
+        )
     )
 
     em_emulator = em_state.get("em_emulator", "")
@@ -1969,16 +2026,18 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
     # install for the emulator itself, not per-shortcut state, so
     # re-visiting the tab (e.g. via an existing shortcut's own Edit
     # link) shouldn't permanently block Create just because the picker
-    # wasn't touched again this time.
+    # wasn't touched again this time. em_keys_skip/em_firmware_skip
+    # override that fallback when the user explicitly asked to pick a
+    # different one (see _em_picker_section).
     em_ready = bool(
         em_entry and em_state.get("em_romfile")
         and (em_state.get("em_biosfile") if em_entry.get("needs_bios") else True)
         and (
-            (em_state.get("em_keysfile") or standalone_emulators.keys_installed(em_emulator))
+            (em_state.get("em_keysfile") or (standalone_emulators.keys_installed(em_emulator) and not em_state.get("em_keys_skip")))
             if em_entry.get("needs_keys") else True
         )
         and (
-            (em_state.get("em_firmwarefile") or standalone_emulators.firmware_installed(em_emulator))
+            (em_state.get("em_firmwarefile") or (standalone_emulators.firmware_installed(em_emulator) and not em_state.get("em_firmware_skip")))
             if em_entry.get("needs_firmware") else True
         )
     )
