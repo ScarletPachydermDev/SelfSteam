@@ -137,6 +137,20 @@ _INFO_ICON_SVG = (
     '<path d="M11 11h2v6h-2zm0-4h2v2h-2z"/></svg>'
 )
 
+
+def _info_tooltip_icon_html(tooltip_text):
+    """Default inline "hover for info" icon next to a label -- native
+    title tooltip (no JS needed), _INFO_ICON_SVG sized/positioned to sit
+    inline with surrounding label text rather than dropping to its own
+    line or looking vertically off. Use this for any future info icon
+    instead of re-deriving the styling each time."""
+    return (
+        '<span style="cursor:help;display:inline-flex;align-items:center;justify-content:center;'
+        'vertical-align:middle;position:relative;top:-0.15rem;color:var(--text-dim)" '
+        f'title="{html.escape(tooltip_text)}">{_INFO_ICON_SVG}</span>'
+    )
+
+
 # (basename, display title, candidate-fetcher, cell width, cell height)
 # -- basenames and the *relative* proportions between categories match
 # gui.py's own ARTWORK_CATEGORIES exactly (170x255, 260x121, 320x104,
@@ -1645,7 +1659,7 @@ def _emulators_tab_panel_html(state, chosen=None):
     return f"""
   <div class="field-group">
     <label class="field-label">Emulator <span class="required-asterisk">*</span>
-      <span style="cursor:help;display:inline-flex;align-items:center;justify-content:center;vertical-align:middle;position:relative;top:-0.15rem;color:var(--text-dim)" title="{html.escape(emulator_info_tooltip)}">{_INFO_ICON_SVG}</span>
+      {_info_tooltip_icon_html(emulator_info_tooltip)}
     </label>
     {source_toggle}
     <form method="get" action="/new#tab-emulators" style="margin:0">
