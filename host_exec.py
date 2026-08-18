@@ -1,11 +1,11 @@
 """Escape our own Flatpak sandbox to run/find things on the real host,
-for when Gridge itself is running as a packaged Flatpak. This is the
+for when SelfSteam itself is running as a packaged Flatpak. This is the
 same class of problem already solved once this project for Steam's own
 Flatpak sandbox: a sandboxed process can't see host binaries (flatpak,
 pidof, a native browser) at all -- flatpak-spawn --host is the standard
 escape hatch, requiring --talk-name=org.freedesktop.Flatpak in this
 app's own manifest. A no-op passthrough when running unsandboxed (e.g.
-directly via `python3 gui.py` during development).
+directly via `python3 selfsteam_server.py` during development).
 """
 import os
 import shutil

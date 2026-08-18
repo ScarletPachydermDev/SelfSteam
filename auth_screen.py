@@ -3,7 +3,7 @@
 Separate entrypoint (like splash.py) since it's launched headless via
 gamescope_splash.launch_foregrounded(), not opened by a user. Same
 plain-Gtk4-no-Adw reasoning as splash.py: runs natively on the host,
-outside Gridge's own Flatpak sandbox where libadwaita normally comes
+outside SelfSteam's own Flatpak sandbox where libadwaita normally comes
 from.
 """
 import signal
@@ -43,18 +43,18 @@ def _build_css(scale):
     s = {name: round(value * scale) for name, value in _BASE_SIZES.items()}
     return f"""
 window {{ background-color: #000000; color: #ffffff; }}
-label.gridge-auth-title {{
+label.selfsteam-auth-title {{
   font-family: Helvetica, Arial, sans-serif; font-size: {s['title_font']}px; font-weight: 400;
 }}
-label.gridge-auth-code {{
+label.selfsteam-auth-code {{
   font-family: Helvetica, Arial, sans-serif; font-weight: 700;
   font-size: {s['code_font']}px; letter-spacing: {s['code_spacing']}px; margin-top: {s['code_margin_top']}px;
 }}
-label.gridge-auth-address {{
+label.selfsteam-auth-address {{
   font-family: Helvetica, Arial, sans-serif; font-size: {s['address_font']}px; font-weight: 400;
   margin: {s['address_margin_top']}px 0 0 {s['address_margin_left']}px;
 }}
-label.gridge-auth-hint {{
+label.selfsteam-auth-hint {{
   font-family: Helvetica, Arial, sans-serif; font-size: {s['hint_font']}px; font-weight: 400;
   margin-bottom: {s['hint_margin_bottom']}px;
 }}
@@ -77,9 +77,9 @@ class AuthScreen(Gtk.ApplicationWindow):
 
         center_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, valign=Gtk.Align.CENTER, halign=Gtk.Align.CENTER)
         title = Gtk.Label(label="Code for web interface")
-        title.add_css_class("gridge-auth-title")
+        title.add_css_class("selfsteam-auth-title")
         code_label = Gtk.Label(label=code)
-        code_label.add_css_class("gridge-auth-code")
+        code_label.add_css_class("selfsteam-auth-code")
         center_box.append(title)
         center_box.append(code_label)
         overlay.set_child(center_box)
@@ -87,13 +87,13 @@ class AuthScreen(Gtk.ApplicationWindow):
         address_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, halign=Gtk.Align.START, valign=Gtk.Align.START)
         for line in (f"{hostname}:{port}", f"{ip}:{port}"):
             line_label = Gtk.Label(label=line, halign=Gtk.Align.START)
-            line_label.add_css_class("gridge-auth-address")
+            line_label.add_css_class("selfsteam-auth-address")
             address_box.append(line_label)
         overlay.add_overlay(address_box)
 
         hint_label = Gtk.Label(label="Press any button or ESC to exit this screen",
                                 halign=Gtk.Align.CENTER, valign=Gtk.Align.END)
-        hint_label.add_css_class("gridge-auth-hint")
+        hint_label.add_css_class("selfsteam-auth-hint")
         overlay.add_overlay(hint_label)
 
         self.set_child(overlay)
@@ -114,7 +114,7 @@ def main():
     ip = sys.argv[3] if len(sys.argv) > 3 else ""
     port = sys.argv[4] if len(sys.argv) > 4 else ""
 
-    app = Gtk.Application(application_id="io.github.ScarletPachydermDev.Gridge.AuthScreen")
+    app = Gtk.Application(application_id="io.github.ScarletPachydermDev.SelfSteam.AuthScreen")
 
     def on_activate(app):
         provider = Gtk.CssProvider()

@@ -5,7 +5,7 @@ one sitting (across URL, and later Apps/RetroArch/Emulators once those
 tabs are wired up) and commit them all at once via the header's "Save
 Changes and Restart Steam OS" button.
 
-Persisted to disk (data/gridge/pending_queue.json under XDG_CONFIG_HOME,
+Persisted to disk (pending_queue.json under XDG_CONFIG_HOME/selfsteam,
 alongside config.json) rather than kept purely in memory: unlike
 auth.py's session/code state, losing a queue silently to a server
 restart would destroy real user work (artwork already downloaded,

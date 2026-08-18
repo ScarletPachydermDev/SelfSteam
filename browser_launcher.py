@@ -20,7 +20,7 @@ shared across derivatives, not Edge-specific):
   (zen.view.compact.*), which is NOT flag-only like the others. Since
   those prefs would also apply the next time the user opens Zen
   normally (same profile, same persistent state), Zen gets a
-  dedicated Gridge-only profile instead of the shared default one --
+  dedicated SelfSteam-only profile instead of the shared default one --
   an explicit tradeoff (no shared logins/addons for Zen specifically)
   the user chose over affecting their regular Zen browsing.
 """
@@ -51,9 +51,14 @@ FIREFOX_APP_IDS = {
 
 ZEN_APP_ID = "app.zen_browser.zen"
 
-# Gridge-dedicated Zen profile -- see module docstring for why this
-# can't just be Zen's own default profile.
-ZEN_PROFILE_DIR = os.path.expanduser("~/.var/app/app.zen_browser.zen/gridge-kiosk-profile")
+# SelfSteam-dedicated Zen profile -- see module docstring for why this
+# can't just be Zen's own default profile. No migration from the old
+# "gridge-kiosk-profile" dirname this app used before its SelfSteam
+# rename -- confirmed on the one live deployment testing this that the
+# profile held nothing but the generated user.js prefs override, no
+# real saved logins, so losing it just means those prefs regenerate
+# fresh under the new path.
+ZEN_PROFILE_DIR = os.path.expanduser("~/.var/app/app.zen_browser.zen/selfsteam-kiosk-profile")
 
 # Confirmed live by reading Zen's own source (ZenCompactMode.mjs) --
 # zen.view.compact.enable-at-startup is the actual persistent switch

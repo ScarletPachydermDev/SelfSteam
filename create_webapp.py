@@ -23,19 +23,23 @@ import standalone_emulators
 import steam_paths
 
 # XDG_CACHE_HOME, not a path next to the source files -- the latter
-# resolves to /app/share/gridge/assets once packaged as a Flatpak,
+# resolves to /app/share/selfsteam/assets once packaged as a Flatpak,
 # which is the read-only app installation dir; writes there would fail
 # entirely. Flatpak automatically redirects XDG_CACHE_HOME to this
 # app's own private, writable cache dir, same pattern config.py already
-# uses for XDG_CONFIG_HOME.
-ASSET_DIR = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "gridge", "assets")
+# uses for XDG_CONFIG_HOME. No migration from the old ~/.cache/gridge/
+# dir this app used before its SelfSteam rename -- unlike config.py's
+# own settings, everything here is a lossy, cheaply-regenerated
+# derivative (SGDB artwork downloads, grid thumbnails), not real user
+# data worth carrying forward.
+ASSET_DIR = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "selfsteam", "assets")
 APPLICATIONS_DIR = os.path.expanduser("~/.local/share/applications")
 
 # Same cache root as ASSET_DIR, own subfolder -- these are small, lossy
 # derivatives of Steam's own grid images (see thumbnail_for_appid),
 # never the real artwork Steam itself displays, so they live entirely
 # separate from anything Steam reads.
-GRID_THUMB_DIR = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "gridge", "grid-thumbs")
+GRID_THUMB_DIR = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "selfsteam", "grid-thumbs")
 # 2x the poster's own CSS display width (166px, see .poster-art) --
 # sharp on HiDPI without hauling in SGDB's original, which routinely
 # ships 600x900 (or larger "featured" variants well past that) for what
@@ -44,20 +48,28 @@ _GRID_THUMB_WIDTH = 332
 
 # Where the launcher lives when Steam itself is natively installed --
 # native Steam has full host filesystem access, so pointing straight at
-# wherever Gridge itself is installed works fine.
+# wherever SelfSteam itself is installed works fine.
 LOCAL_LAUNCH_WRAPPER = os.path.join(os.path.dirname(__file__), "launch-browser.sh")
 
 # Flatpak Steam's sandbox does NOT get general home/host filesystem
 # access by default (confirmed: its stock permissions only grant a
 # handful of narrow XDG dirs like music/pictures, nothing that would
-# cover wherever Gridge happens to be installed) -- so exec'ing
+# cover wherever SelfSteam happens to be installed) -- so exec'ing
 # LOCAL_LAUNCH_WRAPPER silently fails (Steam shows "Launching..." then
 # reverts to "Play" with no error, no window, no process). The one path
 # Flatpak Steam is guaranteed full access to is its own persistent data
 # dir, so for a Flatpak Steam install we copy the launcher (and its
 # sync_gamescope_resolution.py + vendored Xlib dependency) there instead.
 FLATPAK_STEAM_DATA_DIR = os.path.expanduser("~/.var/app/com.valvesoftware.Steam")
-FLATPAK_LAUNCHER_DIR = os.path.join(FLATPAK_STEAM_DATA_DIR, "gridge-launcher")
+# "selfsteam-launcher" going forward -- but is_gridge_launch_wrapper below
+# still has to recognize the old "gridge-launcher" name too. Shortcuts
+# created before this app's SelfSteam rename have that literal old path
+# baked into their exe field in Steam's own shortcuts.vdf; nothing here
+# rewrites those, so the old directory has to keep existing and keep
+# being recognized as "ours" for as long as any such shortcut is still
+# around, or listing/removing them in the UI would silently stop working.
+FLATPAK_LAUNCHER_DIR = os.path.join(FLATPAK_STEAM_DATA_DIR, "selfsteam-launcher")
+_OLD_FLATPAK_LAUNCHER_DIRNAME = "gridge-launcher"
 FLATPAK_LAUNCH_WRAPPER = os.path.join(FLATPAK_LAUNCHER_DIR, "launch-browser.sh")
 _LAUNCHER_COPY_ITEMS = ["sync_gamescope_resolution.py", "vendor"]
 
@@ -88,16 +100,22 @@ exec flatpak-spawn --host --env=DISPLAY="$DISPLAY" --env=WAYLAND_DISPLAY="$WAYLA
 
 
 def is_gridge_launch_wrapper(exe):
-    """True if exe is one of the launch-browser.sh paths Gridge itself
+    """True if exe is one of the launch-browser.sh paths this tool
     creates shortcuts with -- used by export/import to find only
     shortcuts this tool created, never a user's own unrelated non-Steam
     shortcuts. Covers the native-Steam-root-relative case (see
     get_launch_wrapper_path) by directory name rather than a fixed
     constant, since the exact path depends on which native root was
-    detected (~/.local/share/Steam vs ~/.steam/steam)."""
+    detected (~/.local/share/Steam vs ~/.steam/steam). Matches the old
+    "gridge-launcher" dirname alongside the current "selfsteam-launcher"
+    one -- see FLATPAK_LAUNCHER_DIR's own comment for why that has to
+    stay recognized indefinitely, not just during a transition window."""
     if exe in (LOCAL_LAUNCH_WRAPPER, FLATPAK_LAUNCH_WRAPPER):
         return True
-    return os.path.basename(exe) == "launch-browser.sh" and os.path.basename(os.path.dirname(exe)) == "gridge-launcher"
+    if os.path.basename(exe) != "launch-browser.sh":
+        return False
+    dirname = os.path.basename(os.path.dirname(exe))
+    return dirname in ("selfsteam-launcher", _OLD_FLATPAK_LAUNCHER_DIRNAME)
 
 
 def _grant_steam_flatpak_spawn_permission():
@@ -107,8 +125,8 @@ def _grant_steam_flatpak_spawn_permission():
     call failed: ServiceUnknown ... --host only works when the Flatpak
     is allowed to talk to org.freedesktop.Flatpak" -- Valve never
     designed Steam's Flatpak build to spawn arbitrary host processes for
-    non-Steam shortcuts). Gridge grants this itself (via flatpak-spawn
-    --host if Gridge itself is sandboxed, direct otherwise) rather than
+    non-Steam shortcuts). SelfSteam grants this itself (via flatpak-spawn
+    --host if SelfSteam itself is sandboxed, direct otherwise) rather than
     requiring the user to run `flatpak override` manually. Idempotent;
     a no-op if already granted. Takes effect on Steam's next launch,
     not an already-running instance."""
@@ -125,7 +143,7 @@ def _copy_launcher(dest_dir, script_content=None):
     script_content overrides launch-browser.sh's own content (used for
     the flatpak-spawn-wrapped Flatpak-Steam variant); None just copies
     the plain script unchanged (native Steam, which isn't sandboxed and
-    so needs no escape hatch, regardless of whether Gridge itself is)."""
+    so needs no escape hatch, regardless of whether SelfSteam itself is)."""
     os.makedirs(dest_dir, exist_ok=True)
     src_dir = os.path.dirname(__file__)
     for name in _LAUNCHER_COPY_ITEMS:
@@ -151,25 +169,26 @@ def _copy_launcher(dest_dir, script_content=None):
 def get_launch_wrapper_path():
     """Return the launch-browser.sh path to use as this shortcut's exe.
 
-    LOCAL_LAUNCH_WRAPPER (wherever Gridge's own source lives) only
-    works when BOTH sides can see it: Gridge running unsandboxed
-    (plain `python3 gui.py`, e.g. during development) AND Steam being
-    native. Any other combination needs the wrapper relocated
-    somewhere both sides can reach regardless of sandboxing:
+    LOCAL_LAUNCH_WRAPPER (wherever SelfSteam's own source lives) only
+    works when BOTH sides can see it: SelfSteam running unsandboxed
+    (plain `python3 selfsteam_server.py`, e.g. during development) AND
+    Steam being native. Any other combination needs the wrapper
+    relocated somewhere both sides can reach regardless of sandboxing:
 
     - Steam is Flatpak: its sandbox can't see anything outside its own
       persistent data dir (confirmed: narrow stock permissions, no
       general home access), so the wrapper goes there, wrapped with
       flatpak-spawn --host since that sandbox is what constrains the
       browser-launch command inside it.
-    - Steam is native but Gridge itself is a packaged Flatpak: Gridge's
-      own install location (e.g. /app/share/gridge) isn't a real host
-      path at all once packaged -- it only exists inside Gridge's own
-      mount namespace, so even native Steam's full host access can't
-      see it (confirmed on real hardware: "No such file or directory"
-      for a /app/share/gridge/launch-browser.sh exe). The wrapper goes
-      inside Steam's own root instead, which Gridge can still write to
-      (a plain home-relative path, covered by --filesystem=home) and
+    - Steam is native but SelfSteam itself is a packaged Flatpak:
+      SelfSteam's own install location (e.g. /app/share/selfsteam) isn't
+      a real host path at all once packaged -- it only exists inside
+      SelfSteam's own mount namespace, so even native Steam's full host
+      access can't see it (confirmed on real hardware: "No such file or
+      directory" for a /app/share/gridge/launch-browser.sh exe, the
+      equivalent path under this project's old name). The wrapper goes
+      inside Steam's own root instead, which SelfSteam can still write
+      to (a plain home-relative path, covered by --filesystem=home) and
       native Steam already reads/writes freely with no sandbox of its
       own to route around -- so the plain, unwrapped script is enough.
     """
@@ -187,7 +206,7 @@ def get_launch_wrapper_path():
         _grant_steam_flatpak_spawn_permission()
         return _copy_launcher(FLATPAK_LAUNCHER_DIR, script_content=_FLATPAK_STEAM_LAUNCH_SCRIPT)
 
-    return _copy_launcher(os.path.join(steam_root, "gridge-launcher"))
+    return _copy_launcher(os.path.join(steam_root, "selfsteam-launcher"))
 
 
 def slugify(name):
@@ -535,7 +554,7 @@ def thumbnail_for_appid(appid):
     source file actually changes (mtime-compared, not just "does a
     thumbnail exist") -- e.g. re-picking artwork on an Edit -- but never
     touches the original itself, since that's Steam's own file, not
-    Gridge's to modify. Returns the original path unchanged if Pillow
+    SelfSteam's to modify. Returns the original path unchanged if Pillow
     isn't available or the source can't be decoded, so a thumbnail
     failure degrades to the pre-thumbnail behavior rather than a broken
     image."""
@@ -560,7 +579,7 @@ def thumbnail_for_appid(appid):
 
 
 def list_gridge_shortcuts():
-    """Every non-Steam shortcut Gridge itself created (matched via
+    """Every non-Steam shortcut this tool itself created (matched via
     is_gridge_launch_wrapper on the exe field, never a user's own
     unrelated non-Steam shortcuts), across every Steam user profile.
     Returns dicts with appid/name/url/ra_console/ra_romfile/em_emulator/
@@ -603,7 +622,7 @@ def list_gridge_shortcuts():
 
 
 def remove_gridge_shortcut(appid):
-    """Removes a Gridge-created shortcut (and its stale grid assets) by
+    """Removes a shortcut this tool created (and its stale grid assets) by
     appid, across every Steam user profile. No-ops (not an error) if
     already gone some other way -- deleting is inherently idempotent
     from the caller's point of view."""

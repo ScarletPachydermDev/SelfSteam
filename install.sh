@@ -1,5 +1,5 @@
 #!/bin/sh
-# Installs Gridge Server as a boot-persistent systemd user service.
+# Installs the SelfSteam server as a boot-persistent systemd user service.
 #
 # Not sandboxed (no Flatpak yet), so unlike e.g. Jellyfin's Flatpak --
 # which has to ship a unit template plus a copy-paste setup script,
@@ -8,14 +8,24 @@
 # everything directly.
 set -e
 
-INSTALL_DIR="$HOME/.local/opt/gridge-web-server"
-SERVICE_FILE="$HOME/.config/systemd/user/gridge-server.service"
-CONFIG_FILE="$HOME/.config/gridge/config.json"
+INSTALL_DIR="$HOME/.local/opt/selfsteam"
+SERVICE_FILE="$HOME/.config/systemd/user/selfsteam.service"
+# ~/.config/selfsteam, matching config.py's own CONFIG_DIR -- if this
+# app already ran once under its previous "gridge" name, config.py's
+# own module-level migration already carried config.json/
+# pending_queue.json/remembered_devices.json over to this path the
+# first time selfsteam_server.py started, so the check below just finds
+# them already there. This only matters for a genuinely fresh machine
+# that has never run either name's Python side yet.
+CONFIG_FILE="$HOME/.config/selfsteam/config.json"
+# Gridge's own desktop app was never renamed, just its GH repo slug (now
+# gridge-desktop) -- its real Flatpak app-id and internal config path
+# are unchanged, so this keeps pointing at "Gridge" on purpose.
 FLATPAK_CONFIG_FILE="$HOME/.var/app/io.github.ScarletPachydermDev.Gridge/config/gridge/config.json"
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 
-echo "Installing Gridge Server to $INSTALL_DIR"
+echo "Installing SelfSteam to $INSTALL_DIR"
 mkdir -p "$INSTALL_DIR"
 cp "$SCRIPT_DIR"/*.py "$SCRIPT_DIR/launch-browser.sh" "$INSTALL_DIR/"
 chmod +x "$INSTALL_DIR"/*.py "$INSTALL_DIR/launch-browser.sh"
@@ -37,7 +47,7 @@ fi
 mkdir -p "$(dirname "$SERVICE_FILE")"
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=Gridge Server
+Description=SelfSteam
 After=network-online.target
 
 [Service]
@@ -51,7 +61,7 @@ Type=simple
 # steam-launcher.service itself reads from.
 EnvironmentFile=-%t/gamescope-environment
 WorkingDirectory=$INSTALL_DIR
-ExecStart=/usr/bin/python3 $INSTALL_DIR/gridge_server.py
+ExecStart=/usr/bin/python3 $INSTALL_DIR/selfsteam_server.py
 Restart=on-failure
 RestartSec=5
 
@@ -65,12 +75,12 @@ EOF
 loginctl enable-linger "$USER"
 
 systemctl --user daemon-reload
-systemctl --user enable gridge-server.service
+systemctl --user enable selfsteam.service
 # restart, not just enable --now: re-running this script after a code/
 # unit-file update should apply it to the running instance, not leave
 # a stale already-running process untouched.
-systemctl --user restart gridge-server.service
+systemctl --user restart selfsteam.service
 
 echo
-echo "Gridge Server is running and will start automatically on boot."
-systemctl --user --no-pager status gridge-server.service
+echo "SelfSteam is running and will start automatically on boot."
+systemctl --user --no-pager status selfsteam.service

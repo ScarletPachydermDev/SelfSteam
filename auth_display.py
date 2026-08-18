@@ -16,11 +16,11 @@ import window_titles
 
 _AUTH_SCREEN_SCRIPT = os.path.join(os.path.dirname(__file__), "auth_screen.py")
 
-# Same env var + default gridge_server.py itself reads its port from --
-# duplicated rather than imported, since gridge_server.py already
+# Same env var + default selfsteam_server.py itself reads its port from
+# -- duplicated rather than imported, since selfsteam_server.py already
 # imports this module (auth_display) and a reverse import would be
 # circular.
-_PORT = os.environ.get("GRIDGE_SERVER_PORT", "8845")
+_PORT = os.environ.get("SELFSTEAM_SERVER_PORT", "8845")
 
 _lock = threading.Lock()
 _proc = None

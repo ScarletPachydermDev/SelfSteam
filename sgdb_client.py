@@ -65,7 +65,7 @@ def verify_api_key(key):
     timeout, unexpected response) so callers can tell "definitely
     invalid" apart from "couldn't check right now"."""
     url = f"{API_BASE}/search/autocomplete/a"
-    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {key}", "User-Agent": "gridge/0.1"})
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {key}", "User-Agent": "selfsteam/0.1"})
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.load(resp)
@@ -86,7 +86,7 @@ def _get(path, params=None):
         url,
         headers={
             "Authorization": f"Bearer {_api_key()}",
-            "User-Agent": "gridge/0.1",
+            "User-Agent": "selfsteam/0.1",
         },
     )
     try:
@@ -223,7 +223,7 @@ def extract_largest_png_from_ico(ico_bytes):
 
 
 def download(url, dest_path):
-    req = urllib.request.Request(url, headers={"User-Agent": "gridge/0.1"})
+    req = urllib.request.Request(url, headers={"User-Agent": "selfsteam/0.1"})
     with urllib.request.urlopen(req, timeout=30) as resp:
         data = resp.read()
     with open(dest_path, "wb") as f:

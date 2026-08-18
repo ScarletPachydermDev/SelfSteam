@@ -1,7 +1,7 @@
 """Foreground a window in gamescope's compositor via its own X11 control
 properties (STEAM_GAME + GAMESCOPECTRL_BASELAYER_APPID) -- the same
-mechanism gamescope-fg uses, reimplemented here so Gridge Server has no
-runtime dependency on Chimera being installed.
+mechanism gamescope-fg uses, reimplemented here so the SelfSteam server
+has no runtime dependency on Chimera being installed.
 
 Confirmed live (2026-08-12) that a window registered this way must be
 re-registered every time -- it does not stay foregrounded across a

@@ -142,7 +142,7 @@ def _ryubing_args(romfile):
 # <app_id>" contract as retroarch_cores.launch_args), and
 # configure_game_dir(entry, game_dir) -- optional (None if an emulator
 # doesn't have one yet), called once right after a fresh install() (see
-# configure_game_dir's own docstring below) to register Gridge's own
+# configure_game_dir's own docstring below) to register SelfSteam's own
 # upload folder as a watched game directory in the emulator's own
 # settings, so uploaded games show up in its own game list too, not
 # just as Steam shortcuts.
@@ -259,7 +259,7 @@ def launch_args(name, romfile):
 
 def configure_game_dir(name, game_dir):
     """Registers game_dir as a watched ROM folder in the emulator's own
-    settings, so games Gridge uploaded show up in the emulator's own
+    settings, so games SelfSteam uploaded show up in the emulator's own
     game list too, not just as a Steam shortcut -- additive only (never
     removes/replaces anything already there), and each per-emulator
     configurator only ever touches an EXISTING config file (see their
@@ -308,6 +308,15 @@ def keys_installed(name):
 
 def _firmware_marker_path(entry):
     contents_dir = _flatpak_config_dir(entry["app_id"], "Ryujinx", "bis", "system", "Contents")
+    return os.path.join(contents_dir, ".selfsteam-firmware-source")
+
+
+def _old_firmware_marker_path(entry):
+    # Read-only fallback for a marker written before this app's SelfSteam
+    # rename -- a real one already exists from prior firmware installs,
+    # and losing it would silently regress firmware_installed()'s real-
+    # filename display back to the generic "N titles" count-based label.
+    contents_dir = _flatpak_config_dir(entry["app_id"], "Ryujinx", "bis", "system", "Contents")
     return os.path.join(contents_dir, ".gridge-firmware-source")
 
 
@@ -331,6 +340,8 @@ def firmware_installed(name):
     if not count:
         return None
     marker_path = _firmware_marker_path(entry)
+    if not os.path.isfile(marker_path):
+        marker_path = _old_firmware_marker_path(entry)
     if os.path.isfile(marker_path):
         with open(marker_path) as f:
             marker = f.read().strip()

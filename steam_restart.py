@@ -80,7 +80,7 @@ def _launch_and_wait(argv):
 def launch_flatpak_steam_detached():
     """Launch Steam (Flatpak) right after installing it, detached from
     our own process (start_new_session=True) so it keeps running even
-    if Gridge itself closes. The Flathub Steam package is just a small
+    if SelfSteam itself closes. The Flathub Steam package is just a small
     bootstrap downloader -- launching it is what actually triggers the
     real client's multi-minute first-time download/install, which
     otherwise happens completely silently with no visible progress at

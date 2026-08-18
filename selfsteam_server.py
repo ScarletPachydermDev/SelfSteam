@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Gridge Server: headless web UI for adding Steam shortcuts from another
+"""SelfSteam: headless web UI for adding Steam shortcuts from another
 device while the target machine is in Game Mode. No JavaScript by
 design -- plain HTML forms, server-rendered, one request per step,
 except two small deliberate exceptions (dark-mode toggle, login
@@ -55,13 +55,13 @@ import service_resolver
 import sgdb_client as sgdb
 import steam_paths
 
-PORT = int(os.environ.get("GRIDGE_SERVER_PORT", "8845"))
-SESSION_COOKIE = "gridge_session"
-REMEMBER_COOKIE = "gridge_remember"
+PORT = int(os.environ.get("SELFSTEAM_SERVER_PORT", "8845"))
+SESSION_COOKIE = "selfsteam_session"
+REMEMBER_COOKIE = "selfsteam_remember"
 _DARKREADER_PATH = os.path.join(os.path.dirname(__file__), "vendor", "darkreader.js")
 _POSTER_FRAME_PATH = os.path.join(os.path.dirname(__file__), "vendor", "poster-frame.webp")
 _NAME_FIELD_WAND_PATH = os.path.join(os.path.dirname(__file__), "vendor", "name-field-wand.webp")
-_ADD_FORM_ID = "gridge-add-form"
+_ADD_FORM_ID = "selfsteam-add-form"
 _SEARCH_ICON_SVG = (
     '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="white" '
     'stroke-width="3" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle>'
@@ -167,7 +167,7 @@ ARTWORK_CATEGORIES = [
 PAGE_HEAD = """<!doctype html>
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Gridge Server</title>
+<title>SelfSteam</title>
 <!--EXTRA_HEAD-->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -197,14 +197,14 @@ body {
   display: flex; flex-direction: column; height: 100vh;
 }
 ::placeholder { color: #9a9a9a; }
-header.gridge-header {
+header.selfsteam-header {
   background: var(--card-bg); border-bottom: 1px solid var(--border);
   padding: 1.1rem 2rem; display: flex; align-items: center; justify-content: space-between;
   flex-wrap: wrap; gap: 1rem; flex: 0 0 auto;
 }
-.gridge-header-left { display: flex; align-items: center; gap: 1rem; }
-.gridge-header-title strong { font-size: 1.2rem; font-weight: 700; letter-spacing: -0.01em; }
-.gridge-header-actions { display: flex; gap: 0.6rem; align-items: center; }
+.selfsteam-header-left { display: flex; align-items: center; gap: 1rem; }
+.selfsteam-header-title strong { font-size: 1.2rem; font-weight: 700; letter-spacing: -0.01em; }
+.selfsteam-header-actions { display: flex; gap: 0.6rem; align-items: center; }
 .icon-btn-round {
   width: 3rem; margin: 0; padding: 0; height: 3rem; border-radius: 10px;
   border: none; background: var(--card-bg); color: var(--text-dim);
@@ -249,7 +249,7 @@ header.gridge-header {
 /* min-height:0 everywhere down this flex chain is load-bearing: flex
    items default to min-height:auto, which refuses to shrink below
    their content size and lets real content (e.g. many artwork
-   thumbnails) push main/.gridge-columns/the cards taller than the
+   thumbnails) push main/.selfsteam-columns/the cards taller than the
    viewport -- which then cascades into align-items:stretch handing
    every column that same inflated height, so a column with only one
    real content row (flex:1) stretches it to fill that whole inflated
@@ -264,14 +264,14 @@ main { width: 100%; padding: 2rem; flex: 1; min-height: 0; display: flex; flex-d
    (e.g. the artwork column's images) pushed the whole page taller.
    Wrapping only ever matters for the stacked mobile layout below,
    which sets its own rules including flex-wrap. */
-.gridge-columns { display: flex; gap: 1.5rem; align-items: stretch; flex-wrap: nowrap; flex: 1; min-height: 0; }
-.gridge-left, .gridge-middle, .gridge-right { display: flex; flex-direction: column; min-height: 0; }
-.gridge-left, .gridge-middle { flex: 1 1 300px; min-width: 280px; }
-.gridge-right { flex: 1.4 1 400px; min-width: 320px; }
+.selfsteam-columns { display: flex; gap: 1.5rem; align-items: stretch; flex-wrap: nowrap; flex: 1; min-height: 0; }
+.selfsteam-left, .selfsteam-middle, .selfsteam-right { display: flex; flex-direction: column; min-height: 0; }
+.selfsteam-left, .selfsteam-middle { flex: 1 1 300px; min-width: 280px; }
+.selfsteam-right { flex: 1.4 1 400px; min-width: 320px; }
 /* Pins the Add button to the bottom of the left column regardless of
    how much is above it, as long as the column has real height to grow
-   into -- which align-items:stretch on .gridge-columns guarantees. */
-.gridge-spacer { flex: 1 1 auto; }
+   into -- which align-items:stretch on .selfsteam-columns guarantees. */
+.selfsteam-spacer { flex: 1 1 auto; }
 .card {
   background: var(--card-bg); border: 1px solid var(--border);
   border-radius: 12px; padding: 1.15rem; display: flex; flex-direction: column; gap: 0.9rem;
@@ -438,21 +438,21 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
 /* URL is the default-active tab (also what Apps/Emulators, with no
    content of their own yet, still fall back to showing) -- only
    switches away when a *different* tab's own #target marker is
-   actually the current URL fragment. ~ .gridge-columns (a descendant
+   actually the current URL fragment. ~ .selfsteam-columns (a descendant
    combinator after it, not a direct sibling) since the #tab-X marker
-   spans sit just above .gridge-columns (see _tab_bar_targets_html),
+   spans sit just above .selfsteam-columns (see _tab_bar_targets_html),
    so this same :target state can also reach the middle/right columns
    below (see .middle-panel-retroarch etc.), not just the left
    column's own .tab-bar/.tab-panels. */
 .tab-bar a[href="#tab-url"] { background: #fff; color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
-#tab-apps:target ~ .gridge-columns .tab-bar a[href="#tab-url"],
-#tab-retroarch:target ~ .gridge-columns .tab-bar a[href="#tab-url"],
-#tab-emulators:target ~ .gridge-columns .tab-bar a[href="#tab-url"] {
+#tab-apps:target ~ .selfsteam-columns .tab-bar a[href="#tab-url"],
+#tab-retroarch:target ~ .selfsteam-columns .tab-bar a[href="#tab-url"],
+#tab-emulators:target ~ .selfsteam-columns .tab-bar a[href="#tab-url"] {
   background: transparent; color: var(--text-dim); box-shadow: none;
 }
-#tab-apps:target ~ .gridge-columns .tab-bar a[href="#tab-apps"],
-#tab-retroarch:target ~ .gridge-columns .tab-bar a[href="#tab-retroarch"],
-#tab-emulators:target ~ .gridge-columns .tab-bar a[href="#tab-emulators"] {
+#tab-apps:target ~ .selfsteam-columns .tab-bar a[href="#tab-apps"],
+#tab-retroarch:target ~ .selfsteam-columns .tab-bar a[href="#tab-retroarch"],
+#tab-emulators:target ~ .selfsteam-columns .tab-bar a[href="#tab-emulators"] {
   background: #fff; color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,0.12);
 }
 /* flex:1 on both so whichever tab is active can stretch to fill the
@@ -481,26 +481,26 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
 .tab-panel::-webkit-scrollbar-track { background: transparent; }
 .tab-panel::-webkit-scrollbar-thumb { background: var(--text-dim); border-radius: 4px; }
 .tab-panel-url { display: flex; }
-#tab-apps:target ~ .gridge-columns .tab-panels .tab-panel-url,
-#tab-retroarch:target ~ .gridge-columns .tab-panels .tab-panel-url,
-#tab-emulators:target ~ .gridge-columns .tab-panels .tab-panel-url { display: none; }
-#tab-apps:target ~ .gridge-columns .tab-panels .tab-panel-apps,
-#tab-retroarch:target ~ .gridge-columns .tab-panels .tab-panel-retroarch,
-#tab-emulators:target ~ .gridge-columns .tab-panels .tab-panel-emulators { display: flex; }
+#tab-apps:target ~ .selfsteam-columns .tab-panels .tab-panel-url,
+#tab-retroarch:target ~ .selfsteam-columns .tab-panels .tab-panel-url,
+#tab-emulators:target ~ .selfsteam-columns .tab-panels .tab-panel-url { display: none; }
+#tab-apps:target ~ .selfsteam-columns .tab-panels .tab-panel-apps,
+#tab-retroarch:target ~ .selfsteam-columns .tab-panels .tab-panel-retroarch,
+#tab-emulators:target ~ .selfsteam-columns .tab-panels .tab-panel-emulators { display: flex; }
 /* Middle/right columns: URL's own content is the default (also what
    Apps falls back to showing, same as before RetroArch/Emulators had
    any content of their own) -- only switches away from it when that
    specific tab is the targeted one. */
 .middle-panel-retroarch, .right-panel-retroarch,
 .middle-panel-emulators, .right-panel-emulators { display: none; }
-#tab-retroarch:target ~ .gridge-columns .middle-panel-url,
-#tab-retroarch:target ~ .gridge-columns .right-panel-url { display: none; }
-#tab-retroarch:target ~ .gridge-columns .middle-panel-retroarch,
-#tab-retroarch:target ~ .gridge-columns .right-panel-retroarch { display: flex; }
-#tab-emulators:target ~ .gridge-columns .middle-panel-url,
-#tab-emulators:target ~ .gridge-columns .right-panel-url { display: none; }
-#tab-emulators:target ~ .gridge-columns .middle-panel-emulators,
-#tab-emulators:target ~ .gridge-columns .right-panel-emulators { display: flex; }
+#tab-retroarch:target ~ .selfsteam-columns .middle-panel-url,
+#tab-retroarch:target ~ .selfsteam-columns .right-panel-url { display: none; }
+#tab-retroarch:target ~ .selfsteam-columns .middle-panel-retroarch,
+#tab-retroarch:target ~ .selfsteam-columns .right-panel-retroarch { display: flex; }
+#tab-emulators:target ~ .selfsteam-columns .middle-panel-url,
+#tab-emulators:target ~ .selfsteam-columns .right-panel-url { display: none; }
+#tab-emulators:target ~ .selfsteam-columns .middle-panel-emulators,
+#tab-emulators:target ~ .selfsteam-columns .right-panel-emulators { display: flex; }
 .coming-soon { color: var(--text-dim); font-size: 0.85rem; padding: 1rem 0; text-align: center; }
 /* RetroArch tab: BIOS/ROM source toggles + embedded server file picker.
    Plain links, not a CSS-radio-hack -- that trick is client-side only
@@ -541,11 +541,11 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
 /* Pure CSS spinner (no JS needed for the animation) -- shown next to
    an artwork category's title while its SGDB search is still running
    (see the ra_resolved meta-refresh loading phase). */
-@keyframes gridge-spin { to { transform: rotate(360deg); } }
+@keyframes selfsteam-spin { to { transform: rotate(360deg); } }
 .spinner {
   display: inline-block; width: 0.9rem; height: 0.9rem; margin-left: 0.4rem; vertical-align: -2px;
   border: 2px solid var(--skeleton); border-top-color: var(--accent); border-radius: 50%;
-  animation: gridge-spin 0.8s linear infinite;
+  animation: selfsteam-spin 0.8s linear infinite;
 }
 /* ::file-selector-button is a real, standard CSS pseudo-element for
    the browser's own "Choose File" button (Chromium/Firefox/Safari all
@@ -621,24 +621,24 @@ input[type=file]::file-selector-button {
      keeps today's fix from making narrow viewports worse. */
   body { height: auto; min-height: 100vh; }
   main { min-height: auto; }
-  .gridge-columns { align-items: flex-start; min-height: auto; flex-wrap: wrap; }
-  .gridge-left, .gridge-middle, .gridge-right { flex-basis: 100%; min-height: auto; }
+  .selfsteam-columns { align-items: flex-start; min-height: auto; flex-wrap: wrap; }
+  .selfsteam-left, .selfsteam-middle, .selfsteam-right { flex-basis: 100%; min-height: auto; }
   .card { overflow-y: visible; }
-  .gridge-spacer { flex: 0 0 0; }
+  .selfsteam-spacer { flex: 0 0 0; }
 }
 </style></head><body>
-<header class="gridge-header">
-  <div class="gridge-header-left">
+<header class="selfsteam-header">
+  <div class="selfsteam-header-left">
     <!--BACK_BTN-->
-    <div class="gridge-header-title">
+    <div class="selfsteam-header-title">
       <strong><!--PAGE_TITLE--></strong>
     </div>
     <!--QUEUE_ACTIONS-->
   </div>
-  <div class="gridge-header-actions">
+  <div class="selfsteam-header-actions">
     <button class="icon-btn-round" type="button" title="Favorite" style="color:#e0568c"><!--HEART_ICON--></button>
     <!--SGDB_KEY_BADGE-->
-    <button id="gridge-dark-toggle" class="icon-btn-round" type="button" title="Toggle dark mode"><!--DARK_ICON--></button>
+    <button id="selfsteam-dark-toggle" class="icon-btn-round" type="button" title="Toggle dark mode"><!--DARK_ICON--></button>
   </div>
 </header>
 <!--STEAM_WARNING-->
@@ -653,10 +653,10 @@ PAGE_TAIL = """</main>
 <script src="/vendor/darkreader.js"></script>
 <script>
 (function () {
-  var KEY = "gridge-dark-mode";
+  var KEY = "selfsteam-dark-mode";
   var MOON_SVG = "<!--MOON_SVG_JS-->";
   var SUN_SVG = "<!--SUN_SVG_JS-->";
-  var btn = document.getElementById("gridge-dark-toggle");
+  var btn = document.getElementById("selfsteam-dark-toggle");
   var enable = function () { DarkReader.enable({brightness: 100, contrast: 100, sepia: 0}); btn.innerHTML = SUN_SVG; };
   var disable = function () { DarkReader.disable(); btn.innerHTML = MOON_SVG; };
   if (localStorage.getItem(KEY) === "1") enable(); else disable();
@@ -680,7 +680,7 @@ PAGE_TAIL = """</main>
 // state (ra_romsource/ra_biossource, part of _RA_STATE_KEYS) so it
 // survives an actual reload same as everything else on the tab; this
 // only handles the *instant* visual flip for a same-page click.
-function gridgeToggleSource(prefix, mode, stateKey) {
+function selfsteamToggleSource(prefix, mode, stateKey) {
   var upload = document.getElementById(prefix + "-upload-panel");
   var local = document.getElementById(prefix + "-local-panel");
   var uploadLabel = document.getElementById(prefix + "-upload-label");
@@ -709,7 +709,7 @@ function gridgeToggleSource(prefix, mode, stateKey) {
 // synchronously before the browser starts navigating away, so it stays
 // visible for the whole upload; the eventual redirect (see
 // _handle_ra_upload) replaces the page outright once it's done.
-function gridgeShowUploading(prefix) {
+function selfsteamShowUploading(prefix) {
   var status = document.getElementById(prefix + "-upload-status");
   if (status) status.style.display = "inline-flex";
 }
@@ -734,9 +734,9 @@ function gridgeShowUploading(prefix) {
 // same shape retroarch_cores.py's own core install already has) is
 // where switching this to "Installing" partway through would actually
 // mean something.
-function gridgeShowInstalling(form) {
+function selfsteamShowInstalling(form) {
   if (form.dataset.installed) return;
-  var button = document.getElementById("gridge-add-button");
+  var button = document.getElementById("selfsteam-add-button");
   if (!button) return;
   button.disabled = true;
   button.innerHTML = "Downloading " + form.dataset.emulator + '<span class="spinner"></span>';
@@ -747,7 +747,7 @@ function gridgeShowInstalling(form) {
 // breadcrumbs, folder/file rows, remove-file) was still a full-page
 // reload -- a visible blink for what's conceptually a small in-place
 // edit, same complaint the source toggle already got the no-reload
-// treatment for. gridgeTabFetch fetches the exact URL a real click
+// treatment for. selfsteamTabFetch fetches the exact URL a real click
 // would have navigated to, then swaps just the given ids' page regions
 // in place instead of replacing the whole document -- shared by every
 // tab that wants this (RA, then Emulators), parameterized by which
@@ -755,13 +755,13 @@ function gridgeShowInstalling(form) {
 // onchange-driven navigation as a fallback -- if fetch ever fails (or
 // JS is off entirely), it just behaves like a normal link/auto-submit
 // again, nothing here is the only way to reach a URL.
-// Shared by gridgeTabFetch (GET, url known upfront) and gridgeUploadFetch
+// Shared by selfsteamTabFetch (GET, url known upfront) and selfsteamUploadFetch
 // (POST, final url only known once fetch() has followed the upload's own
 // redirect) -- both just want "swap these ids in from this HTML, then
 // chase any <meta refresh> the same way a real browser would have".
 // Splitting this out is what let the upload path below drop its real
 // top-level navigation without duplicating the meta-refresh chase logic.
-function gridgeApplySwap(htmlText, url, swapIds) {
+function selfsteamApplySwap(htmlText, url, swapIds) {
   history.replaceState(null, "", url);
   var doc = new DOMParser().parseFromString(htmlText, "text/html");
   swapIds.forEach(function (id) {
@@ -777,13 +777,13 @@ function gridgeApplySwap(htmlText, url, swapIds) {
   // follow-up itself instead of waiting for an actual page reload.
   var meta = doc.querySelector('meta[http-equiv="refresh"]');
   var match = meta && /url=(.*)$/.exec(meta.getAttribute("content") || "");
-  if (match) gridgeTabFetch(match[1], swapIds);
+  if (match) selfsteamTabFetch(match[1], swapIds);
 }
 
-function gridgeTabFetch(url, swapIds) {
+function selfsteamTabFetch(url, swapIds) {
   fetch(url)
     .then(function (r) { if (!r.ok) throw new Error("bad status"); return r.text(); })
-    .then(function (htmlText) { gridgeApplySwap(htmlText, url, swapIds); })
+    .then(function (htmlText) { selfsteamApplySwap(htmlText, url, swapIds); })
     .catch(function () { window.location.href = url; });
 }
 
@@ -801,49 +801,49 @@ function gridgeTabFetch(url, swapIds) {
 // in-place swap every other tab interaction already gets, with the same
 // graceful real-navigation fallback if fetch throws (JS half-broken,
 // network weirdness) rather than leaving the picked file stuck nowhere.
-function gridgeUploadFetch(input, swapIds) {
+function selfsteamUploadFetch(input, swapIds) {
   var form = input.form;
   var data = new FormData(form);
   fetch(form.getAttribute("action"), { method: "POST", body: data })
     .then(function (r) { if (!r.ok) throw new Error("bad status"); return r.text().then(function (t) { return {text: t, url: r.url}; }); })
-    .then(function (result) { gridgeApplySwap(result.text, result.url, swapIds); })
+    .then(function (result) { selfsteamApplySwap(result.text, result.url, swapIds); })
     .catch(function () { form.submit(); });
 }
 
-var GRIDGE_RA_SWAP_IDS = [
-  "gridge-ra-tab-panel", "gridge-ra-middle", "gridge-ra-right",
-  "gridge-add-form-slot", "gridge-add-button",
+var SELFSTEAM_RA_SWAP_IDS = [
+  "selfsteam-ra-tab-panel", "selfsteam-ra-middle", "selfsteam-ra-right",
+  "selfsteam-add-form-slot", "selfsteam-add-button",
 ];
 
-function gridgeRaFetch(url) { gridgeTabFetch(url, GRIDGE_RA_SWAP_IDS); }
+function selfsteamRaFetch(url) { selfsteamTabFetch(url, SELFSTEAM_RA_SWAP_IDS); }
 
-function gridgeRaNav(a) {
-  gridgeRaFetch(a.getAttribute("href"));
+function selfsteamRaNav(a) {
+  selfsteamRaFetch(a.getAttribute("href"));
   return false;
 }
 
-function gridgeRaFormNav(form) {
+function selfsteamRaFormNav(form) {
   var qs = new URLSearchParams(new FormData(form)).toString();
   var action = form.getAttribute("action").split("#")[0];
-  gridgeRaFetch(action + "?" + qs + "#tab-retroarch");
+  selfsteamRaFetch(action + "?" + qs + "#tab-retroarch");
 }
 
-var GRIDGE_EM_SWAP_IDS = [
-  "gridge-em-tab-panel", "gridge-em-middle", "gridge-em-right",
-  "gridge-add-form-slot", "gridge-add-button",
+var SELFSTEAM_EM_SWAP_IDS = [
+  "selfsteam-em-tab-panel", "selfsteam-em-middle", "selfsteam-em-right",
+  "selfsteam-add-form-slot", "selfsteam-add-button",
 ];
 
-function gridgeEmFetch(url) { gridgeTabFetch(url, GRIDGE_EM_SWAP_IDS); }
+function selfsteamEmFetch(url) { selfsteamTabFetch(url, SELFSTEAM_EM_SWAP_IDS); }
 
-function gridgeEmNav(a) {
-  gridgeEmFetch(a.getAttribute("href"));
+function selfsteamEmNav(a) {
+  selfsteamEmFetch(a.getAttribute("href"));
   return false;
 }
 
-function gridgeEmFormNav(form) {
+function selfsteamEmFormNav(form) {
   var qs = new URLSearchParams(new FormData(form)).toString();
   var action = form.getAttribute("action").split("#")[0];
-  gridgeEmFetch(action + "?" + qs + "#tab-emulators");
+  selfsteamEmFetch(action + "?" + qs + "#tab-emulators");
 }
 </script>
 </body></html>"""
@@ -862,13 +862,13 @@ def _hostname():
     # Login and the shortcut gallery both show this instead of a fixed
     # title -- it's the fastest way to confirm from the login screen
     # alone that you've reached the right machine, useful the moment
-    # there's more than one Gridge Server on the same network.
+    # there's more than one SelfSteam on the same network.
     return socket.gethostname()
 
 
 def _steam_warning_html():
     # Sanity check, not a hard requirement -- on real SteamOS this can
-    # never fire (Steam owns the machine), but Gridge Server itself is
+    # never fire (Steam owns the machine), but SelfSteam itself is
     # plain Python with no dependency on Steam being installed at all,
     # so running it on a bare Linux box without Steam yet would
     # otherwise fail silently/late, deep inside /add or /commit instead
@@ -1002,8 +1002,8 @@ def _browser_select_html(selected_browser):
         options.append(f'<option value="{html.escape(app_id)}"{sel}>{html.escape(name)}</option>')
     return f"""
   <div class="field-group">
-    <label class="field-label" for="gridge-browser-select">Browser <span style="color:var(--text-dim);font-weight:400;font-size:0.85rem">Flatpak</span></label>
-    <select name="browser" id="gridge-browser-select">{''.join(options)}</select>
+    <label class="field-label" for="selfsteam-browser-select">Browser <span style="color:var(--text-dim);font-weight:400;font-size:0.85rem">Flatpak</span></label>
+    <select name="browser" id="selfsteam-browser-select">{''.join(options)}</select>
   </div>"""
 
 
@@ -1051,10 +1051,10 @@ def _url_tab_panel_html(query="", couch_mode=False, browser="", chosen=None, nam
     name_default = sgdb.clean_sgdb_name(chosen["name"]) if chosen else (resolved.name if resolved and resolved.name else "")
     name_field = f"""
   <div class="field-group">
-    <label class="field-label" for="gridge-name-field">Name</label>
+    <label class="field-label" for="selfsteam-name-field">Name</label>
     <div class="field-with-clear">
       <img class="name-field-icon" src="/vendor/name-field-wand.webp" alt="">
-      <input type="text" name="match_name" id="gridge-name-field" form="{_ADD_FORM_ID}"
+      <input type="text" name="match_name" id="selfsteam-name-field" form="{_ADD_FORM_ID}"
              value="{html.escape(name_default)}" placeholder="Shortcut name">
       <a href="{name_reset_href}" class="field-clear-btn" title="Reset to guessed name">&#10005;</a>
     </div>
@@ -1084,7 +1084,7 @@ def _url_tab_panel_html(query="", couch_mode=False, browser="", chosen=None, nam
   {couch_row}
   {hint}
   {_browser_select_html(browser)}
-  <div class="gridge-spacer"></div>
+  <div class="selfsteam-spacer"></div>
   {name_field}"""
 
 
@@ -1103,6 +1103,16 @@ _RA_ROOT = os.path.expanduser("~")
 # Under _RA_ROOT on purpose -- uploaded files just become another real
 # path the existing local-picker sandbox (_ra_safe_join) already
 # handles, no special-casing needed once they land here.
+#
+# "gridge", not "selfsteam" -- deliberately NOT renamed alongside the
+# rest of this app's SelfSteam rebrand. Shortcuts already created before
+# that rename have this exact absolute path baked into their own
+# LaunchOptions (the ROM/BIOS/keys/firmware path RetroArch or the
+# emulator was told to load); moving the directory a real file already
+# lives under would break every one of them the moment Steam next tried
+# to launch it. New uploads keep landing here too, alongside old ones --
+# there's no separate "new" location to migrate to without the same
+# problem recurring on the next rename.
 _RA_UPLOAD_DIR = os.path.join(_RA_ROOT, ".local", "share", "gridge", "uploads")
 
 
@@ -1135,17 +1145,17 @@ def _ra_safe_join(rel_path):
 
 
 def _ra_breadcrumbs_html(rel_path, state, path_key):
-    # onclick="return gridgeRaNav(this)" here and on every other RA
+    # onclick="return selfsteamRaNav(this)" here and on every other RA
     # navigation link below: an in-place AJAX swap (see PAGE_TAIL) when
     # JS is available, falling back to this same href as a real
     # navigation otherwise -- the href is never just a decoy.
     parts = [p for p in rel_path.split("/") if p]
-    crumbs = [f'<a href="{_ra_url("/new", state, **{path_key: ""})}" onclick="return gridgeRaNav(this)">{html.escape(_RA_ROOT)}</a>']
+    crumbs = [f'<a href="{_ra_url("/new", state, **{path_key: ""})}" onclick="return selfsteamRaNav(this)">{html.escape(_RA_ROOT)}</a>']
     built = ""
     for part in parts:
         built += f"/{part}"
         crumbs.append(
-            f'<a href="{_ra_url("/new", state, **{path_key: built.lstrip("/")})}" onclick="return gridgeRaNav(this)">{html.escape(part)}</a>'
+            f'<a href="{_ra_url("/new", state, **{path_key: built.lstrip("/")})}" onclick="return selfsteamRaNav(this)">{html.escape(part)}</a>'
         )
     return " / ".join(crumbs)
 
@@ -1166,7 +1176,7 @@ def _ra_list_rows(abs_path, rel_path, state, path_key, file_key):
         entry_rel = f"{rel_path}/{entry.name}".lstrip("/")
         if entry.is_dir():
             href = _ra_url("/new", state, **{path_key: entry_rel})
-            rows.append(f'<a href="{href}" onclick="return gridgeRaNav(this)"><span class="folder-icon">&#128193;</span>{html.escape(entry.name)}</a>')
+            rows.append(f'<a href="{href}" onclick="return selfsteamRaNav(this)"><span class="folder-icon">&#128193;</span>{html.escape(entry.name)}</a>')
         else:
             overrides = {path_key: rel_path, file_key: entry_rel}
             if file_key == "ra_romfile":
@@ -1190,7 +1200,7 @@ def _ra_list_rows(abs_path, rel_path, state, path_key, file_key):
                 overrides["ra_sgdb_cleared"] = ""
                 overrides["ra_name_cleared"] = ""
             href = _ra_url("/new", state, **overrides)
-            rows.append(f'<a href="{href}" onclick="return gridgeRaNav(this)"><span class="file-icon">&#128190;</span>{html.escape(entry.name)}</a>')
+            rows.append(f'<a href="{href}" onclick="return selfsteamRaNav(this)"><span class="file-icon">&#128190;</span>{html.escape(entry.name)}</a>')
     return "".join(rows)
 
 
@@ -1221,7 +1231,7 @@ def _ra_picker_section(prefix, label, state, already_installed=None):
     # Same-line upload-in-progress indicator, to the right of the label
     # row -- a multi-hundred-MB ROM over real wifi can take a while, and
     # the browser otherwise gives zero feedback that the click even
-    # registered. Hidden by default, shown by gridgeShowUploading (see
+    # registered. Hidden by default, shown by selfsteamShowUploading (see
     # PAGE_TAIL) the instant the upload form is actually submitted.
     upload_status = (
         f'<span id="{dom_prefix}-upload-status" class="upload-status" style="display:none">'
@@ -1245,7 +1255,7 @@ def _ra_picker_section(prefix, label, state, already_installed=None):
     <label class="field-label" style="display:flex;align-items:center;gap:0.4rem;min-width:0">
       <span style="flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{label} <span class="required-asterisk">*</span></span>
       <span class="selected-file-name">&#10003; {html.escape(os.path.basename(selected_file))}</span>
-      <a href="{remove_href}" class="remove-file-btn" title="Remove file" onclick="return gridgeRaNav(this)">{_X_ICON_SVG}</a>
+      <a href="{remove_href}" class="remove-file-btn" title="Remove file" onclick="return selfsteamRaNav(this)">{_X_ICON_SVG}</a>
       {upload_status}
     </label>"""
     elif show_installed:
@@ -1254,7 +1264,7 @@ def _ra_picker_section(prefix, label, state, already_installed=None):
     <label class="field-label" style="display:flex;align-items:center;gap:0.4rem;min-width:0">
       <span style="flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{label} <span class="required-asterisk">*</span></span>
       <span class="selected-file-name">&#10003; {html.escape(already_installed)}</span>
-      <a href="{remove_href}" class="remove-file-btn" title="Pick a different file" onclick="return gridgeRaNav(this)">{_X_ICON_SVG}</a>
+      <a href="{remove_href}" class="remove-file-btn" title="Pick a different file" onclick="return selfsteamRaNav(this)">{_X_ICON_SVG}</a>
       {upload_status}
     </label>"""
     else:
@@ -1264,7 +1274,7 @@ def _ra_picker_section(prefix, label, state, already_installed=None):
       {upload_status}
     </label>"""
 
-    # Both panels are always rendered, with plain JS (gridgeToggleSource
+    # Both panels are always rendered, with plain JS (selfsteamToggleSource
     # in PAGE_TAIL) instantly swapping which is visible on a same-page
     # click -- no navigation, so no reload flicker. Initial visibility on
     # an actual page load still comes from real server state (source),
@@ -1285,15 +1295,15 @@ def _ra_picker_section(prefix, label, state, already_installed=None):
     upload_action = f"/new/upload?{_ra_qs(state)}&slot={prefix}#tab-retroarch"
     # Auto-submits on pick, no separate Upload button -- a real
     # user-initiated change event, not scripted navigation.
-    # gridgeShowUploading and gridgeUploadFetch both run from onchange
+    # selfsteamShowUploading and selfsteamUploadFetch both run from onchange
     # directly, not a form onsubmit handler -- HTMLFormElement.submit()
     # (unlike the newer requestSubmit()) never fires the form's own
     # submit event at all per spec, so an onsubmit handler here would
-    # silently never run; gridgeUploadFetch itself falls back to a real
+    # silently never run; selfsteamUploadFetch itself falls back to a real
     # this.form.submit() if fetch throws, same as every other nav helper.
     upload_panel = f"""
     <form method="post" enctype="multipart/form-data" action="{upload_action}">
-      <input type="file" name="file" onchange="gridgeShowUploading('{dom_prefix}'); gridgeUploadFetch(this, GRIDGE_RA_SWAP_IDS)">
+      <input type="file" name="file" onchange="selfsteamShowUploading('{dom_prefix}'); selfsteamUploadFetch(this, SELFSTEAM_RA_SWAP_IDS)">
     </form>"""
 
     abs_path = _ra_safe_join(rel_path)
@@ -1317,8 +1327,8 @@ def _ra_picker_section(prefix, label, state, already_installed=None):
     # attention alongside it.
     picker_ui = "" if (selected_file or show_installed) else f"""
     <div class="source-toggle">
-      <a class="{upload_active}" href="javascript:void(0)" id="{dom_prefix}-upload-label" onclick="gridgeToggleSource('{dom_prefix}', 'upload', '{source_key}')">Upload</a>
-      <a class="{local_active}" href="javascript:void(0)" id="{dom_prefix}-local-label" onclick="gridgeToggleSource('{dom_prefix}', 'local', '{source_key}')">{html.escape(_hostname())}</a>
+      <a class="{upload_active}" href="javascript:void(0)" id="{dom_prefix}-upload-label" onclick="selfsteamToggleSource('{dom_prefix}', 'upload', '{source_key}')">Upload</a>
+      <a class="{local_active}" href="javascript:void(0)" id="{dom_prefix}-local-label" onclick="selfsteamToggleSource('{dom_prefix}', 'local', '{source_key}')">{html.escape(_hostname())}</a>
     </div>
     <div id="{dom_prefix}-upload-panel" style="display:{upload_display};margin-top:0.6rem">{upload_panel}</div>
     <div id="{dom_prefix}-local-panel" style="display:{local_display}">{local_panel}</div>"""
@@ -1346,7 +1356,7 @@ def _retroarch_tab_panel_html(state, chosen=None):
         f'{"Pick your console" if not c else html.escape(c)}</option>'
         for c, _core, _needs in [("", None, False)] + retroarch_cores.CONSOLES
     )
-    # id="ra-console-form-{k}" lets gridgeToggleSource (PAGE_TAIL) sync
+    # id="ra-console-form-{k}" lets selfsteamToggleSource (PAGE_TAIL) sync
     # ra_romsource/ra_biossource here the instant they're toggled --
     # otherwise a toggle click followed immediately by a console change
     # (this form's own auto-submit) would submit the stale, pre-toggle
@@ -1382,7 +1392,7 @@ def _retroarch_tab_panel_html(state, chosen=None):
     name_default = "" if name_cleared else (chosen["name"] if chosen else (_ra_guess_name_from_filename(romfile) if romfile else ""))
     name_reset_href = _ra_url("/new", state, ra_name_cleared=("" if name_cleared else "1"))
     name_reset_title = "Reset to guessed name" if name_cleared else "Clear"
-    # onclick=gridgeRaNav -- routes through the AJAX fetch layer instead
+    # onclick=selfsteamRaNav -- routes through the AJAX fetch layer instead
     # of a plain navigation so the swap always happens even when only a
     # same-page state flag changed (a plain <a> click to an identical
     # URL+fragment is a real no-op in the browser otherwise).
@@ -1393,7 +1403,7 @@ def _retroarch_tab_panel_html(state, chosen=None):
       <img class="name-field-icon" src="/vendor/name-field-wand.webp" alt="">
       <input type="text" name="ra_match_name" id="ra-name-field" form="{_ADD_FORM_ID}"
              value="{html.escape(name_default)}" placeholder="Shortcut name">
-      <a href="{name_reset_href}" class="field-clear-btn" title="{name_reset_title}" onclick="return gridgeRaNav(this)">&#10005;</a>
+      <a href="{name_reset_href}" class="field-clear-btn" title="{name_reset_title}" onclick="return selfsteamRaNav(this)">&#10005;</a>
     </div>
   </div>"""
 
@@ -1407,18 +1417,18 @@ def _retroarch_tab_panel_html(state, chosen=None):
            change without it, and this is what the approved/tested demo
            used once the "Set console" button was removed. Since this
            already depends on JS to submit at all, routing that submit
-           through gridgeRaFormNav (fifth exception, see PAGE_TAIL) for
+           through selfsteamRaFormNav (fifth exception, see PAGE_TAIL) for
            an in-place swap instead of a real navigation costs nothing
            extra -- a JS-off browser was never going to auto-submit this
            either way. -->
-      <select name="ra_console" onchange="gridgeRaFormNav(this.form)">
+      <select name="ra_console" onchange="selfsteamRaFormNav(this.form)">
         {console_options}
       </select>
     </form>
   </div>
   {bios_block}
   {rom_block}
-  <div class="gridge-spacer"></div>
+  <div class="selfsteam-spacer"></div>
   {name_field}"""
 
 
@@ -1460,12 +1470,12 @@ def _em_breadcrumbs_html(rel_path, state, path_key):
     # local-file-browsing logic they implement isn't actually RA-
     # specific despite the name, just built there first.
     parts = [p for p in rel_path.split("/") if p]
-    crumbs = [f'<a href="{_em_url("/new", state, **{path_key: ""})}" onclick="return gridgeEmNav(this)">{html.escape(_RA_ROOT)}</a>']
+    crumbs = [f'<a href="{_em_url("/new", state, **{path_key: ""})}" onclick="return selfsteamEmNav(this)">{html.escape(_RA_ROOT)}</a>']
     built = ""
     for part in parts:
         built += f"/{part}"
         crumbs.append(
-            f'<a href="{_em_url("/new", state, **{path_key: built.lstrip("/")})}" onclick="return gridgeEmNav(this)">{html.escape(part)}</a>'
+            f'<a href="{_em_url("/new", state, **{path_key: built.lstrip("/")})}" onclick="return selfsteamEmNav(this)">{html.escape(part)}</a>'
         )
     return " / ".join(crumbs)
 
@@ -1492,7 +1502,7 @@ def _em_list_rows(abs_path, rel_path, state, path_key, file_key):
         entry_rel = f"{rel_path}/{entry.name}".lstrip("/")
         if entry.is_dir():
             href = _em_url("/new", state, **{path_key: entry_rel})
-            rows.append(f'<a href="{href}" onclick="return gridgeEmNav(this)"><span class="folder-icon">&#128193;</span>{html.escape(entry.name)}</a>')
+            rows.append(f'<a href="{href}" onclick="return selfsteamEmNav(this)"><span class="folder-icon">&#128193;</span>{html.escape(entry.name)}</a>')
         else:
             overrides = {path_key: rel_path, file_key: entry_rel}
             if file_key == "em_romfile":
@@ -1509,7 +1519,7 @@ def _em_list_rows(abs_path, rel_path, state, path_key, file_key):
                 overrides["em_sgdb_cleared"] = ""
                 overrides["em_name_cleared"] = ""
             href = _em_url("/new", state, **overrides)
-            rows.append(f'<a href="{href}" onclick="return gridgeEmNav(this)"><span class="file-icon">&#128190;</span>{html.escape(entry.name)}</a>')
+            rows.append(f'<a href="{href}" onclick="return selfsteamEmNav(this)"><span class="file-icon">&#128190;</span>{html.escape(entry.name)}</a>')
     return "".join(rows)
 
 
@@ -1560,7 +1570,7 @@ def _em_picker_section(prefix, label, state, already_installed=None, info_toolti
     <label class="field-label" style="display:flex;align-items:center;gap:0.4rem;min-width:0">
       <span style="flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{label_text}</span>
       <span class="selected-file-name">&#10003; {html.escape(display_name)}</span>
-      <a href="{remove_href}" class="remove-file-btn" title="Remove file" onclick="return gridgeEmNav(this)">{_X_ICON_SVG}</a>
+      <a href="{remove_href}" class="remove-file-btn" title="Remove file" onclick="return selfsteamEmNav(this)">{_X_ICON_SVG}</a>
       {upload_status}
     </label>"""
     elif show_installed:
@@ -1569,7 +1579,7 @@ def _em_picker_section(prefix, label, state, already_installed=None, info_toolti
     <label class="field-label" style="display:flex;align-items:center;gap:0.4rem;min-width:0">
       <span style="flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{label_text}</span>
       <span class="selected-file-name">&#10003; {html.escape(already_installed)}</span>
-      <a href="{remove_href}" class="remove-file-btn" title="Pick a different file" onclick="return gridgeEmNav(this)">{_X_ICON_SVG}</a>
+      <a href="{remove_href}" class="remove-file-btn" title="Pick a different file" onclick="return selfsteamEmNav(this)">{_X_ICON_SVG}</a>
       {upload_status}
     </label>"""
     else:
@@ -1582,7 +1592,7 @@ def _em_picker_section(prefix, label, state, already_installed=None, info_toolti
     upload_action = f"/new/upload-em?{_em_qs(state)}&slot={prefix}#tab-emulators"
     upload_panel = f"""
     <form method="post" enctype="multipart/form-data" action="{upload_action}">
-      <input type="file" name="file" onchange="gridgeShowUploading('{dom_prefix}'); gridgeUploadFetch(this, GRIDGE_EM_SWAP_IDS)">
+      <input type="file" name="file" onchange="selfsteamShowUploading('{dom_prefix}'); selfsteamUploadFetch(this, SELFSTEAM_EM_SWAP_IDS)">
     </form>"""
 
     abs_path = _ra_safe_join(rel_path)
@@ -1606,8 +1616,8 @@ def _em_picker_section(prefix, label, state, already_installed=None, info_toolti
     # attention alongside it.
     picker_ui = "" if (selected_file or show_installed) else f"""
     <div class="source-toggle">
-      <a class="{upload_active}" href="javascript:void(0)" id="{dom_prefix}-upload-label" onclick="gridgeToggleSource('{dom_prefix}', 'upload', '{source_key}')">Upload</a>
-      <a class="{local_active}" href="javascript:void(0)" id="{dom_prefix}-local-label" onclick="gridgeToggleSource('{dom_prefix}', 'local', '{source_key}')">{html.escape(_hostname())}</a>
+      <a class="{upload_active}" href="javascript:void(0)" id="{dom_prefix}-upload-label" onclick="selfsteamToggleSource('{dom_prefix}', 'upload', '{source_key}')">Upload</a>
+      <a class="{local_active}" href="javascript:void(0)" id="{dom_prefix}-local-label" onclick="selfsteamToggleSource('{dom_prefix}', 'local', '{source_key}')">{html.escape(_hostname())}</a>
     </div>
     <div id="{dom_prefix}-upload-panel" style="display:{upload_display};margin-top:0.6rem">{upload_panel}</div>
     <div id="{dom_prefix}-local-panel" style="display:{local_display}">{local_panel}</div>"""
@@ -1648,7 +1658,7 @@ def _emulators_tab_panel_html(state, chosen=None):
     )
 
     # id="em-console-form-{k}" mirrors the RA tab's own "ra-console-
-    # form-{k}" -- see gridgeToggleSource's own comment on why its
+    # form-{k}" -- see selfsteamToggleSource's own comment on why its
     # lookup only needs the leading tab prefix, not a separate function.
     hidden_fields = "".join(
         f'<input type="hidden" name="{k}" id="em-console-form-{k}" value="{html.escape(state.get(k, ""))}">'
@@ -1666,7 +1676,7 @@ def _emulators_tab_panel_html(state, chosen=None):
             "/new", state, em_install_source=value, em_emulator="",
             em_romfile="", em_biosfile="", em_keysfile="", em_firmwarefile="", em_resolved="",
         )
-        return f'<a class="{active}" href="{href}" onclick="return gridgeEmNav(this)">{text}</a>'
+        return f'<a class="{active}" href="{href}" onclick="return selfsteamEmNav(this)">{text}</a>'
 
     source_toggle = f"""
     <div class="source-toggle" style="margin-bottom:0.6rem">
@@ -1697,7 +1707,7 @@ def _emulators_tab_panel_html(state, chosen=None):
     name_default = "" if name_cleared else (chosen["name"] if chosen else (_ra_guess_name_from_filename(romfile) if romfile else ""))
     name_reset_href = _em_url("/new", state, em_name_cleared=("" if name_cleared else "1"))
     name_reset_title = "Reset to guessed name" if name_cleared else "Clear"
-    # onclick=gridgeEmNav -- see _retroarch_tab_panel_html's own comment
+    # onclick=selfsteamEmNav -- see _retroarch_tab_panel_html's own comment
     # on the same fix, same identical-URL no-op bug here.
     name_field = f"""
   <div class="field-group">
@@ -1706,7 +1716,7 @@ def _emulators_tab_panel_html(state, chosen=None):
       <img class="name-field-icon" src="/vendor/name-field-wand.webp" alt="">
       <input type="text" name="em_match_name" id="em-name-field" form="{_ADD_FORM_ID}"
              value="{html.escape(name_default)}" placeholder="Shortcut name">
-      <a href="{name_reset_href}" class="field-clear-btn" title="{name_reset_title}" onclick="return gridgeEmNav(this)">&#10005;</a>
+      <a href="{name_reset_href}" class="field-clear-btn" title="{name_reset_title}" onclick="return selfsteamEmNav(this)">&#10005;</a>
     </div>
   </div>"""
 
@@ -1726,7 +1736,7 @@ def _emulators_tab_panel_html(state, chosen=None):
     {source_toggle}
     <form method="get" action="/new#tab-emulators" style="margin:0">
       {hidden_fields}
-      <select name="em_emulator" onchange="gridgeEmFormNav(this.form)">
+      <select name="em_emulator" onchange="selfsteamEmFormNav(this.form)">
         {emulator_options}
       </select>
     </form>
@@ -1735,7 +1745,7 @@ def _emulators_tab_panel_html(state, chosen=None):
   {keys_block}
   {firmware_block}
   {rom_block}
-  <div class="gridge-spacer"></div>
+  <div class="selfsteam-spacer"></div>
   {name_field}"""
 
 
@@ -1811,7 +1821,7 @@ def _em_middle_column_html(state, matches, extra_class=""):
             rows.append(f'<a class="{cls.strip()}" href="{href}">{html.escape(m["name"])}</a>')
         list_html = f'<div class="boxed-list">{"".join(rows)}</div>'
     return f"""
-<div class="card {extra_class}" id="gridge-em-middle">
+<div class="card {extra_class}" id="selfsteam-em-middle">
   {_em_sgdb_search_bar_html(state, matches[0] if matches else None)}
   <div class="field-group" style="flex:1;min-height:0">
     <h2>SGDB matches</h2>
@@ -1825,7 +1835,7 @@ _FORM_TABS = [("tab-url", "URL"), ("tab-apps", "Apps"), ("tab-retroarch", "Retro
 
 
 def _tab_bar_targets_html():
-    # Emitted just above .gridge-columns (see render_page) -- empty
+    # Emitted just above .selfsteam-columns (see render_page) -- empty
     # :target anchor markers, not radio inputs. The radio-hack version
     # of this (an <input type=radio checked> per tab, server-picking
     # which one had "checked") looked right in every direct HTTP test
@@ -2004,7 +2014,7 @@ def _ra_middle_column_html(state, matches, extra_class=""):
             rows.append(f'<a class="{cls.strip()}" href="{href}">{html.escape(m["name"])}</a>')
         list_html = f'<div class="boxed-list">{"".join(rows)}</div>'
     return f"""
-<div class="card {extra_class}" id="gridge-ra-middle">
+<div class="card {extra_class}" id="selfsteam-ra-middle">
   {_ra_sgdb_search_bar_html(state, matches[0] if matches else None)}
   <div class="field-group" style="flex:1;min-height:0">
     <h2>SGDB matches</h2>
@@ -2234,12 +2244,12 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
     add_form = ""
     # Always present and pinned to the bottom, per the design handoff --
     # inert (not tied to any form) until a match/artwork exists to add.
-    # id="gridge-add-button" is a stable AJAX-swap target (see
-    # gridgeTabFetch/GRIDGE_RA_SWAP_IDS/GRIDGE_EM_SWAP_IDS in PAGE_TAIL)
+    # id="selfsteam-add-button" is a stable AJAX-swap target (see
+    # selfsteamTabFetch/SELFSTEAM_RA_SWAP_IDS/SELFSTEAM_EM_SWAP_IDS in PAGE_TAIL)
     # -- unlike add_form this element always exists in every render_page
     # code path, so it never needs a separately-wrapped placeholder the
     # way add_form does below.
-    add_button = '<button type="button" id="gridge-add-button" disabled style="opacity:0.45;cursor:not-allowed">Create Steam Shortcut</button>'
+    add_button = '<button type="button" id="selfsteam-add-button" disabled style="opacity:0.45;cursor:not-allowed">Create Steam Shortcut</button>'
     # The Add form is declared standalone (no visible children) and
     # everything that belongs to it -- the button, the artwork radios,
     # the active tab's own Name field -- is associated via form="..."
@@ -2257,7 +2267,7 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
   <input type="hidden" name="ra_biosfile" value="{html.escape(ra_state.get('ra_biosfile', ''))}">
 </form>
 """
-        add_button = f'<button type="submit" id="gridge-add-button" form="{_ADD_FORM_ID}">Create Steam Shortcut</button>'
+        add_button = f'<button type="submit" id="selfsteam-add-button" form="{_ADD_FORM_ID}">Create Steam Shortcut</button>'
     elif em_ready:
         # onsubmit here, not onclick on the button: disabling a submit
         # button synchronously inside its own onclick can stop that same
@@ -2267,7 +2277,7 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
         # fires as part of the submission itself, so disabling there is
         # always safe -- the submission already happened by that point.
         #
-        # data-installed lets gridgeShowInstalling skip the spinner
+        # data-installed lets selfsteamShowInstalling skip the spinner
         # entirely when the emulator's already there -- Create still
         # blocks briefly on _add_standalone_emulator_shortcut's own
         # already-installed check either way, but that's fast (a single
@@ -2276,7 +2286,7 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
         # re-checks it again for real regardless of what this says.
         em_already_installed = standalone_emulators.installed(em_emulator)
         add_form = f"""
-<form id="{_ADD_FORM_ID}" action="/add" method="post" onsubmit="gridgeShowInstalling(this)"
+<form id="{_ADD_FORM_ID}" action="/add" method="post" onsubmit="selfsteamShowInstalling(this)"
       data-emulator="{html.escape(em_emulator)}" data-installed="{"1" if em_already_installed else ""}">
   <input type="hidden" name="em_emulator" value="{html.escape(em_emulator)}">
   <input type="hidden" name="em_romfile" value="{html.escape(em_state.get('em_romfile', ''))}">
@@ -2285,7 +2295,7 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
   <input type="hidden" name="em_firmwarefile" value="{html.escape(em_state.get('em_firmwarefile', ''))}">
 </form>
 """
-        add_button = f'<button type="submit" id="gridge-add-button" form="{_ADD_FORM_ID}">Create Steam Shortcut</button>'
+        add_button = f'<button type="submit" id="selfsteam-add-button" form="{_ADD_FORM_ID}">Create Steam Shortcut</button>'
     elif chosen is not None:
         couch_field = '<input type="hidden" name="couch_mode" value="1">' if couch_mode else ""
         # The Name field itself (see _url_tab_panel_html) is what
@@ -2301,7 +2311,7 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
   {couch_field}
 </form>
 """
-        add_button = f'<button type="submit" id="gridge-add-button" form="{_ADD_FORM_ID}">Create Steam Shortcut</button>'
+        add_button = f'<button type="submit" id="selfsteam-add-button" form="{_ADD_FORM_ID}">Create Steam Shortcut</button>'
     elif ra_awaiting_artwork or em_awaiting_artwork:
         # Everything else (console/rom/bios, or emulator/rom/keys/
         # firmware) is already picked -- just waiting on the SGDB fetch
@@ -2309,7 +2319,7 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
         # split out from the base disabled state below), which can
         # genuinely take a few seconds on a slow connection.
         add_button = (
-            '<button type="button" id="gridge-add-button" disabled style="opacity:0.45;cursor:not-allowed">'
+            '<button type="button" id="selfsteam-add-button" disabled style="opacity:0.45;cursor:not-allowed">'
             'Searching for artwork...<span class="spinner"></span></button>'
         )
 
@@ -2333,10 +2343,10 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
       </form>
     </div>
     <div class="tab-panel tab-panel-apps"><div class="coming-soon">Apps (Flathub/Installed) -- coming soon</div></div>
-    <div class="tab-panel tab-panel-retroarch" id="gridge-ra-tab-panel">
+    <div class="tab-panel tab-panel-retroarch" id="selfsteam-ra-tab-panel">
       {_retroarch_tab_panel_html(ra_state, ra_chosen)}
     </div>
-    <div class="tab-panel tab-panel-emulators" id="gridge-em-tab-panel">
+    <div class="tab-panel tab-panel-emulators" id="selfsteam-em-tab-panel">
       {_emulators_tab_panel_html(em_state, em_chosen)}
     </div>
   </div>
@@ -2382,21 +2392,21 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
 
     middle_url = _middle_column_html(query, couch_mode, browser, sgdb_q, matches, match_index, extra_class="middle-panel-url", ra_state=ra_state, em_state=em_state)
     right_url = f'<div class="card artwork-card right-panel-url">{_artwork_picker_html(candidates_by_category)}</div>'
-    right_ra = f'<div class="card artwork-card right-panel-retroarch" id="gridge-ra-right">{ra_right_content}</div>'
-    right_em = f'<div class="card artwork-card right-panel-emulators" id="gridge-em-right">{em_right_content}</div>'
+    right_ra = f'<div class="card artwork-card right-panel-retroarch" id="selfsteam-ra-right">{ra_right_content}</div>'
+    right_em = f'<div class="card artwork-card right-panel-emulators" id="selfsteam-em-right">{em_right_content}</div>'
 
-    # id="gridge-add-form-slot" is a stable AJAX-swap target even when
+    # id="selfsteam-add-form-slot" is a stable AJAX-swap target even when
     # add_form itself is empty (no id of its own to grab in that case) --
-    # see gridgeTabFetch/GRIDGE_RA_SWAP_IDS/GRIDGE_EM_SWAP_IDS in
+    # see selfsteamTabFetch/SELFSTEAM_RA_SWAP_IDS/SELFSTEAM_EM_SWAP_IDS in
     # PAGE_TAIL, and add_button's own comment above for why that one
     # didn't need the same wrapper treatment.
     return render(f"""
-<div id="gridge-add-form-slot">{add_form}</div>
+<div id="selfsteam-add-form-slot">{add_form}</div>
 {_tab_bar_targets_html()}
-<div class="gridge-columns">
-  <div class="gridge-left">{left}</div>
-  <div class="gridge-middle">{middle_url}{ra_middle_html}{em_middle_html}</div>
-  <div class="gridge-right">{right_url}{right_ra}{right_em}</div>
+<div class="selfsteam-columns">
+  <div class="selfsteam-left">{left}</div>
+  <div class="selfsteam-middle">{middle_url}{ra_middle_html}{em_middle_html}</div>
+  <div class="selfsteam-right">{right_url}{right_ra}{right_em}</div>
 </div>
 """, extra_head=extra_head)
 
@@ -2413,8 +2423,8 @@ def render_login(error=None):
 <div class="card" style="width:100%;max-width:360px;margin:2rem auto;flex:none">
   <h2 style="font-size:1.5rem">Enter code</h2>
   {error_html}
-  <form id="gridge-login-form" action="/login" method="post">
-    <input type="text" name="code" id="gridge-login-code" required autofocus maxlength="6"
+  <form id="selfsteam-login-form" action="/login" method="post">
+    <input type="text" name="code" id="selfsteam-login-code" required autofocus maxlength="6"
            autocomplete="off"
            style="text-transform:uppercase; text-align:center; font-size:1.6rem; letter-spacing:0.4rem">
     <label style="display:flex;align-items:center;justify-content:center;gap:0.4rem;margin-top:0.9rem;font-size:0.9rem">
@@ -2428,9 +2438,9 @@ def render_login(error=None):
   // and an empty field (server-side, see render_login's error path)
   // -- so this naturally loops until the right code goes in, no extra
   // logic needed here.
-  document.getElementById("gridge-login-code").addEventListener("input", function (e) {{
+  document.getElementById("selfsteam-login-code").addEventListener("input", function (e) {{
     e.target.value = e.target.value.toUpperCase();
-    if (e.target.value.length === 6) document.getElementById("gridge-login-form").submit();
+    if (e.target.value.length === 6) document.getElementById("selfsteam-login-form").submit();
   }});
   </script>
 </div>
@@ -2514,9 +2524,9 @@ def render_settings(error=None):
   {error_html}
   <form action="/key" method="post" style="display:flex;flex-direction:column;gap:0.9rem">
     <div class="field-group">
-      <label class="field-label" for="gridge-sgdb-key">SteamGridDB API key</label>
+      <label class="field-label" for="selfsteam-sgdb-key">SteamGridDB API key</label>
       <div class="field-with-clear">
-        <input type="text" name="sgdb_api_key" id="gridge-sgdb-key" value="{html.escape(current_key)}"
+        <input type="text" name="sgdb_api_key" id="selfsteam-sgdb-key" value="{html.escape(current_key)}"
                placeholder="Paste your key here" autocomplete="off">
         <button type="submit" formaction="/key/remove" formnovalidate class="field-clear-btn" title="Remove key">&#10005;</button>
       </div>
@@ -2620,12 +2630,12 @@ def _poster_card_html(shortcut, pending_removal_appids):
         edit_href = f"/search?q={urllib.parse.quote(shortcut['url'] or name)}"
     # A RetroArch/Emulators-tab shortcut's ROM might be a local pick
     # (referenced in place, wherever it already lives -- see the local
-    # file browser) rather than something Gridge uploaded itself, so
+    # file browser) rather than something SelfSteam uploaded itself, so
     # "delete on remove" isn't automatically safe the way it'd be for a
-    # copy Gridge owns: it could be the user's own real ROM sitting
+    # copy SelfSteam owns: it could be the user's own real ROM sitting
     # somewhere in their existing library. A real confirmation page
     # (see render_remove_confirm) asks which they actually want instead
-    # of ever silently deleting a file Gridge doesn't own the lifecycle
+    # of ever silently deleting a file SelfSteam doesn't own the lifecycle
     # of. URL-tab shortcuts have no file at stake at all, so they skip
     # straight to the one-click removal below, same as before.
     romfile = shortcut.get("ra_romfile") or shortcut.get("em_romfile")
@@ -2666,8 +2676,8 @@ def render_remove_confirm(appid, name, romfile):
     # there's no file to ask about. delete_file is opt-in, not the
     # default action, because a locally-picked ROM is referenced in
     # place wherever it already lives on disk, not copied into a
-    # Gridge-owned folder -- deleting it by default could destroy a
-    # file the user never asked Gridge to own.
+    # SelfSteam-owned folder -- deleting it by default could destroy a
+    # file the user never asked SelfSteam to own.
     appid_html = html.escape(str(appid))
     name_html = html.escape(name)
     romfile_html = html.escape(romfile)
@@ -3064,7 +3074,7 @@ class Handler(BaseHTTPRequestHandler):
                 # on the /shortcuts/remove-confirm page -- a locally
                 # picked ROM is referenced in place, not copied, so
                 # deleting it by default could destroy a file the user
-                # never asked Gridge to own. Looked up fresh (not
+                # never asked SelfSteam to own. Looked up fresh (not
                 # trusted from the form's own hidden fields) so this
                 # can't be spoofed into deleting an arbitrary path --
                 # only a romfile create_webapp itself already found by
@@ -3286,7 +3296,7 @@ class Handler(BaseHTTPRequestHandler):
             was_already_installed = standalone_emulators.installed(em_emulator)
             if not was_already_installed:
                 standalone_emulators.install(em_emulator)
-                # Only right after Gridge itself did a fresh install --
+                # Only right after SelfSteam itself did a fresh install --
                 # never for an emulator the user already had, whose own
                 # game-directory settings (if any) stay untouched. See
                 # configure_game_dir's own docstring for why this is
@@ -3497,12 +3507,12 @@ class Handler(BaseHTTPRequestHandler):
             self._send_html(render_done(label, ok=False, error=e))
 
     def log_message(self, fmt, *args):
-        print(f"[gridge-server] {self.address_string()} - {fmt % args}")
+        print(f"[selfsteam-server] {self.address_string()} - {fmt % args}")
 
 
 def main():
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
-    print(f"Gridge Server listening on http://0.0.0.0:{PORT}/")
+    print(f"SelfSteam listening on http://0.0.0.0:{PORT}/")
     server.serve_forever()
 
 
