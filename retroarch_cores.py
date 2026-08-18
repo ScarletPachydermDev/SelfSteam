@@ -163,14 +163,19 @@ _BIOS_FILENAMES = {
 def bios_installed(console):
     """Real on-disk check, same idea as standalone_emulators.keys_installed/
     firmware_installed -- lets a second/third/... game for a console that
-    already has its BIOS in place skip picking it again."""
+    already has its BIOS in place skip picking it again. Returns the
+    real filename(s) actually found (comma-joined for "all"-mode
+    consoles needing more than one), or None -- the picker shows this
+    directly rather than a vague "installed" label."""
     entry = _BIOS_FILENAMES.get(console)
     if not entry:
-        return False
+        return None
     mode, filenames = entry
     system_dir = _system_dir()
-    hits = [os.path.isfile(os.path.join(system_dir, fn)) for fn in filenames]
-    return all(hits) if mode == "all" else any(hits)
+    present = [fn for fn in filenames if os.path.isfile(os.path.join(system_dir, fn))]
+    if mode == "all":
+        return ", ".join(os.path.basename(fn) for fn in filenames) if len(present) == len(filenames) else None
+    return os.path.basename(present[0]) if present else None
 
 
 def install_bios(bios_src_path):

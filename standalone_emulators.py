@@ -290,21 +290,33 @@ def keys_installed(name):
     em_ready) only requires freshly picking them when neither is
     present yet, letting an existing shortcut's own Edit link land back
     on the tab without permanently blocking Create just because the
-    keys picker wasn't touched again."""
+    keys picker wasn't touched again. Returns the real .keys filename
+    found (e.g. "prod.keys"), or None -- the picker shows this directly
+    rather than a vague "installed" label."""
     entry = EMULATORS.get(name)
     if not entry:
-        return False
+        return None
     keys_dir = _flatpak_config_dir(entry["app_id"], "Ryujinx", "system")
-    return os.path.isdir(keys_dir) and any(f.endswith(".keys") for f in os.listdir(keys_dir))
+    if not os.path.isdir(keys_dir):
+        return None
+    found = next((f for f in sorted(os.listdir(keys_dir)) if f.endswith(".keys")), None)
+    return found
 
 
 def firmware_installed(name):
-    """Same idea as keys_installed, for the registered firmware dir."""
+    """Same idea as keys_installed, for the registered firmware dir --
+    but a firmware .zip install (see install_firmware_zip) explodes into
+    a directory of NCA-id-named content folders, not anything with a
+    real user-facing filename, so this returns a count-based label
+    ("148 titles") instead of a filename, or None."""
     entry = EMULATORS.get(name)
     if not entry:
-        return False
+        return None
     registered_dir = _flatpak_config_dir(entry["app_id"], "Ryujinx", "bis", "system", "Contents", "registered")
-    return os.path.isdir(registered_dir) and bool(os.listdir(registered_dir))
+    if not os.path.isdir(registered_dir):
+        return None
+    count = len(os.listdir(registered_dir))
+    return f"{count} titles" if count else None
 
 
 def install_keys(name, keys_path):

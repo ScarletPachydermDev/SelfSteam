@@ -1112,7 +1112,7 @@ def _ra_list_rows(abs_path, rel_path, state, path_key, file_key):
     return "".join(rows)
 
 
-def _ra_picker_section(prefix, label, state, already_installed=False):
+def _ra_picker_section(prefix, label, state, already_installed=None):
     path_key = f"ra_{prefix}path"
     file_key = f"ra_{prefix}file"
     source_key = f"ra_{prefix}source"
@@ -1171,7 +1171,7 @@ def _ra_picker_section(prefix, label, state, already_installed=False):
         label_row = f"""
     <label class="field-label" style="display:flex;align-items:center;gap:0.4rem;min-width:0">
       <span style="flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{label} <span class="required-asterisk">*</span></span>
-      <span class="selected-file-name">&#10003; Already installed</span>
+      <span class="selected-file-name">&#10003; {html.escape(already_installed)}</span>
       <a href="{remove_href}" class="remove-file-btn" title="Pick a different file" onclick="return gridgeRaNav(this)">{_X_ICON_SVG}</a>
       {upload_status}
     </label>"""
@@ -1399,7 +1399,7 @@ def _em_list_rows(abs_path, rel_path, state, path_key, file_key):
     return "".join(rows)
 
 
-def _em_picker_section(prefix, label, state, allow_folder=False, already_installed=False):
+def _em_picker_section(prefix, label, state, allow_folder=False, already_installed=None):
     path_key = f"em_{prefix}path"
     file_key = f"em_{prefix}file"
     source_key = f"em_{prefix}source"
@@ -1447,7 +1447,7 @@ def _em_picker_section(prefix, label, state, allow_folder=False, already_install
         label_row = f"""
     <label class="field-label" style="display:flex;align-items:center;gap:0.4rem;min-width:0">
       <span style="flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{label} <span class="required-asterisk">*</span></span>
-      <span class="selected-file-name">&#10003; Already installed</span>
+      <span class="selected-file-name">&#10003; {html.escape(already_installed)}</span>
       <a href="{remove_href}" class="remove-file-btn" title="Pick a different file" onclick="return gridgeEmNav(this)">{_X_ICON_SVG}</a>
       {upload_status}
     </label>"""
