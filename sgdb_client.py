@@ -2,6 +2,8 @@
 import json
 import os
 import re
+import time
+import urllib.error
 import urllib.request
 import urllib.parse
 
@@ -223,9 +225,24 @@ def extract_largest_png_from_ico(ico_bytes):
 
 
 def download(url, dest_path):
+    """One retry on a transient network failure (timeout, TLS handshake
+    stall, connection reset) before giving up -- confirmed live that a
+    VPN exit on this network policing sustained transfers to certain
+    CDN IPs (see the VPN/Fastly finding) can intermittently stall a
+    single image mid-handshake even though the connection is otherwise
+    healthy. Without this, one flaky image out of five (grid/hero/logo/
+    icon) failed the *entire* shortcut add, not just that one asset."""
     req = urllib.request.Request(url, headers={"User-Agent": "selfsteam/0.1"})
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        data = resp.read()
-    with open(dest_path, "wb") as f:
-        f.write(data)
-    return dest_path
+    last_error = None
+    for attempt in range(2):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = resp.read()
+            with open(dest_path, "wb") as f:
+                f.write(data)
+            return dest_path
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+            last_error = e
+            if attempt == 0:
+                time.sleep(1)
+    raise last_error
