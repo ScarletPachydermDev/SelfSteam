@@ -303,26 +303,21 @@ def keys_installed(name):
     return found
 
 
-# Mirrors gridge_server._RA_UPLOAD_DIR (not imported directly -- that'd
-# be a circular import, gridge_server already imports this module) --
-# where an uploaded firmware zip lands, and stays (install_firmware_zip
-# only ever reads from it, never deletes it -- a deliberate choice, see
-# its own docstring). Only uploads land here; a locally-picked zip stays
-# wherever it already lived and isn't found by this lookup.
-_UPLOAD_FIRMWARE_DIR = os.path.expanduser("~/.local/share/gridge/uploads/em-firmware")
+def _firmware_marker_path(entry):
+    contents_dir = _flatpak_config_dir(entry["app_id"], "Ryujinx", "bis", "system", "Contents")
+    return os.path.join(contents_dir, ".gridge-firmware-source")
 
 
 def firmware_installed(name):
     """Same idea as keys_installed, for the registered firmware dir --
     but a firmware .zip install (see install_firmware_zip) explodes into
     a directory of NCA-id-named content folders with no real user-facing
-    filename of its own, so this instead looks for the actual uploaded
-    zip that's still sitting in Gridge's own upload folder (the most
-    recently modified one, if more than one was ever uploaded) and shows
-    its real filename -- falling back to a count-based label ("148
-    titles") only when nothing uploaded is found there (e.g. the
-    firmware was picked from somewhere else on the local filesystem
-    instead of uploaded)."""
+    filename of its own, so this instead reads the real filename back
+    from the sidecar marker install_firmware_zip writes next to it
+    (works whether that zip was uploaded or picked locally, and
+    naturally reflects whatever was installed *last*) -- falling back to
+    a count-based label ("148 titles") only for firmware installed
+    before that marker existed."""
     entry = EMULATORS.get(name)
     if not entry:
         return None
@@ -332,11 +327,12 @@ def firmware_installed(name):
     count = len(os.listdir(registered_dir))
     if not count:
         return None
-    if os.path.isdir(_UPLOAD_FIRMWARE_DIR):
-        uploads = [f for f in os.listdir(_UPLOAD_FIRMWARE_DIR) if not f.startswith(".upload-")]
-        if uploads:
-            newest = max(uploads, key=lambda f: os.path.getmtime(os.path.join(_UPLOAD_FIRMWARE_DIR, f)))
-            return newest
+    marker_path = _firmware_marker_path(entry)
+    if os.path.isfile(marker_path):
+        with open(marker_path) as f:
+            marker = f.read().strip()
+        if marker:
+            return marker
     return f"{count} titles"
 
 
@@ -432,4 +428,13 @@ def install_firmware_zip(name, zip_path):
     if os.path.isdir(registered_dir):
         shutil.rmtree(registered_dir)
     shutil.move(temp_dir, registered_dir)
+    # A sidecar marker, not anything Ryujinx itself reads -- registered/
+    # only ever holds NCA-id-named content folders with no filename of
+    # their own, so this is the one place the real, human-readable name
+    # of whatever zip was actually installed survives, for
+    # firmware_installed's own display. Overwritten on every real
+    # install, so picking a different firmware later naturally replaces
+    # it -- there's nothing else to "reset" separately.
+    with open(_firmware_marker_path(entry), "w") as f:
+        f.write(os.path.basename(zip_path))
     return registered_dir
