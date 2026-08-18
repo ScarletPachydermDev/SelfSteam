@@ -291,6 +291,9 @@ input[type=text]:focus, select:focus { border-color: var(--accent); }
   background: var(--accent); border: none; display: flex; align-items: center; justify-content: center;
   cursor: pointer;
 }
+.search-submit-btn:disabled { background: #d8d8d8; cursor: not-allowed; }
+.field-with-clear input[type=text]:disabled { color: var(--text-dim); cursor: not-allowed; }
+.field-with-clear:has(input[type=text]:disabled) { background: #f0f0f0; }
 .field-clear-btn {
   width: 1.8rem; height: 1.8rem; flex: 0 0 auto; margin: 0; padding: 0; font-size: 0.9rem; line-height: 1;
   border-radius: 50%; background: transparent; color: #4a4a4a; border: none; text-decoration: none;
@@ -1105,8 +1108,16 @@ def _ra_list_rows(abs_path, rel_path, state, path_key, file_key):
                 # A freshly-picked ROM needs a fresh SGDB search -- see
                 # the /new handler's ra_loading branch, which only
                 # skips straight to showing results when ra_resolved is
-                # already set for this exact pick.
+                # already set for this exact pick. ra_sgdb_q dropped too
+                # -- otherwise a search term typed before any ROM was
+                # even picked (which never did anything, since /new only
+                # ever searches once a romfile exists) silently carried
+                # forward and overrode the new ROM's own guessed-name
+                # search once one was finally picked -- confirmed live,
+                # typing "toy story" with no ROM yet, then picking Wave
+                # Race 64, searched SGDB for "toy story" instead.
                 overrides["ra_resolved"] = ""
+                overrides["ra_sgdb_q"] = ""
             href = _ra_url("/new", state, **overrides)
             rows.append(f'<a href="{href}" onclick="return gridgeRaNav(this)"><span class="file-icon">&#128190;</span>{html.escape(entry.name)}</a>')
     return "".join(rows)
@@ -1392,8 +1403,11 @@ def _em_list_rows(abs_path, rel_path, state, path_key, file_key):
             if file_key == "em_romfile":
                 # A freshly-picked ROM needs a fresh SGDB search -- see
                 # the /new handler's em_loading branch, mirroring the
-                # RA tab's own ra_resolved reasoning exactly.
+                # RA tab's own ra_resolved reasoning exactly. em_sgdb_q
+                # dropped too -- see _ra_list_rows's own comment on the
+                # exact same fix, same root cause here.
                 overrides["em_resolved"] = ""
+                overrides["em_sgdb_q"] = ""
             href = _em_url("/new", state, **overrides)
             rows.append(f'<a href="{href}" onclick="return gridgeEmNav(this)"><span class="file-icon">&#128190;</span>{html.escape(entry.name)}</a>')
     return "".join(rows)
@@ -1648,15 +1662,25 @@ def _em_sgdb_search_bar_html(state, chosen=None):
     # request with zero loading feedback, not just the very first
     # search a fresh ROM pick already triggers on its own.
     hidden = _ra_hidden_fields({k: v for k, v in state.items() if k not in ("em_sgdb_q", "em_resolved")})
+    # Disabled until a ROM actually exists -- /new never runs a search at
+    # all without one (there's nothing to guess a name from), so typing
+    # here beforehand silently did nothing except sit in state, which
+    # then wrongly overrode the real search once a ROM was finally
+    # picked (confirmed live: typing a term with no ROM yet, then
+    # picking one, searched SGDB for the stale term instead of the new
+    # ROM's own guessed name -- see _em_list_rows's own fix for the
+    # other half of this). A disabled input isn't included in its own
+    # form submission at all, so it can't leave a stale value behind.
+    disabled = "" if state.get("em_romfile") else " disabled"
     return f"""
 <form action="/new#tab-emulators" method="get">
   {hidden}
   <div class="search-field-row">
     <div class="field-with-clear">
-      <input type="text" name="em_sgdb_q" value="{html.escape(display_term)}" placeholder="SGDB search">
+      <input type="text" name="em_sgdb_q" value="{html.escape(display_term)}" placeholder="SGDB search"{disabled}>
       <a href="{clear_href}" class="field-clear-btn" title="Clear">&#10005;</a>
     </div>
-    <button type="submit" class="search-submit-btn" title="Search">{_SEARCH_ICON_SVG}</button>
+    <button type="submit" class="search-submit-btn" title="Search"{disabled}>{_SEARCH_ICON_SVG}</button>
   </div>
 </form>
 """
@@ -1815,15 +1839,18 @@ def _ra_sgdb_search_bar_html(state, chosen=None):
     # ra_resolved dropped along with ra_sgdb_q -- see _em_sgdb_search_bar_
     # html's own comment on this exact same fix for the reasoning.
     hidden = _ra_hidden_fields({k: v for k, v in state.items() if k not in ("ra_sgdb_q", "ra_resolved")})
+    # Disabled until a ROM exists -- see _em_sgdb_search_bar_html's own
+    # comment on this exact same fix for the reasoning.
+    disabled = "" if state.get("ra_romfile") else " disabled"
     return f"""
 <form action="/new#tab-retroarch" method="get">
   {hidden}
   <div class="search-field-row">
     <div class="field-with-clear">
-      <input type="text" name="ra_sgdb_q" value="{html.escape(display_term)}" placeholder="SGDB search">
+      <input type="text" name="ra_sgdb_q" value="{html.escape(display_term)}" placeholder="SGDB search"{disabled}>
       <a href="{clear_href}" class="field-clear-btn" title="Clear">&#10005;</a>
     </div>
-    <button type="submit" class="search-submit-btn" title="Search">{_SEARCH_ICON_SVG}</button>
+    <button type="submit" class="search-submit-btn" title="Search"{disabled}>{_SEARCH_ICON_SVG}</button>
   </div>
 </form>
 """
