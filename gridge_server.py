@@ -3390,7 +3390,16 @@ class Handler(BaseHTTPRequestHandler):
         # succeeded is unambiguously an "upload" for this slot.
         overrides = {file_key: rel_path, source_key: "upload"}
         if slot == "rom":
+            # Same reset _ra_list_rows already does for a fresh local
+            # pick -- an uploaded ROM is just as fresh a pick as a
+            # locally-browsed one, and skipping this here left an
+            # uploaded replacement ROM silently inheriting the previous
+            # ROM's cleared name/search fields instead of getting its
+            # own guessed cross-population back.
             overrides["ra_resolved"] = ""
+            overrides["ra_sgdb_q"] = ""
+            overrides["ra_sgdb_cleared"] = ""
+            overrides["ra_name_cleared"] = ""
         self._redirect(_ra_url("/new", ra_state, **overrides))
 
     def _handle_em_upload(self):
@@ -3439,7 +3448,13 @@ class Handler(BaseHTTPRequestHandler):
         source_key = f"em_{slot}source"
         overrides = {file_key: rel_path, source_key: "upload"}
         if slot == "rom":
+            # Same reset _em_list_rows already does for a fresh local
+            # pick -- see _handle_ra_upload's own comment for why this
+            # was missing here too.
             overrides["em_resolved"] = ""
+            overrides["em_sgdb_q"] = ""
+            overrides["em_sgdb_cleared"] = ""
+            overrides["em_name_cleared"] = ""
         self._redirect(_em_url("/new", em_state, **overrides))
 
     def _commit_pending(self):
