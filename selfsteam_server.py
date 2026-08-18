@@ -1110,10 +1110,52 @@ _RA_STATE_KEYS = [
     "ra_resolved", "ra_sgdb_q", "ra_romsource", "ra_biossource", "ra_bios_skip",
     "ra_sgdb_cleared", "ra_name_cleared",
 ]
-_RA_ROOT = os.path.expanduser("~")
-# Under _RA_ROOT on purpose -- uploaded files just become another real
-# path the existing local-picker sandbox (_ra_safe_join) already
-# handles, no special-casing needed once they land here.
+_HOME_DIR = os.path.expanduser("~")
+# The local file-picker's sandbox boundary is the real filesystem root,
+# not just the home dir -- deliberately widened (was os.path.expanduser
+# ("~")) so ROMs on an external drive mounted under /mnt or /run (a USB
+# stick or SD card, e.g. on a Steam Machine's removable media) are
+# actually reachable, not just whatever lives under the user's own home.
+# _ra_safe_join's realpath+containment check still runs (guards against
+# ".." tricks), it just has nothing left to meaningfully exclude once
+# the boundary itself is "/" -- that's the whole point.
+_RA_ROOT = "/"
+# Where a picker with no navigation state yet (state.get(path_key) is
+# falsy -- never set, or explicitly cleared) actually starts looking --
+# see _ra_resolve_relpath. Widening _RA_ROOT to "/" would otherwise mean
+# a completely fresh picker landed on a bare "/" directory listing
+# (system dirs, no games in sight) instead of the one place a user's own
+# files actually are by default.
+_RA_DEFAULT_RELPATH = os.path.relpath(_HOME_DIR, _RA_ROOT)
+
+
+def _ra_resolve_relpath(raw):
+    # raw == "" covers two different real cases that both want the same
+    # default: a genuinely fresh picker (path_key was never set), and
+    # _ra_qs's own serialization, which omits falsy values entirely --
+    # so an explicitly-cleared path_key is indistinguishable from never-
+    # set once it round-trips through a URL. Both should land on the
+    # home dir, not literal "/".
+    #
+    # True root is reachable a different way on purpose: the root
+    # breadcrumb (_ra_breadcrumbs_html) links with path_key="/" -- a
+    # real, truthy, single-character rel_path that survives
+    # serialization -- which _ra_safe_join's own rel_path.lstrip("/")
+    # then resolves back to _RA_ROOT itself. Same "explicit override vs.
+    # unset" pattern already used elsewhere in this file (ra_bios_skip,
+    # ra_sgdb_cleared, etc.), just for a path instead of a flag.
+    if not raw:
+        return _RA_DEFAULT_RELPATH
+    if raw == "/":
+        return ""
+    return raw
+
+
+# Under _HOME_DIR (not the now-much-wider _RA_ROOT) on purpose --
+# uploaded files just become another real path the existing local-picker
+# sandbox (_ra_safe_join) already handles, no special-casing needed once
+# they land here; there's no reason for SelfSteam's own upload landing
+# spot to move just because browsing itself got wider.
 #
 # "gridge", not "selfsteam" -- deliberately NOT renamed alongside the
 # rest of this app's SelfSteam rebrand. Shortcuts already created before
@@ -1124,7 +1166,7 @@ _RA_ROOT = os.path.expanduser("~")
 # to launch it. New uploads keep landing here too, alongside old ones --
 # there's no separate "new" location to migrate to without the same
 # problem recurring on the next rename.
-_RA_UPLOAD_DIR = os.path.join(_RA_ROOT, ".local", "share", "gridge", "uploads")
+_RA_UPLOAD_DIR = os.path.join(_HOME_DIR, ".local", "share", "gridge", "uploads")
 
 
 def _ra_state_from_params(params):
@@ -1150,7 +1192,13 @@ def _ra_url(path, state, **overrides):
 def _ra_safe_join(rel_path):
     candidate = os.path.realpath(os.path.join(_RA_ROOT, rel_path.lstrip("/")))
     root_real = os.path.realpath(_RA_ROOT)
-    if candidate != root_real and not candidate.startswith(root_real + os.sep):
+    # root_real == "/" (os.sep) needs special-casing here -- root_real +
+    # os.sep would otherwise double up into "//", which no real path
+    # (other than a literal, never-occurring "//...") ever starts with,
+    # so every subpath of true root would wrongly fail containment the
+    # moment _RA_ROOT was widened to "/" instead of the home dir.
+    root_prefix = root_real if root_real == os.sep else root_real + os.sep
+    if candidate != root_real and not candidate.startswith(root_prefix):
         return None
     return candidate
 
@@ -1161,7 +1209,11 @@ def _ra_breadcrumbs_html(rel_path, state, path_key):
     # JS is available, falling back to this same href as a real
     # navigation otherwise -- the href is never just a decoy.
     parts = [p for p in rel_path.split("/") if p]
-    crumbs = [f'<a href="{_ra_url("/new", state, **{path_key: ""})}" onclick="return selfsteamRaNav(this)">{html.escape(_RA_ROOT)}</a>']
+    # path_key="/" here on purpose, not "" -- see _ra_resolve_relpath's
+    # own comment. "" round-trips through _ra_qs indistinguishably from
+    # "never set", which would land back on the home-dir default instead
+    # of true root.
+    crumbs = [f'<a href="{_ra_url("/new", state, **{path_key: "/"})}" onclick="return selfsteamRaNav(this)">{html.escape(_RA_ROOT)}</a>']
     built = ""
     for part in parts:
         built += f"/{part}"
@@ -1220,7 +1272,7 @@ def _ra_picker_section(prefix, label, state, already_installed=None):
     file_key = f"ra_{prefix}file"
     source_key = f"ra_{prefix}source"
     skip_key = f"ra_{prefix}_skip"
-    rel_path = state.get(path_key, "")
+    rel_path = _ra_resolve_relpath(state.get(path_key, ""))
     selected_file = state.get(file_key, "")
     dom_prefix = f"ra-{prefix}-source"
     # A console's BIOS is a one-time install shared by every game that
@@ -1319,7 +1371,8 @@ def _ra_picker_section(prefix, label, state, already_installed=None):
 
     abs_path = _ra_safe_join(rel_path)
     if abs_path is None or not os.path.isdir(abs_path):
-        abs_path, rel_path = _RA_ROOT, ""
+        rel_path = _RA_DEFAULT_RELPATH
+        abs_path = _ra_safe_join(rel_path) or _RA_ROOT
     local_panel = (
         f'<div class="breadcrumbs">{_ra_breadcrumbs_html(rel_path, state, path_key)}</div>'
         f'<div class="picker-list"><div class="boxed-list">{_ra_list_rows(abs_path, rel_path, state, path_key, file_key)}</div></div>'
@@ -1481,7 +1534,9 @@ def _em_breadcrumbs_html(rel_path, state, path_key):
     # local-file-browsing logic they implement isn't actually RA-
     # specific despite the name, just built there first.
     parts = [p for p in rel_path.split("/") if p]
-    crumbs = [f'<a href="{_em_url("/new", state, **{path_key: ""})}" onclick="return selfsteamEmNav(this)">{html.escape(_RA_ROOT)}</a>']
+    # path_key="/" here on purpose, not "" -- see _ra_resolve_relpath's
+    # own comment.
+    crumbs = [f'<a href="{_em_url("/new", state, **{path_key: "/"})}" onclick="return selfsteamEmNav(this)">{html.escape(_RA_ROOT)}</a>']
     built = ""
     for part in parts:
         built += f"/{part}"
@@ -1539,7 +1594,7 @@ def _em_picker_section(prefix, label, state, already_installed=None, info_toolti
     file_key = f"em_{prefix}file"
     source_key = f"em_{prefix}source"
     skip_key = f"em_{prefix}_skip"
-    rel_path = state.get(path_key, "")
+    rel_path = _ra_resolve_relpath(state.get(path_key, ""))
     selected_file = state.get(file_key, "")
     dom_prefix = f"em-{prefix}-source"
     source = state.get(source_key) or "local"
@@ -1609,7 +1664,8 @@ def _em_picker_section(prefix, label, state, already_installed=None, info_toolti
 
     abs_path = _ra_safe_join(rel_path)
     if abs_path is None or not os.path.isdir(abs_path):
-        abs_path, rel_path = _RA_ROOT, ""
+        rel_path = _RA_DEFAULT_RELPATH
+        abs_path = _ra_safe_join(rel_path) or _RA_ROOT
     local_panel = (
         f'<div class="breadcrumbs">{_em_breadcrumbs_html(rel_path, state, path_key)}</div>'
         f'<div class="picker-list"><div class="boxed-list">{_em_list_rows(abs_path, rel_path, state, path_key, file_key)}</div></div>'
