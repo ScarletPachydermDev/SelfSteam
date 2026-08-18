@@ -1904,11 +1904,25 @@ def _ra_loading_artwork_html():
     return "".join(sections)
 
 
-def _artwork_picker_html(candidates_by_category):
+def _artwork_picker_html(candidates_by_category, prefix=""):
     # Always renders all 5 categories, even with zero candidates
     # (candidates_by_category can be {}) -- shown before any search
     # too, so the right column never collapses to a placeholder message
     # and always occupies its full share of the row.
+    #
+    # prefix ("" for URL, "ra_" for RetroArch, "em_" for Emulators) keeps
+    # each tab's own radio group and ids from colliding with the other
+    # two -- every flavor of right column is always rendered at once
+    # (CSS decides which is visible, see render_page's own comment), and
+    # all three shared the exact same name="artwork_{basename}" AND the
+    # same form="{_ADD_FORM_ID}" until this existed, meaning they were
+    # really just one radio group per category spanning all three tabs:
+    # whichever tab's picker happened to render *last* in the DOM (with
+    # its own default checked) silently won the real submitted value,
+    # regardless of which tab was actually visible or what got clicked --
+    # confirmed live as exactly why a freshly resolved RA search's own
+    # first result never looked selected (the Emulators tab's own
+    # always-"no artwork" default, rendered after it, was overriding it).
     sections = []
     for basename, title, _fetch, base_w, base_h in ARTWORK_CATEGORIES:
         candidates = candidates_by_category.get(basename) or []
@@ -1936,11 +1950,11 @@ def _artwork_picker_html(candidates_by_category):
         # finds artwork, the first real result is the more useful
         # default (one fewer click for the common case), same as
         # before "none" existed at all.
-        none_id = f"art-{basename}-none"
+        none_id = f"art-{prefix}{basename}-none"
         none_checked = "" if candidates else " checked"
         none_cell = f"""
 <div class="artwork-cell">
-  <input type="radio" id="{none_id}" name="artwork_{basename}" value="" form="{_ADD_FORM_ID}"{none_checked}>
+  <input type="radio" id="{none_id}" name="artwork_{prefix}{basename}" value="" form="{_ADD_FORM_ID}"{none_checked}>
   <label for="{none_id}" style="{cell_style}">{_NO_ARTWORK_ICON_SVG}</label>
 </div>"""
         if not candidates:
@@ -1961,12 +1975,12 @@ def _artwork_picker_html(candidates_by_category):
         cells = [none_cell]
         for i, cand in enumerate(candidates):
             checked = " checked" if i == 0 else ""
-            input_id = f"art-{basename}-{i}"
+            input_id = f"art-{prefix}{basename}-{i}"
             thumb = html.escape(cand.get("thumb") or cand["url"])
             url = html.escape(cand["url"])
             cells.append(f"""
 <div class="artwork-cell">
-  <input type="radio" id="{input_id}" name="artwork_{basename}" value="{url}" form="{_ADD_FORM_ID}"{checked}>
+  <input type="radio" id="{input_id}" name="artwork_{prefix}{basename}" value="{url}" form="{_ADD_FORM_ID}"{checked}>
   <label for="{input_id}" style="{cell_style}">
     <img src="{thumb}" loading="lazy" alt="">
   </label>
@@ -2193,7 +2207,7 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
         ra_right_content = _ra_loading_artwork_html()
     else:
         ra_middle_html = _ra_middle_column_html(ra_state, [ra_chosen] if ra_chosen else [], extra_class="middle-panel-retroarch")
-        ra_right_content = _artwork_picker_html(ra_candidates_by_category)
+        ra_right_content = _artwork_picker_html(ra_candidates_by_category, prefix="ra_")
 
     if em_loading:
         em_refresh_url = _em_url("/new", em_state, em_resolved="1")
@@ -2205,7 +2219,7 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
         em_right_content = _ra_loading_artwork_html()
     else:
         em_middle_html = _em_middle_column_html(em_state, [em_chosen] if em_chosen else [], extra_class="middle-panel-emulators")
-        em_right_content = _artwork_picker_html(em_candidates_by_category)
+        em_right_content = _artwork_picker_html(em_candidates_by_category, prefix="em_")
 
     middle_url = _middle_column_html(query, couch_mode, browser, sgdb_q, matches, match_index, extra_class="middle-panel-url", ra_state=ra_state, em_state=em_state)
     right_url = f'<div class="card artwork-card right-panel-url">{_artwork_picker_html(candidates_by_category)}</div>'
@@ -3040,8 +3054,11 @@ class Handler(BaseHTTPRequestHandler):
 
             slug = create_webapp.slugify(match_name)
             selections = {}
+            # artwork_ra_{basename}, not artwork_{basename} -- see
+            # _artwork_picker_html's own comment on why each tab's own
+            # radio group needs a distinct name, this being the RA tab's.
             for basename, _title, _fetch, _w, _h in ARTWORK_CATEGORIES:
-                selection_url = (params.get(f"artwork_{basename}") or [None])[0]
+                selection_url = (params.get(f"artwork_ra_{basename}") or [None])[0]
                 selections[basename] = {"url": selection_url} if selection_url else None
             asset_paths = create_webapp.download_selected_assets(slug, selections)
             pending_queue.add(match_name, None, False, asset_paths, launch_args=args)
@@ -3115,8 +3132,10 @@ class Handler(BaseHTTPRequestHandler):
 
             slug = create_webapp.slugify(match_name)
             selections = {}
+            # artwork_em_{basename} -- see _add_retroarch_shortcut's own
+            # comment on the same rename, this being the Emulators tab's.
             for basename, _title, _fetch, _w, _h in ARTWORK_CATEGORIES:
-                selection_url = (params.get(f"artwork_{basename}") or [None])[0]
+                selection_url = (params.get(f"artwork_em_{basename}") or [None])[0]
                 selections[basename] = {"url": selection_url} if selection_url else None
             asset_paths = create_webapp.download_selected_assets(slug, selections)
             pending_queue.add(match_name, None, False, asset_paths, launch_args=args)
