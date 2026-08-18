@@ -755,28 +755,59 @@ function gridgeShowInstalling(form) {
 // onchange-driven navigation as a fallback -- if fetch ever fails (or
 // JS is off entirely), it just behaves like a normal link/auto-submit
 // again, nothing here is the only way to reach a URL.
-function gridgeTabFetch(url, swapIds) {
+// Shared by gridgeTabFetch (GET, url known upfront) and gridgeUploadFetch
+// (POST, final url only known once fetch() has followed the upload's own
+// redirect) -- both just want "swap these ids in from this HTML, then
+// chase any <meta refresh> the same way a real browser would have".
+// Splitting this out is what let the upload path below drop its real
+// top-level navigation without duplicating the meta-refresh chase logic.
+function gridgeApplySwap(htmlText, url, swapIds) {
   history.replaceState(null, "", url);
+  var doc = new DOMParser().parseFromString(htmlText, "text/html");
+  swapIds.forEach(function (id) {
+    var next = doc.getElementById(id);
+    var cur = document.getElementById(id);
+    if (next && cur) cur.replaceWith(next);
+  });
+  // A freshly-picked ROM's response is the loading-skeleton page
+  // (see the /new handler's ra_loading/em_loading branches) carrying
+  // a <meta refresh> to the real, possibly-slow resolved URL -- a
+  // real browser would follow that automatically; here the swap
+  // above already showed its spinner, so this just fetches the
+  // follow-up itself instead of waiting for an actual page reload.
+  var meta = doc.querySelector('meta[http-equiv="refresh"]');
+  var match = meta && /url=(.*)$/.exec(meta.getAttribute("content") || "");
+  if (match) gridgeTabFetch(match[1], swapIds);
+}
+
+function gridgeTabFetch(url, swapIds) {
   fetch(url)
     .then(function (r) { if (!r.ok) throw new Error("bad status"); return r.text(); })
-    .then(function (htmlText) {
-      var doc = new DOMParser().parseFromString(htmlText, "text/html");
-      swapIds.forEach(function (id) {
-        var next = doc.getElementById(id);
-        var cur = document.getElementById(id);
-        if (next && cur) cur.replaceWith(next);
-      });
-      // A freshly-picked ROM's response is the loading-skeleton page
-      // (see the /new handler's ra_loading/em_loading branches) carrying
-      // a <meta refresh> to the real, possibly-slow resolved URL -- a
-      // real browser would follow that automatically; here the swap
-      // above already showed its spinner, so this just fetches the
-      // follow-up itself instead of waiting for an actual page reload.
-      var meta = doc.querySelector('meta[http-equiv="refresh"]');
-      var match = meta && /url=(.*)$/.exec(meta.getAttribute("content") || "");
-      if (match) gridgeTabFetch(match[1], swapIds);
-    })
+    .then(function (htmlText) { gridgeApplySwap(htmlText, url, swapIds); })
     .catch(function () { window.location.href = url; });
+}
+
+// Sixth deliberate JS exception: a file upload used to be a real
+// this.form.submit() -- a genuine top-level navigation, since
+// multipart/form-data with a real file needs a real request body fetch()
+// can build too (via FormData), it just wasn't being used. That real
+// navigation, followed by the upload handler's own 303 redirect and then
+// (for a ROM) the loading page's own 0-delay meta-refresh, was three
+// full-document loads back to back -- enough for a real, visible flash
+// of the page's default tab before each one's :target CSS caught up,
+// self-correcting a moment later but still visible. Routing the upload
+// itself through fetch (which follows the 303 automatically, landing
+// r.url on the real post-redirect page) collapses that to the same
+// in-place swap every other tab interaction already gets, with the same
+// graceful real-navigation fallback if fetch throws (JS half-broken,
+// network weirdness) rather than leaving the picked file stuck nowhere.
+function gridgeUploadFetch(input, swapIds) {
+  var form = input.form;
+  var data = new FormData(form);
+  fetch(form.getAttribute("action"), { method: "POST", body: data })
+    .then(function (r) { if (!r.ok) throw new Error("bad status"); return r.text().then(function (t) { return {text: t, url: r.url}; }); })
+    .then(function (result) { gridgeApplySwap(result.text, result.url, swapIds); })
+    .catch(function () { form.submit(); });
 }
 
 var GRIDGE_RA_SWAP_IDS = [
@@ -1252,16 +1283,17 @@ def _ra_picker_section(prefix, label, state, already_installed=None):
     # since anything after a URL fragment becomes part of the fragment
     # text, not a real query param the server could read.
     upload_action = f"/new/upload?{_ra_qs(state)}&slot={prefix}#tab-retroarch"
-    # Auto-submits on pick, no separate Upload button -- same
-    # onchange="this.form.submit()" pattern already used for the console
-    # select, a real user-initiated change event, not scripted
-    # navigation. gridgeShowUploading runs from onchange directly, not a
-    # form onsubmit handler -- HTMLFormElement.submit() (unlike the
-    # newer requestSubmit()) never fires the form's own submit event at
-    # all per spec, so an onsubmit handler here would silently never run.
+    # Auto-submits on pick, no separate Upload button -- a real
+    # user-initiated change event, not scripted navigation.
+    # gridgeShowUploading and gridgeUploadFetch both run from onchange
+    # directly, not a form onsubmit handler -- HTMLFormElement.submit()
+    # (unlike the newer requestSubmit()) never fires the form's own
+    # submit event at all per spec, so an onsubmit handler here would
+    # silently never run; gridgeUploadFetch itself falls back to a real
+    # this.form.submit() if fetch throws, same as every other nav helper.
     upload_panel = f"""
     <form method="post" enctype="multipart/form-data" action="{upload_action}">
-      <input type="file" name="file" onchange="gridgeShowUploading('{dom_prefix}'); this.form.submit()">
+      <input type="file" name="file" onchange="gridgeShowUploading('{dom_prefix}'); gridgeUploadFetch(this, GRIDGE_RA_SWAP_IDS)">
     </form>"""
 
     abs_path = _ra_safe_join(rel_path)
@@ -1550,7 +1582,7 @@ def _em_picker_section(prefix, label, state, already_installed=None, info_toolti
     upload_action = f"/new/upload-em?{_em_qs(state)}&slot={prefix}#tab-emulators"
     upload_panel = f"""
     <form method="post" enctype="multipart/form-data" action="{upload_action}">
-      <input type="file" name="file" onchange="gridgeShowUploading('{dom_prefix}'); this.form.submit()">
+      <input type="file" name="file" onchange="gridgeShowUploading('{dom_prefix}'); gridgeUploadFetch(this, GRIDGE_EM_SWAP_IDS)">
     </form>"""
 
     abs_path = _ra_safe_join(rel_path)
