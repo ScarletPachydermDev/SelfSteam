@@ -734,12 +734,23 @@ function selfsteamShowUploading(prefix) {
 // same shape retroarch_cores.py's own core install already has) is
 // where switching this to "Installing" partway through would actually
 // mean something.
-function selfsteamShowInstalling(form) {
-  if (form.dataset.installed) return;
+// Broadened from an Emulators-tab-only "Downloading <emulator>" spinner
+// (still shown for a genuine fresh Flatpak install, that one real case
+// where /add's own blocking work is a multi-minute download) into a
+// spinner shown on every Create click regardless of tab -- the URL and
+// RetroArch tabs' own /add work (SGDB artwork fetch, then the full
+// Steam stop/splash/write/restart maintenance cycle) is real, visible-
+// on-a-slow-connection-or-slow-Steam-restart blocking time too, and
+// previously gave zero feedback that the click registered at all.
+function selfsteamShowCreating(form) {
   var button = document.getElementById("selfsteam-add-button");
   if (!button) return;
   button.disabled = true;
-  button.innerHTML = "Downloading " + form.dataset.emulator + '<span class="spinner"></span>';
+  if (form.dataset.emulator && !form.dataset.installed) {
+    button.innerHTML = "Downloading " + form.dataset.emulator + '<span class="spinner"></span>';
+  } else {
+    button.innerHTML = "Creating Shortcut" + '<span class="spinner"></span>';
+  }
 }
 
 // Fifth deliberate JS exception: every other RA-tab interaction that
@@ -2262,7 +2273,7 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
     # (with stale data) instead of actually searching.
     if ra_ready:
         add_form = f"""
-<form id="{_ADD_FORM_ID}" action="/add" method="post">
+<form id="{_ADD_FORM_ID}" action="/add" method="post" onsubmit="selfsteamShowCreating(this)">
   <input type="hidden" name="ra_console" value="{html.escape(ra_console)}">
   <input type="hidden" name="ra_romfile" value="{html.escape(ra_state.get('ra_romfile', ''))}">
   <input type="hidden" name="ra_biosfile" value="{html.escape(ra_state.get('ra_biosfile', ''))}">
@@ -2278,16 +2289,18 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
         # fires as part of the submission itself, so disabling there is
         # always safe -- the submission already happened by that point.
         #
-        # data-installed lets selfsteamShowInstalling skip the spinner
-        # entirely when the emulator's already there -- Create still
-        # blocks briefly on _add_standalone_emulator_shortcut's own
-        # already-installed check either way, but that's fast (a single
+        # data-installed lets selfsteamShowCreating show the generic
+        # "Creating Shortcut" spinner instead of "Downloading <emulator>"
+        # when the emulator's already there -- Create still blocks
+        # briefly on _add_standalone_emulator_shortcut's own already-
+        # installed check either way, but that's fast (a single
         # `flatpak info`), not the multi-minute-first-time-only download
-        # the spinner exists for. Checked fresh at render time; /add
-        # re-checks it again for real regardless of what this says.
+        # the more specific wording is for. Checked fresh at render
+        # time; /add re-checks it again for real regardless of what
+        # this says.
         em_already_installed = standalone_emulators.installed(em_emulator)
         add_form = f"""
-<form id="{_ADD_FORM_ID}" action="/add" method="post" onsubmit="selfsteamShowInstalling(this)"
+<form id="{_ADD_FORM_ID}" action="/add" method="post" onsubmit="selfsteamShowCreating(this)"
       data-emulator="{html.escape(em_emulator)}" data-installed="{"1" if em_already_installed else ""}">
   <input type="hidden" name="em_emulator" value="{html.escape(em_emulator)}">
   <input type="hidden" name="em_romfile" value="{html.escape(em_state.get('em_romfile', ''))}">
@@ -2305,7 +2318,7 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
         # was typed, not just whatever the server last rendered) is
         # what's submitted, without needing to nest it inside this form.
         add_form = f"""
-<form id="{_ADD_FORM_ID}" action="/add" method="post">
+<form id="{_ADD_FORM_ID}" action="/add" method="post" onsubmit="selfsteamShowCreating(this)">
   <input type="hidden" name="query" value="{html.escape(query)}">
   <input type="hidden" name="resolved_url" value="{html.escape(resolved_url or '')}">
   <input type="hidden" name="browser" value="{html.escape(_default_browser(browser))}">
