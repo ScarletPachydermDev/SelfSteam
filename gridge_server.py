@@ -1066,6 +1066,7 @@ def _url_tab_panel_html(query="", couch_mode=False, browser="", chosen=None, nam
 _RA_STATE_KEYS = [
     "ra_console", "ra_rompath", "ra_romfile", "ra_biospath", "ra_biosfile",
     "ra_resolved", "ra_sgdb_q", "ra_romsource", "ra_biossource", "ra_bios_skip",
+    "ra_sgdb_cleared", "ra_name_cleared",
 ]
 _RA_ROOT = os.path.expanduser("~")
 # Under _RA_ROOT on purpose -- uploaded files just become another real
@@ -1151,6 +1152,12 @@ def _ra_list_rows(abs_path, rel_path, state, path_key, file_key):
                 # Race 64, searched SGDB for "toy story" instead.
                 overrides["ra_resolved"] = ""
                 overrides["ra_sgdb_q"] = ""
+                # A brand new ROM gets its own fresh one-time auto-fill
+                # (see _ra_display_term/name_default) -- any earlier
+                # "user explicitly cleared this" flag belonged to the
+                # *previous* ROM, not this one.
+                overrides["ra_sgdb_cleared"] = ""
+                overrides["ra_name_cleared"] = ""
             href = _ra_url("/new", state, **overrides)
             rows.append(f'<a href="{href}" onclick="return gridgeRaNav(this)"><span class="file-icon">&#128190;</span>{html.escape(entry.name)}</a>')
     return "".join(rows)
@@ -1331,18 +1338,22 @@ def _retroarch_tab_panel_html(state, chosen=None):
     # /new handler), same wand-icon/clear-to-reset pattern as the URL
     # tab's own Name field.
     romfile = state.get("ra_romfile", "")
-    name_default = chosen["name"] if chosen else (_ra_guess_name_from_filename(romfile) if romfile else "")
-    name_reset_href = _ra_url("/new", state)
-    # onclick=gridgeRaNav on this link specifically (unlike the URL tab's
-    # own reset, which navigates to a different route -- /search -- and
-    # always triggers a real load): built from the current state
-    # unmodified, so its href is often byte-identical to the page
-    # already showing, including the #tab-retroarch fragment -- a plain
-    # <a> click there is a real no-op in the browser (same URL, same
-    # fragment, nothing to navigate to), confirmed live as exactly why
-    # "Reset to guessed name" looked broken. Routing through the AJAX
-    # fetch layer instead always re-fetches and re-swaps regardless of
-    # whether the address bar's own URL actually changed.
+    # ra_name_cleared: the auto cross-population from the resolved
+    # match/guessed filename is meant to be a one-time courtesy fill-in,
+    # not something that keeps overwriting the field after the user's
+    # done something with it -- confirmed live, "clearing" this used to
+    # just re-show the exact same guessed name right back, which read as
+    # the clear button doing nothing. The icon toggles between Clear
+    # (blanks it, sets the flag) and Reset to guessed name (drops the
+    # flag, goes back to auto-fill) depending on which state it's in.
+    name_cleared = bool(state.get("ra_name_cleared"))
+    name_default = "" if name_cleared else (chosen["name"] if chosen else (_ra_guess_name_from_filename(romfile) if romfile else ""))
+    name_reset_href = _ra_url("/new", state, ra_name_cleared=("" if name_cleared else "1"))
+    name_reset_title = "Reset to guessed name" if name_cleared else "Clear"
+    # onclick=gridgeRaNav -- routes through the AJAX fetch layer instead
+    # of a plain navigation so the swap always happens even when only a
+    # same-page state flag changed (a plain <a> click to an identical
+    # URL+fragment is a real no-op in the browser otherwise).
     name_field = f"""
   <div class="field-group">
     <label class="field-label" for="ra-name-field">Name</label>
@@ -1350,7 +1361,7 @@ def _retroarch_tab_panel_html(state, chosen=None):
       <img class="name-field-icon" src="/vendor/name-field-wand.webp" alt="">
       <input type="text" name="ra_match_name" id="ra-name-field" form="{_ADD_FORM_ID}"
              value="{html.escape(name_default)}" placeholder="Shortcut name">
-      <a href="{name_reset_href}" class="field-clear-btn" title="Reset to guessed name" onclick="return gridgeRaNav(this)">&#10005;</a>
+      <a href="{name_reset_href}" class="field-clear-btn" title="{name_reset_title}" onclick="return gridgeRaNav(this)">&#10005;</a>
     </div>
   </div>"""
 
@@ -1394,7 +1405,7 @@ _EM_STATE_KEYS = [
     "em_biospath", "em_biosfile", "em_biossource",
     "em_keyspath", "em_keysfile", "em_keyssource", "em_keys_skip",
     "em_firmwarepath", "em_firmwarefile", "em_firmwaresource", "em_firmware_skip",
-    "em_resolved", "em_sgdb_q",
+    "em_resolved", "em_sgdb_q", "em_sgdb_cleared", "em_name_cleared",
 ]
 
 
@@ -1460,6 +1471,11 @@ def _em_list_rows(abs_path, rel_path, state, path_key, file_key):
                 # exact same fix, same root cause here.
                 overrides["em_resolved"] = ""
                 overrides["em_sgdb_q"] = ""
+                # A brand new ROM gets its own fresh one-time auto-fill
+                # -- see _ra_list_rows's own comment on the same reset,
+                # same reasoning here.
+                overrides["em_sgdb_cleared"] = ""
+                overrides["em_name_cleared"] = ""
             href = _em_url("/new", state, **overrides)
             rows.append(f'<a href="{href}" onclick="return gridgeEmNav(this)"><span class="file-icon">&#128190;</span>{html.escape(entry.name)}</a>')
     return "".join(rows)
@@ -1643,8 +1659,12 @@ def _emulators_tab_panel_html(state, chosen=None):
     rom_block = _em_picker_section("rom", "Select ROM", state)
 
     romfile = state.get("em_romfile", "")
-    name_default = chosen["name"] if chosen else (_ra_guess_name_from_filename(romfile) if romfile else "")
-    name_reset_href = _em_url("/new", state)
+    # em_name_cleared -- see _retroarch_tab_panel_html's own comment on
+    # the same flag/toggle, same reasoning here.
+    name_cleared = bool(state.get("em_name_cleared"))
+    name_default = "" if name_cleared else (chosen["name"] if chosen else (_ra_guess_name_from_filename(romfile) if romfile else ""))
+    name_reset_href = _em_url("/new", state, em_name_cleared=("" if name_cleared else "1"))
+    name_reset_title = "Reset to guessed name" if name_cleared else "Clear"
     # onclick=gridgeEmNav -- see _retroarch_tab_panel_html's own comment
     # on the same fix, same identical-URL no-op bug here.
     name_field = f"""
@@ -1654,7 +1674,7 @@ def _emulators_tab_panel_html(state, chosen=None):
       <img class="name-field-icon" src="/vendor/name-field-wand.webp" alt="">
       <input type="text" name="em_match_name" id="em-name-field" form="{_ADD_FORM_ID}"
              value="{html.escape(name_default)}" placeholder="Shortcut name">
-      <a href="{name_reset_href}" class="field-clear-btn" title="Reset to guessed name" onclick="return gridgeEmNav(this)">&#10005;</a>
+      <a href="{name_reset_href}" class="field-clear-btn" title="{name_reset_title}" onclick="return gridgeEmNav(this)">&#10005;</a>
     </div>
   </div>"""
 
@@ -1689,19 +1709,21 @@ def _emulators_tab_panel_html(state, chosen=None):
 
 def _em_display_term(state, chosen=None):
     # What's actually driving the current SGDB results: the explicit
-    # override if there is one, else the real resolved match's own name
-    # (once SGDB has actually found one), else the raw filename guess --
-    # so the box always shows what was really searched instead of
-    # sitting blank. Safe to fall back to chosen here (unlike an earlier
-    # version of this that always showed the raw override alone) because
-    # Clear now drops em_resolved along with em_sgdb_q (see
-    # _em_sgdb_search_bar_html's own comment) -- chosen by the time this
-    # renders again is always freshly re-resolved from the guessed name,
-    # never the stale match a leftover override had found, so this
-    # doesn't reintroduce the "Clear looks like it does nothing" bug the
-    # blank-only version was fixing.
+    # override if there is one, else -- only if the user hasn't
+    # explicitly cleared this box for the current ROM (em_sgdb_cleared,
+    # set by the Clear link itself, dropped again the moment a genuinely
+    # new ROM is picked -- see _em_list_rows) -- the real resolved
+    # match's own name, else the raw filename guess. The cross-
+    # population is meant to be a one-time courtesy fill-in, not
+    # something that keeps overwriting whatever the user does with the
+    # field afterward -- confirmed live: clearing this then had the
+    # "cleared" search term stick, but the box's own displayed value
+    # kept reverting to the freshly re-resolved game name anyway, which
+    # read as "Clear doesn't actually clear it."
     if state.get("em_sgdb_q"):
         return state["em_sgdb_q"].lower()
+    if state.get("em_sgdb_cleared"):
+        return ""
     if chosen and chosen.get("name"):
         return chosen["name"].lower()
     romfile = state.get("em_romfile")
@@ -1710,13 +1732,17 @@ def _em_display_term(state, chosen=None):
 
 def _em_sgdb_search_bar_html(state, chosen=None):
     display_term = _em_display_term(state, chosen)
-    clear_href = _em_url("/new", state, em_sgdb_q="", em_resolved="")
     # em_resolved dropped along with em_sgdb_q -- carrying it forward
     # would skip the /new handler's em_loading branch entirely (it only
     # triggers when em_resolved is falsy), meaning a real search term
     # change would run its whole SGDB search synchronously in one
     # request with zero loading feedback, not just the very first
-    # search a fresh ROM pick already triggers on its own.
+    # search a fresh ROM pick already triggers on its own. em_sgdb_cleared
+    # set alongside them -- see _em_display_term's own comment for why:
+    # without it, the fresh re-search this triggers would just
+    # re-populate the box's own display right back with the newly
+    # resolved match's name.
+    clear_href = _em_url("/new", state, em_sgdb_q="", em_resolved="", em_sgdb_cleared="1")
     hidden = _ra_hidden_fields({k: v for k, v in state.items() if k not in ("em_sgdb_q", "em_resolved")})
     # Disabled until a ROM actually exists -- /new never runs a search at
     # all without one (there's nothing to guess a name from), so typing
@@ -1887,10 +1913,12 @@ def _middle_column_html(query, couch_mode, browser, sgdb_q, matches, match_index
 
 def _ra_display_term(state, chosen=None):
     # Same fallback chain (override -> resolved match's name -> filename
-    # guess) as _em_display_term -- see its own comment for why this is
-    # safe now that Clear drops ra_resolved along with ra_sgdb_q.
+    # guess) as _em_display_term, with the same ra_sgdb_cleared guard --
+    # see its own comment for the reasoning.
     if state.get("ra_sgdb_q"):
         return state["ra_sgdb_q"].lower()
+    if state.get("ra_sgdb_cleared"):
+        return ""
     if chosen and chosen.get("name"):
         return chosen["name"].lower()
     romfile = state.get("ra_romfile")
@@ -1906,9 +1934,10 @@ def _ra_sgdb_search_bar_html(state, chosen=None):
     # _RA_STATE_KEYS, so it's just another field carried by every
     # existing RA link/form for free -- no separate threading needed.
     display_term = _ra_display_term(state, chosen)
-    clear_href = _ra_url("/new", state, ra_sgdb_q="", ra_resolved="")
-    # ra_resolved dropped along with ra_sgdb_q -- see _em_sgdb_search_bar_
-    # html's own comment on this exact same fix for the reasoning.
+    # ra_resolved/ra_sgdb_cleared dropped alongside ra_sgdb_q -- see
+    # _em_sgdb_search_bar_html's own comment on this exact same fix for
+    # the reasoning.
+    clear_href = _ra_url("/new", state, ra_sgdb_q="", ra_resolved="", ra_sgdb_cleared="1")
     hidden = _ra_hidden_fields({k: v for k, v in state.items() if k not in ("ra_sgdb_q", "ra_resolved")})
     # Disabled until a ROM exists -- see _em_sgdb_search_bar_html's own
     # comment on this exact same fix for the reasoning.
