@@ -2368,9 +2368,16 @@ def _resolve_matches(query, resolved, sgdb_q=None):
 def _poster_card_html(shortcut, pending_removal_appids):
     appid = shortcut["appid"]
     name = shortcut["name"]
-    has_artwork = appid is not None and create_webapp.find_grid_image_for_appid(appid) is not None
+    grid_source = create_webapp.find_grid_image_for_appid(appid) if appid is not None else None
+    has_artwork = grid_source is not None
     if has_artwork:
-        art_html = f'<img class="poster-art" src="/grid-image/{appid}" loading="lazy" alt="{html.escape(name)}">'
+        # ?v=<source mtime> -- lets the browser cache the thumbnail
+        # aggressively (see _serve_grid_image's own long max-age) while
+        # still fetching a fresh one the moment the real artwork actually
+        # changes (re-picking on Edit), since that's a different URL
+        # rather than the same one now pointing at different bytes.
+        cache_bust = int(os.path.getmtime(grid_source))
+        art_html = f'<img class="poster-art" src="/grid-image/{appid}?v={cache_bust}" loading="lazy" alt="{html.escape(name)}">'
     else:
         # No grid image on disk -- rather than a broken <img> or a blank
         # panel, show the shortcut's own name so the poster still reads
@@ -2543,7 +2550,11 @@ class Handler(BaseHTTPRequestHandler):
         if not appid.isdigit():
             self._send_html(render("<p>Not found</p>"), status=404)
             return
-        path = create_webapp.find_grid_image_for_appid(int(appid))
+        # A small cached webp thumbnail, not Steam's own (often multi-MB)
+        # original -- see create_webapp.thumbnail_for_appid. Falls back
+        # to serving the real original path if thumbnailing isn't
+        # possible, so this never regresses to a broken image.
+        path = create_webapp.thumbnail_for_appid(int(appid))
         if not path or not os.path.exists(path):
             self._send_html(render("<p>Not found</p>"), status=404)
             return
@@ -2554,6 +2565,13 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
+        # The browser's own cache, on top of the on-disk thumbnail cache --
+        # skips even the local request entirely on a repeat gallery visit.
+        # A week is safe: re-picking artwork changes the underlying file,
+        # which changes what thumbnail_for_appid regenerates and serves
+        # next time regardless of what a browser has cached under this
+        # same URL.
+        self.send_header("Cache-Control", "public, max-age=604800")
         self.end_headers()
         self.wfile.write(body)
 

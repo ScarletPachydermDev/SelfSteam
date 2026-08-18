@@ -31,6 +31,17 @@ import steam_paths
 ASSET_DIR = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "gridge", "assets")
 APPLICATIONS_DIR = os.path.expanduser("~/.local/share/applications")
 
+# Same cache root as ASSET_DIR, own subfolder -- these are small, lossy
+# derivatives of Steam's own grid images (see thumbnail_for_appid),
+# never the real artwork Steam itself displays, so they live entirely
+# separate from anything Steam reads.
+GRID_THUMB_DIR = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "gridge", "grid-thumbs")
+# 2x the poster's own CSS display width (166px, see .poster-art) --
+# sharp on HiDPI without hauling in SGDB's original, which routinely
+# ships 600x900 (or larger "featured" variants well past that) for what
+# the gallery only ever shows at postage-stamp size.
+_GRID_THUMB_WIDTH = 332
+
 # Where the launcher lives when Steam itself is natively installed --
 # native Steam has full host filesystem access, so pointing straight at
 # wherever Gridge itself is installed works fine.
@@ -512,6 +523,40 @@ def find_grid_image_for_appid(appid):
         if path:
             return path
     return None
+
+
+def thumbnail_for_appid(appid):
+    """A small, cached webp copy of appid's own vertical grid image, for
+    the gallery to serve instead of Steam's real (often multi-MB, full
+    "featured"-resolution) original -- with 6 shortcuts already
+    noticeably slow to load, and Steam users routinely running into the
+    tens or hundreds, re-shipping the original to every browser on every
+    home page load doesn't scale. Regenerated automatically whenever the
+    source file actually changes (mtime-compared, not just "does a
+    thumbnail exist") -- e.g. re-picking artwork on an Edit -- but never
+    touches the original itself, since that's Steam's own file, not
+    Gridge's to modify. Returns the original path unchanged if Pillow
+    isn't available or the source can't be decoded, so a thumbnail
+    failure degrades to the pre-thumbnail behavior rather than a broken
+    image."""
+    source = find_grid_image_for_appid(appid)
+    if not source:
+        return None
+    os.makedirs(GRID_THUMB_DIR, exist_ok=True)
+    thumb_path = os.path.join(GRID_THUMB_DIR, f"{appid}.webp")
+    if os.path.exists(thumb_path) and os.path.getmtime(thumb_path) >= os.path.getmtime(source):
+        return thumb_path
+    try:
+        from PIL import Image
+        with Image.open(source) as img:
+            img = img.convert("RGB")
+            ratio = _GRID_THUMB_WIDTH / img.width
+            target_size = (_GRID_THUMB_WIDTH, round(img.height * ratio))
+            img = img.resize(target_size, Image.LANCZOS)
+            img.save(thumb_path, "WEBP", quality=80)
+        return thumb_path
+    except Exception:  # noqa: BLE001 -- any decode/encode failure just falls back to the original
+        return source
 
 
 def list_gridge_shortcuts():
