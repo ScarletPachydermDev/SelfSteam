@@ -292,8 +292,17 @@ input[type=text]:focus, select:focus { border-color: var(--accent); }
   cursor: pointer;
 }
 .search-submit-btn:disabled { background: #d8d8d8; cursor: not-allowed; }
-.field-with-clear input[type=text]:disabled { color: var(--text-dim); cursor: not-allowed; }
-.field-with-clear:has(input[type=text]:disabled) { background: #f0f0f0; }
+/* overflow:hidden on the pill container is the real fix here -- a
+   disabled <input>'s own UA-drawn background is a plain rectangle that
+   otherwise pokes out past the container's rounded corners at the two
+   ends (confirmed live: showed up as small grey marks just outside the
+   pill's left/right curve). appearance:none alone doesn't suppress it,
+   since that swatch isn't part of the textfield "appearance" the
+   property controls. */
+.field-with-clear input[type=text]:disabled {
+  color: var(--text-dim); cursor: not-allowed; background: transparent; border: none;
+}
+.field-with-clear:has(input[type=text]:disabled) { background: #f0f0f0; overflow: hidden; }
 .field-clear-btn {
   width: 1.8rem; height: 1.8rem; flex: 0 0 auto; margin: 0; padding: 0; font-size: 0.9rem; line-height: 1;
   border-radius: 50%; background: transparent; color: #4a4a4a; border: none; text-decoration: none;
@@ -1757,7 +1766,7 @@ def _display_name(sgdb_q):
     return sgdb_q.lower()
 
 
-def _sgdb_search_bar_html(query, couch_mode, browser, sgdb_q, ra_state=None, em_state=None):
+def _sgdb_search_bar_html(query, couch_mode, browser, sgdb_q, ra_state=None, em_state=None, has_matches=False):
     # Always-visible override search (matches the design handoff's
     # column-2 "SGDB search" pill) rather than the earlier magnifying-
     # glass reveal -- lets a user search SteamGridDB directly,
@@ -1770,15 +1779,24 @@ def _sgdb_search_bar_html(query, couch_mode, browser, sgdb_q, ra_state=None, em_
     # tabs once they're built out, not just the URL tab.
     display_term = _display_name(sgdb_q)
     clear_href = f"/search?{_state_qs(query, couch_mode, browser, ra_state, em_state)}"
+    # Disabled until the URL/service field has actually resolved to
+    # something real -- same reasoning as the RA/Emulators tabs' own
+    # search bars being disabled with no ROM picked yet (see
+    # _ra_sgdb_search_bar_html): there's nothing to search SGDB for
+    # otherwise, so a live-looking box that silently did nothing was the
+    # same trap. has_matches (there's always at least one synthetic
+    # match once resolution succeeds, see _resolve_matches) is this
+    # tab's own version of "romfile picked."
+    disabled = "" if has_matches else " disabled"
     return f"""
 <form action="/search" method="get">
   {_hidden_state_fields(query, couch_mode, browser, ra_state, em_state)}
   <div class="search-field-row">
     <div class="field-with-clear">
-      <input type="text" name="sgdb_q" value="{html.escape(display_term)}" placeholder="SGDB search">
+      <input type="text" name="sgdb_q" value="{html.escape(display_term)}" placeholder="SGDB search"{disabled}>
       <a href="{clear_href}" class="field-clear-btn" title="Clear">&#10005;</a>
     </div>
-    <button type="submit" class="search-submit-btn" title="Search">{_SEARCH_ICON_SVG}</button>
+    <button type="submit" class="search-submit-btn" title="Search"{disabled}>{_SEARCH_ICON_SVG}</button>
   </div>
 </form>
 """
@@ -1807,7 +1825,7 @@ def _middle_column_html(query, couch_mode, browser, sgdb_q, matches, match_index
     list_html = _match_list_html(query, couch_mode, browser, sgdb_q, matches, match_index, ra_state, em_state) if matches else _placeholder_matches_html()
     return f"""
 <div class="card {extra_class}">
-  {_sgdb_search_bar_html(query, couch_mode, browser, sgdb_q, ra_state, em_state)}
+  {_sgdb_search_bar_html(query, couch_mode, browser, sgdb_q, ra_state, em_state, has_matches=bool(matches))}
   <div class="field-group" style="flex:1;min-height:0">
     <h2>SGDB matches</h2>
     {list_html}
