@@ -2683,6 +2683,18 @@ def _fetch_candidates(game_id):
 
 
 class Handler(BaseHTTPRequestHandler):
+    # No timeout at all by default -- a stalled/dropped connection mid-
+    # upload (flaky wifi, a VPN silently dropping a long-lived transfer,
+    # a backgrounded browser tab) left rfile.read() blocking forever with
+    # nothing to show for it, which is exactly what "keeps on uploading
+    # forever" looked like: no error, no timeout, just an infinite spin.
+    # This is a per-read idle timeout (StreamRequestHandler.setup() calls
+    # self.connection.settimeout(self.timeout)), not a total-transfer
+    # cap -- a genuinely slow-but-still-progressing large upload keeps
+    # succeeding as long as *some* bytes arrive within each window: only
+    # a connection that's truly gone silent gets cut loose.
+    timeout = 60
+
     def _send_html(self, body, status=200):
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -3314,7 +3326,12 @@ class Handler(BaseHTTPRequestHandler):
         os.close(fd)
         try:
             filename = multipart_upload.save_uploaded_file(self.rfile, content_type, length, tmp_path)
-        except ValueError:
+        except (ValueError, OSError):
+            # OSError alongside ValueError -- a stalled connection (see
+            # Handler.timeout's own comment) raises socket.timeout here,
+            # a subclass of OSError, not ValueError; same "please try
+            # again" outcome either way, rather than an unhandled
+            # exception with the upload just silently never finishing.
             os.remove(tmp_path)
             self._send_html(render_done("Upload", ok=False, error="Upload failed -- please try again"))
             return
@@ -3371,7 +3388,12 @@ class Handler(BaseHTTPRequestHandler):
         os.close(fd)
         try:
             filename = multipart_upload.save_uploaded_file(self.rfile, content_type, length, tmp_path)
-        except ValueError:
+        except (ValueError, OSError):
+            # OSError alongside ValueError -- a stalled connection (see
+            # Handler.timeout's own comment) raises socket.timeout here,
+            # a subclass of OSError, not ValueError; same "please try
+            # again" outcome either way, rather than an unhandled
+            # exception with the upload just silently never finishing.
             os.remove(tmp_path)
             self._send_html(render_done("Upload", ok=False, error="Upload failed -- please try again"))
             return
