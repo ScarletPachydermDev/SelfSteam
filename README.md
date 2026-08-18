@@ -1,17 +1,12 @@
 # SelfSteam
 
-A headless companion to [Gridge](https://github.com/ScarletPachydermDev/gridge-desktop) -- a small web UI for adding Steam shortcuts (with SteamGridDB artwork) from another device, while the target machine stays in Steam's Game Mode.
+A headless companion, a small web UI for adding Steam shortcuts (with SteamGridDB artwork) from another device, while the target machine stays in Steam's Game Mode.
 
-No JavaScript. Plain server-rendered HTML forms.
+![](screenshots/screenshot-2026-08-18.webp)
 
 ## Status
 
 Live-tested end to end on real hardware: web request in, a random code shown full-screen on the TV to log in (same pattern ChimeraOS's own authenticator and `emerytech/couchside` both use -- no accounts, "can you see the screen" is the access control), Steam stopped, a full-screen "please wait" splash, the shortcut + artwork written safely while Steam is down, Steam restarted, shortcut launches correctly -- now running as a real boot-persistent systemd user service via `install.sh`.
-
-Not yet done:
-
-- Flatpak packaging (currently installs as plain `.py` files, see `install.sh`)
-- Session cookies are in-memory only -- a server restart logs everyone out (no persistence layer yet, by design for now)
 
 ## Why a restart is needed at all
 
