@@ -1624,14 +1624,19 @@ def _emulators_tab_panel_html(state, chosen=None):
     </div>
   </div>"""
 
-    flathub_hint = (
-        '<div class="hint-row"><span class="info-icon">i</span>'
-        '<span>Emulators will be downloaded from Flathub if not installed</span></div>'
-    ) if install_source == "flathub" else ""
+    # Native title tooltip -- covers both install sources at once (not
+    # conditional on which one's active) since it's a hover reference,
+    # not a status message about what's about to happen this time.
+    emulator_info_tooltip = (
+        "Flatpaks will be downloaded from Flathub if not installed.\n\n"
+        "AppImage emulators will be downloaded from the developer's own source."
+    )
 
     return f"""
   <div class="field-group">
-    <label class="field-label">Emulator <span class="required-asterisk">*</span></label>
+    <label class="field-label">Emulator <span class="required-asterisk">*</span>
+      <span class="info-icon" style="cursor:help;display:inline-flex;vertical-align:middle" title="{html.escape(emulator_info_tooltip)}">i</span>
+    </label>
     {source_toggle}
     <form method="get" action="/new#tab-emulators" style="margin:0">
       {hidden_fields}
@@ -1639,7 +1644,6 @@ def _emulators_tab_panel_html(state, chosen=None):
         {emulator_options}
       </select>
     </form>
-    {flathub_hint}
   </div>
   {bios_block}
   {keys_block}
@@ -3108,8 +3112,18 @@ class Handler(BaseHTTPRequestHandler):
             asset_paths = create_webapp.download_selected_assets(slug, selections)
             pending_queue.add(match_name, None, False, asset_paths, launch_args=args)
             # Same "stay on this tab, cleaned" redirect as the URL tab's
-            # own /add -- see its comment above.
-            self._redirect("/new#tab-retroarch")
+            # own /add -- see its comment above. Console and the ROM
+            # picker's own folder/source carried forward (everything
+            # else dropped) -- someone queueing several games for the
+            # same console, or several ROMs sitting in the same folder,
+            # back to back shouldn't have to re-pick either every single
+            # time, unlike the ROM file/BIOS/search state itself, which
+            # really is specific to the one game just queued.
+            ra_rompath = (params.get("ra_rompath") or [""])[0]
+            ra_romsource = (params.get("ra_romsource") or [""])[0]
+            self._redirect(_ra_url("/new", {
+                "ra_console": ra_console, "ra_rompath": ra_rompath, "ra_romsource": ra_romsource,
+            }))
         except Exception as e:  # noqa: BLE001 -- surfaced to the user, not swallowed
             self._send_html(render_done(match_name, ok=False, error=e))
 
@@ -3184,7 +3198,18 @@ class Handler(BaseHTTPRequestHandler):
                 selections[basename] = {"url": selection_url} if selection_url else None
             asset_paths = create_webapp.download_selected_assets(slug, selections)
             pending_queue.add(match_name, None, False, asset_paths, launch_args=args)
-            self._redirect("/new#tab-emulators")
+            # Emulator (and its Flathub/AppImage source), plus the ROM
+            # picker's own folder/source, carried forward -- same
+            # reasoning as _add_retroarch_shortcut's own carry-forward,
+            # everything else genuinely is specific to the one game just
+            # queued.
+            em_install_source = (params.get("em_install_source") or [""])[0]
+            em_rompath = (params.get("em_rompath") or [""])[0]
+            em_romsource = (params.get("em_romsource") or [""])[0]
+            self._redirect(_em_url("/new", {
+                "em_emulator": em_emulator, "em_install_source": em_install_source,
+                "em_rompath": em_rompath, "em_romsource": em_romsource,
+            }))
         except Exception as e:  # noqa: BLE001 -- surfaced to the user, not swallowed
             self._send_html(render_done(match_name, ok=False, error=e))
 
