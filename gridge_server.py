@@ -1333,6 +1333,16 @@ def _retroarch_tab_panel_html(state, chosen=None):
     romfile = state.get("ra_romfile", "")
     name_default = chosen["name"] if chosen else (_ra_guess_name_from_filename(romfile) if romfile else "")
     name_reset_href = _ra_url("/new", state)
+    # onclick=gridgeRaNav on this link specifically (unlike the URL tab's
+    # own reset, which navigates to a different route -- /search -- and
+    # always triggers a real load): built from the current state
+    # unmodified, so its href is often byte-identical to the page
+    # already showing, including the #tab-retroarch fragment -- a plain
+    # <a> click there is a real no-op in the browser (same URL, same
+    # fragment, nothing to navigate to), confirmed live as exactly why
+    # "Reset to guessed name" looked broken. Routing through the AJAX
+    # fetch layer instead always re-fetches and re-swaps regardless of
+    # whether the address bar's own URL actually changed.
     name_field = f"""
   <div class="field-group">
     <label class="field-label" for="ra-name-field">Name</label>
@@ -1340,7 +1350,7 @@ def _retroarch_tab_panel_html(state, chosen=None):
       <img class="name-field-icon" src="/vendor/name-field-wand.webp" alt="">
       <input type="text" name="ra_match_name" id="ra-name-field" form="{_ADD_FORM_ID}"
              value="{html.escape(name_default)}" placeholder="Shortcut name">
-      <a href="{name_reset_href}" class="field-clear-btn" title="Reset to guessed name">&#10005;</a>
+      <a href="{name_reset_href}" class="field-clear-btn" title="Reset to guessed name" onclick="return gridgeRaNav(this)">&#10005;</a>
     </div>
   </div>"""
 
@@ -1635,6 +1645,8 @@ def _emulators_tab_panel_html(state, chosen=None):
     romfile = state.get("em_romfile", "")
     name_default = chosen["name"] if chosen else (_ra_guess_name_from_filename(romfile) if romfile else "")
     name_reset_href = _em_url("/new", state)
+    # onclick=gridgeEmNav -- see _retroarch_tab_panel_html's own comment
+    # on the same fix, same identical-URL no-op bug here.
     name_field = f"""
   <div class="field-group">
     <label class="field-label" for="em-name-field">Name</label>
@@ -1642,7 +1654,7 @@ def _emulators_tab_panel_html(state, chosen=None):
       <img class="name-field-icon" src="/vendor/name-field-wand.webp" alt="">
       <input type="text" name="em_match_name" id="em-name-field" form="{_ADD_FORM_ID}"
              value="{html.escape(name_default)}" placeholder="Shortcut name">
-      <a href="{name_reset_href}" class="field-clear-btn" title="Reset to guessed name">&#10005;</a>
+      <a href="{name_reset_href}" class="field-clear-btn" title="Reset to guessed name" onclick="return gridgeEmNav(this)">&#10005;</a>
     </div>
   </div>"""
 
@@ -1676,15 +1688,24 @@ def _emulators_tab_panel_html(state, chosen=None):
 
 
 def _em_display_term(state, chosen=None):
-    # Literally just the override, blank when there isn't one -- this
-    # used to fall back to the resolved match's own name (or the raw
-    # filename guess) so the box always showed what was really driving
-    # results, but that meant Clear never actually produced an empty
-    # field: dropping the override just fell straight through to
-    # showing chosen["name"] again, which read as "Clear doesn't work"
-    # (confirmed live -- a user clearing this with a ROM already
-    # resolved saw the field repopulate right back).
-    return state.get("em_sgdb_q", "").lower()
+    # What's actually driving the current SGDB results: the explicit
+    # override if there is one, else the real resolved match's own name
+    # (once SGDB has actually found one), else the raw filename guess --
+    # so the box always shows what was really searched instead of
+    # sitting blank. Safe to fall back to chosen here (unlike an earlier
+    # version of this that always showed the raw override alone) because
+    # Clear now drops em_resolved along with em_sgdb_q (see
+    # _em_sgdb_search_bar_html's own comment) -- chosen by the time this
+    # renders again is always freshly re-resolved from the guessed name,
+    # never the stale match a leftover override had found, so this
+    # doesn't reintroduce the "Clear looks like it does nothing" bug the
+    # blank-only version was fixing.
+    if state.get("em_sgdb_q"):
+        return state["em_sgdb_q"].lower()
+    if chosen and chosen.get("name"):
+        return chosen["name"].lower()
+    romfile = state.get("em_romfile")
+    return _ra_guess_name_from_filename(romfile).lower() if romfile else ""
 
 
 def _em_sgdb_search_bar_html(state, chosen=None):
@@ -1781,15 +1802,19 @@ def _placeholder_matches_html():
     return f'<div class="boxed-list">{"".join(rows)}</div>'
 
 
-def _display_name(sgdb_q):
-    # Literally just the override, blank when there isn't one -- see
-    # _em_display_term's own comment for why this dropped its old
-    # fallback to the resolved service name (that made Clear repopulate
-    # the field right back instead of actually clearing it). Purely a
-    # search term -- the separate Name field (see _url_tab_panel_html)
-    # is what actually gets saved, so editing this doesn't rename
-    # anything on its own.
-    return sgdb_q.lower()
+def _display_name(query, sgdb_q):
+    # What's actually driving the current SGDB results: the explicit
+    # override if there is one, else whatever the URL/service field
+    # itself resolved to -- see _em_display_term's own comment for why
+    # this fallback is safe (Clear drops the resolved state alongside
+    # the override, so this never shows a stale term). Purely a search
+    # term -- the separate Name field (see _url_tab_panel_html) is what
+    # actually gets saved, so editing this doesn't rename anything on
+    # its own.
+    if sgdb_q:
+        return sgdb_q.lower()
+    resolved = service_resolver.resolve(query) if query else None
+    return resolved.name.lower() if resolved and resolved.name else ""
 
 
 def _sgdb_search_bar_html(query, couch_mode, browser, sgdb_q, ra_state=None, em_state=None, has_matches=False):
@@ -1803,7 +1828,7 @@ def _sgdb_search_bar_html(query, couch_mode, browser, sgdb_q, ra_state=None, em_
     # service field itself resolved to) rather than sitting empty until
     # touched -- same behavior planned for the Apps/RetroArch/Emulators
     # tabs once they're built out, not just the URL tab.
-    display_term = _display_name(sgdb_q)
+    display_term = _display_name(query, sgdb_q)
     clear_href = f"/search?{_state_qs(query, couch_mode, browser, ra_state, em_state)}"
     # Disabled until the URL/service field has actually resolved to
     # something real -- same reasoning as the RA/Emulators tabs' own
@@ -1861,13 +1886,15 @@ def _middle_column_html(query, couch_mode, browser, sgdb_q, matches, match_index
 
 
 def _ra_display_term(state, chosen=None):
-    # Literally just the override, blank when there isn't one -- see
-    # _em_display_term's own comment for why this dropped its old
-    # fallback to the resolved match's name/filename guess (that made
-    # Clear repopulate the field right back instead of actually
-    # clearing it). Lowercased, matching _resolve_matches's own
-    # lowercasing of whatever it actually sends to SGDB.
-    return state.get("ra_sgdb_q", "").lower()
+    # Same fallback chain (override -> resolved match's name -> filename
+    # guess) as _em_display_term -- see its own comment for why this is
+    # safe now that Clear drops ra_resolved along with ra_sgdb_q.
+    if state.get("ra_sgdb_q"):
+        return state["ra_sgdb_q"].lower()
+    if chosen and chosen.get("name"):
+        return chosen["name"].lower()
+    romfile = state.get("ra_romfile")
+    return _ra_guess_name_from_filename(romfile).lower() if romfile else ""
 
 
 def _ra_sgdb_search_bar_html(state, chosen=None):
