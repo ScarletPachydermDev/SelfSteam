@@ -2010,13 +2010,26 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
     # shouldn't block Create just because this particular game didn't
     # pick it again, unless the user explicitly asked to override it via
     # ra_bios_skip (see _ra_picker_section).
-    ra_ready = bool(
+    #
+    # Split into "prereqs" (console/rom/bios) and "resolved" (SGDB has
+    # actually finished, real artwork candidates exist and one is
+    # selected -- see _artwork_picker_html's own always-something-
+    # checked default) on purpose: without requiring ra_resolved too,
+    # Create was clickable the instant prereqs were met even while a
+    # slow SGDB search was still in flight (the ra_loading meta-refresh
+    # flash, or the real network call behind it) -- confirmed live as
+    # exactly the case a poor connection made easy to hit, submitting
+    # whatever artwork selection happened to still be on the page from
+    # before this particular search even started.
+    ra_prereqs_ready = bool(
         ra_console and ra_state.get("ra_romfile")
         and (
             (ra_state.get("ra_biosfile") or (retroarch_cores.bios_installed(ra_console) and not ra_state.get("ra_bios_skip")))
             if ra_needs_bios else True
         )
     )
+    ra_ready = ra_prereqs_ready and bool(ra_state.get("ra_resolved"))
+    ra_awaiting_artwork = ra_prereqs_ready and not ra_state.get("ra_resolved")
 
     em_emulator = em_state.get("em_emulator", "")
     em_entry = standalone_emulators.EMULATORS.get(em_emulator)
@@ -2028,8 +2041,9 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
     # link) shouldn't permanently block Create just because the picker
     # wasn't touched again this time. em_keys_skip/em_firmware_skip
     # override that fallback when the user explicitly asked to pick a
-    # different one (see _em_picker_section).
-    em_ready = bool(
+    # different one (see _em_picker_section). Same prereqs/resolved
+    # split as ra_ready above, same reasoning.
+    em_prereqs_ready = bool(
         em_entry and em_state.get("em_romfile")
         and (em_state.get("em_biosfile") if em_entry.get("needs_bios") else True)
         and (
@@ -2041,6 +2055,8 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
             if em_entry.get("needs_firmware") else True
         )
     )
+    em_ready = em_prereqs_ready and bool(em_state.get("em_resolved"))
+    em_awaiting_artwork = em_prereqs_ready and not em_state.get("em_resolved")
 
     add_form = ""
     # Always present and pinned to the bottom, per the design handoff --
@@ -2113,6 +2129,16 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
 </form>
 """
         add_button = f'<button type="submit" id="gridge-add-button" form="{_ADD_FORM_ID}">Create Steam Shortcut</button>'
+    elif ra_awaiting_artwork or em_awaiting_artwork:
+        # Everything else (console/rom/bios, or emulator/rom/keys/
+        # firmware) is already picked -- just waiting on the SGDB fetch
+        # itself (see ra_ready/em_ready's own comment on why this is
+        # split out from the base disabled state below), which can
+        # genuinely take a few seconds on a slow connection.
+        add_button = (
+            '<button type="button" id="gridge-add-button" disabled style="opacity:0.45;cursor:not-allowed">'
+            'Searching for artwork...<span class="spinner"></span></button>'
+        )
 
     # Reloading with the exact same state discards whatever's currently
     # typed in the Name field and re-renders its default (chosen's own
