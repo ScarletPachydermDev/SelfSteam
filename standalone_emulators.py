@@ -166,6 +166,9 @@ EMULATORS = {
         "needs_firmware": True,
         "args": _ryubing_args,
         "configure_game_dir": _ryubing_configure_game_dir,
+        # .nsp omitted from the ROM picker -- not supported by Ryubing
+        # (or Eden, its other fork) per real user testing, not guessed.
+        "rom_exclude_extensions": {".nsp"},
     },
 }
 
@@ -290,17 +293,17 @@ def keys_installed(name):
     em_ready) only requires freshly picking them when neither is
     present yet, letting an existing shortcut's own Edit link land back
     on the tab without permanently blocking Create just because the
-    keys picker wasn't touched again. Returns the real .keys filename
-    found (e.g. "prod.keys"), or None -- the picker shows this directly
-    rather than a vague "installed" label."""
+    keys picker wasn't touched again. Returns the real .keys filename(s)
+    found, comma-joined (e.g. "prod.keys, title.keys"), or None -- the
+    picker shows this directly rather than a vague "installed" label."""
     entry = EMULATORS.get(name)
     if not entry:
         return None
     keys_dir = _flatpak_config_dir(entry["app_id"], "Ryujinx", "system")
     if not os.path.isdir(keys_dir):
         return None
-    found = next((f for f in sorted(os.listdir(keys_dir)) if f.endswith(".keys")), None)
-    return found
+    found = sorted(f for f in os.listdir(keys_dir) if f.endswith(".keys"))
+    return ", ".join(found) if found else None
 
 
 def _firmware_marker_path(entry):
@@ -344,36 +347,32 @@ def install_keys(name, keys_path):
     the same directory ContentManager.InstallKeys's own real caller
     (MainWindowViewModel.HandleKeysInstallation) uses.
 
-    keys_path can be a single file (prod.keys alone) or a directory --
-    a real Switch key dump typically has both prod.keys (console-wide)
-    and title.keys (per-game) side by side, and ContentManager.
-    InstallKeys itself supports both shapes: a single file gets copied
-    as-is, a directory gets every *.keys file inside it copied. Ported
-    directly from that same method, not guessed. Returns the list of
-    files actually copied. No parsing/verification of the keys' own
-    contents either way -- Ryubing does that itself on next launch."""
+    keys_path is a single picked file (prod.keys) -- a real Switch key
+    dump typically has title.keys (per-game) sitting right alongside it
+    too, so this also auto-picks up title.keys from that same folder if
+    it's there, without the user needing to pick it separately (see
+    _em_picker_section's own "keys" display for the matching UI side of
+    this). Returns the list of files actually copied. No parsing/
+    verification of the keys' own contents either way -- Ryubing does
+    that itself on next launch."""
     entry = EMULATORS.get(name)
     if not entry:
         raise ValueError(f"No known standalone emulator: {name}")
     dest_dir = _flatpak_config_dir(entry["app_id"], "Ryujinx", "system")
     os.makedirs(dest_dir, exist_ok=True)
 
-    if os.path.isdir(keys_path):
-        copied = []
-        for entry_name in sorted(os.listdir(keys_path)):
-            if not entry_name.endswith(".keys"):
-                continue
-            src = os.path.join(keys_path, entry_name)
-            if not os.path.isfile(src):
-                continue
-            dest = os.path.join(dest_dir, entry_name)
-            shutil.copy2(src, dest)
-            copied.append(dest)
-        return copied
-
+    copied = []
     dest = os.path.join(dest_dir, os.path.basename(keys_path))
     shutil.copy2(keys_path, dest)
-    return [dest]
+    copied.append(dest)
+
+    sibling = os.path.join(os.path.dirname(keys_path), "title.keys")
+    if os.path.basename(keys_path) != "title.keys" and os.path.isfile(sibling):
+        sibling_dest = os.path.join(dest_dir, "title.keys")
+        shutil.copy2(sibling, sibling_dest)
+        copied.append(sibling_dest)
+
+    return copied
 
 
 def install_firmware_zip(name, zip_path):

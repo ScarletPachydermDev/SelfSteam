@@ -1423,6 +1423,15 @@ def _em_list_rows(abs_path, rel_path, state, path_key, file_key):
     except PermissionError:
         return '<div class="row" style="color:var(--text-dim)">Permission denied</div>'
     entries = [e for e in entries if not e.name.startswith(".")]
+    # ROM extensions the current emulator doesn't actually support (e.g.
+    # Ryubing/Eden and .nsp, per real testing -- see standalone_emulators.
+    # EMULATORS's own rom_exclude_extensions) are hidden from the picker
+    # entirely rather than left selectable and failing later at launch.
+    if file_key == "em_romfile":
+        entry = standalone_emulators.EMULATORS.get(state.get("em_emulator", ""))
+        exclude = entry.get("rom_exclude_extensions") if entry else None
+        if exclude:
+            entries = [e for e in entries if e.is_dir() or os.path.splitext(e.name)[1].lower() not in exclude]
     if not entries:
         return '<div class="row" style="color:var(--text-dim)">Nothing here.</div>'
     rows = []
@@ -1446,7 +1455,7 @@ def _em_list_rows(abs_path, rel_path, state, path_key, file_key):
     return "".join(rows)
 
 
-def _em_picker_section(prefix, label, state, allow_folder=False, already_installed=None):
+def _em_picker_section(prefix, label, state, already_installed=None, info_tooltip=None):
     path_key = f"em_{prefix}path"
     file_key = f"em_{prefix}file"
     source_key = f"em_{prefix}source"
@@ -1468,23 +1477,30 @@ def _em_picker_section(prefix, label, state, allow_folder=False, already_install
         f'<span id="{dom_prefix}-upload-status" class="upload-status" style="display:none">'
         f'Uploading<span class="spinner"></span></span>'
     )
+    label_text = f'{label} <span class="required-asterisk">*</span>'
+    if info_tooltip:
+        label_text += f' {_info_tooltip_icon_html(info_tooltip)}'
 
     if selected_file:
         remove_overrides = {file_key: ""}
         if prefix == "rom":
             remove_overrides["em_resolved"] = ""
         remove_href = _em_url("/new", state, **remove_overrides)
-        # rstrip("/") before basename -- a folder pick (see allow_folder
-        # below) is stored with a trailing "/" so install_keys-callers
-        # can tell a folder pick apart from a file pick that happens to
-        # share the same path; os.path.basename of a trailing-slash path
-        # is otherwise just "". The home folder itself picks as a bare
-        # "/", whose basename is "" -- shown as the real absolute root
-        # path instead of a blank/confusing name.
-        display_name = os.path.basename(selected_file.rstrip("/")) or (_RA_ROOT if selected_file.endswith("/") else selected_file)
+        display_name = os.path.basename(selected_file)
+        # A real Switch key dump usually has title.keys sitting right
+        # alongside the picked prod.keys -- install_keys already copies
+        # it too automatically when it's there (see its own docstring),
+        # so the display reflects that instead of only ever showing the
+        # one file the user actually clicked.
+        if prefix == "keys":
+            abs_selected = _ra_safe_join(selected_file)
+            if abs_selected:
+                sibling = os.path.join(os.path.dirname(abs_selected), "title.keys")
+                if os.path.basename(abs_selected) != "title.keys" and os.path.isfile(sibling):
+                    display_name = f"{display_name}, title.keys"
         label_row = f"""
     <label class="field-label" style="display:flex;align-items:center;gap:0.4rem;min-width:0">
-      <span style="flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{label} <span class="required-asterisk">*</span></span>
+      <span style="flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{label_text}</span>
       <span class="selected-file-name">&#10003; {html.escape(display_name)}</span>
       <a href="{remove_href}" class="remove-file-btn" title="Remove file" onclick="return gridgeEmNav(this)">{_X_ICON_SVG}</a>
       {upload_status}
@@ -1493,7 +1509,7 @@ def _em_picker_section(prefix, label, state, allow_folder=False, already_install
         remove_href = _em_url("/new", state, **{skip_key: "1"})
         label_row = f"""
     <label class="field-label" style="display:flex;align-items:center;gap:0.4rem;min-width:0">
-      <span style="flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{label} <span class="required-asterisk">*</span></span>
+      <span style="flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{label_text}</span>
       <span class="selected-file-name">&#10003; {html.escape(already_installed)}</span>
       <a href="{remove_href}" class="remove-file-btn" title="Pick a different file" onclick="return gridgeEmNav(this)">{_X_ICON_SVG}</a>
       {upload_status}
@@ -1501,7 +1517,7 @@ def _em_picker_section(prefix, label, state, allow_folder=False, already_install
     else:
         label_row = f"""
     <label class="field-label" style="display:flex;align-items:center;gap:0.4rem;min-width:0">
-      <span style="flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{label} <span class="required-asterisk">*</span></span>
+      <span style="flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{label_text}</span>
       {upload_status}
     </label>"""
 
@@ -1514,26 +1530,8 @@ def _em_picker_section(prefix, label, state, allow_folder=False, already_install
     abs_path = _ra_safe_join(rel_path)
     if abs_path is None or not os.path.isdir(abs_path):
         abs_path, rel_path = _RA_ROOT, ""
-    # "Select this folder" is a separate action from navigating into a
-    # folder (clicking a folder row in the list below still just
-    # browses into it) -- picks the CURRENT directory being viewed
-    # itself, same idea a native file/folder dialog's own "Select
-    # Folder" button has. Only offered where it's actually useful: a
-    # real Switch key dump often has prod.keys and title.keys side by
-    # side, and Ryubing's own InstallKeys accepts a directory of *.keys
-    # files directly (ported as-is in standalone_emulators.install_keys)
-    # -- confirmed live on a throwaway test page before wiring in here.
-    select_folder = ""
-    if allow_folder:
-        folder_href = _em_url("/new", state, **{path_key: rel_path, file_key: rel_path + "/"})
-        select_folder = (
-            f'<div style="margin-bottom:0.4rem;font-size:0.85rem">'
-            f'<a href="{folder_href}" onclick="return gridgeEmNav(this)">&#128193; Select current folder ({html.escape(rel_path or _RA_ROOT)})</a>'
-            f'</div>'
-        )
     local_panel = (
         f'<div class="breadcrumbs">{_em_breadcrumbs_html(rel_path, state, path_key)}</div>'
-        f'{select_folder}'
         f'<div class="picker-list"><div class="boxed-list">{_em_list_rows(abs_path, rel_path, state, path_key, file_key)}</div></div>'
     )
 
@@ -1619,12 +1617,12 @@ def _emulators_tab_panel_html(state, chosen=None):
     </div>"""
 
     bios_block = _em_picker_section("bios", "Select BIOS", state) if needs_bios else ""
-    # allow_folder=True: a real Switch key dump usually has prod.keys
-    # and title.keys side by side -- see _em_picker_section's own
-    # comment on why "Select current folder" exists at all.
     keys_block = (
-        _em_picker_section("keys", "Select Keys", state, allow_folder=True,
-                           already_installed=standalone_emulators.keys_installed(emulator))
+        _em_picker_section(
+            "keys", "Select Keys", state,
+            already_installed=standalone_emulators.keys_installed(emulator),
+            info_tooltip="Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
+        )
         if needs_keys else ""
     )
     firmware_block = (
