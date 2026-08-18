@@ -1645,7 +1645,7 @@ def _emulators_tab_panel_html(state, chosen=None):
     return f"""
   <div class="field-group">
     <label class="field-label">Emulator <span class="required-asterisk">*</span>
-      <span style="cursor:help;display:inline-flex;align-items:center;justify-content:center;vertical-align:middle;color:var(--text-dim)" title="{html.escape(emulator_info_tooltip)}">{_INFO_ICON_SVG}</span>
+      <span style="cursor:help;display:inline-flex;align-items:center;justify-content:center;vertical-align:middle;position:relative;top:-0.15rem;color:var(--text-dim)" title="{html.escape(emulator_info_tooltip)}">{_INFO_ICON_SVG}</span>
     </label>
     {source_toggle}
     <form method="get" action="/new#tab-emulators" style="margin:0">
