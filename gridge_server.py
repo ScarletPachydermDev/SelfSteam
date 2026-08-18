@@ -126,6 +126,16 @@ _X_ICON_SVG = (
     '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round">'
     '<path d="M5 5L19 19M19 5L5 19"></path></svg>'
 )
+# Real icon (from info-circle-svgrepo-com.svg, fill swapped to
+# currentColor so it follows .info-icon's own color) rather than a
+# CSS circle + "i" glyph -- same reasoning as _X_ICON_SVG's own switch
+# away from a text glyph, an italic "i" character's own metrics never
+# sat centered in a small circle no matter how it was nudged.
+_INFO_ICON_SVG = (
+    '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">'
+    '<path d="M12 2C6.486 2 2 6.486 2 12s4.486 10 10 10 10-4.486 10-10S17.514 2 12 2zm0 18c-4.411 0-8-3.589-8-8s3.589-8 8-8 8 3.589 8 8-3.589 8-8 8z"/>'
+    '<path d="M11 11h2v6h-2zm0-4h2v2h-2z"/></svg>'
+)
 
 # (basename, display title, candidate-fetcher, cell width, cell height)
 # -- basenames and the *relative* proportions between categories match
@@ -1635,7 +1645,7 @@ def _emulators_tab_panel_html(state, chosen=None):
     return f"""
   <div class="field-group">
     <label class="field-label">Emulator <span class="required-asterisk">*</span>
-      <span class="info-icon" style="cursor:help;display:inline-flex;align-items:center;justify-content:center;vertical-align:middle;width:0.85rem;height:0.85rem;font-size:0.6rem;font-style:normal;line-height:1;padding-bottom:1px" title="{html.escape(emulator_info_tooltip)}">i</span>
+      <span style="cursor:help;display:inline-flex;align-items:center;justify-content:center;vertical-align:middle;color:var(--text-dim)" title="{html.escape(emulator_info_tooltip)}">{_INFO_ICON_SVG}</span>
     </label>
     {source_toggle}
     <form method="get" action="/new#tab-emulators" style="margin:0">
