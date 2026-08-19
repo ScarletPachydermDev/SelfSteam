@@ -619,6 +619,37 @@ def install_pcsx2_bios_slot(entry, slot_prefix, file_path):
         cp.write(f, space_around_delimiters=True)
 
 
+def _supermodel_args(romfile):
+    # Bare positional romfile (a MAME-compatible ROM-set zip) plus
+    # -fullscreen -- confirmed real via Supermodel's own docs
+    # (Docs/README.txt: "supermodel scud.zip -fullscreen").
+    return [shlex.quote(romfile), "-fullscreen"]
+
+
+def _bigpemu_args(romfile):
+    # Bare positional romfile -- confirmed real via BigPEmu's own user
+    # manual ("BigPEmu always expects the first command line argument
+    # to be a software (e.g. cartridge) image path"). No documented
+    # fullscreen flag exists anywhere in that manual (only -forcewidth/
+    # -forceheight resolution overrides) -- fullscreen has to be toggled
+    # once inside the app, after which BigPEmu persists it in its own
+    # config for later launches, same as any other setting.
+    return [shlex.quote(romfile)]
+
+
+def _openmsx_args(romfile):
+    # -cart <path> to insert the ROM as a cartridge, plus
+    # -command "set fullscreen on" -- both confirmed real via openMSX's
+    # own manual/source (Ubuntu man page's -cart entry; the -command
+    # startup-Tcl mechanism and "set fullscreen on" documented on
+    # msx.org's own forum, openMSX's maintainer-run support channel).
+    # No -machine override -- the unspecified default is C-BIOS_MSX2+,
+    # openMSX's own bundled open-source BIOS replacement, confirmed via
+    # its own Contrib/README.cbios ("we can ship them with openMSX"),
+    # so no external system ROM is required for cartridge-based games.
+    return ["-cart", shlex.quote(romfile), "-command", shlex.quote("set fullscreen on")]
+
+
 def _shadps4_args(romfile):
     # --fullscreen true plus a bare positional game path (its CLI11
     # option name is "guest_arg", aliased -g/--game) -- confirmed real
@@ -948,6 +979,58 @@ EMULATORS = {
         # Confirmed live on X1: its manifest only grants home (full
         # read-write, not even :ro) + /media, /run/media -- no host:ro.
         # Same gap as melonDS/RPCS3/Play! before their own fixes.
+        "grant_permissions": ["--filesystem=host:ro"],
+    },
+    "Supermodel": {
+        "install_type": "flathub",
+        "app_id": "com.supermodel3.Supermodel",
+        "consoles": "Sega Model 3",
+        # Self-contained MAME-compatible ROM-set zips (checksum-detected
+        # game data, not a separate boot ROM) -- confirmed via its own
+        # docs: "No separate BIOS file is required beyond the per-game
+        # ROM archives."
+        "needs_bios": False,
+        "needs_keys": False,
+        "needs_firmware": False,
+        "args": _supermodel_args,
+        # No grant_permissions needed -- confirmed LIVE via
+        # `flatpak info --show-permissions com.supermodel3.Supermodel`
+        # on X1 (filesystems=home;host:ro), not just read from the
+        # manifest text.
+    },
+    "BigPEmu": {
+        "install_type": "flathub",
+        "app_id": "com.richwhitehouse.BigPEmu",
+        "consoles": "Atari Jaguar",
+        # Standard Jaguar cartridge games boot from their own on-cart
+        # code -- no BIOS file is mentioned anywhere in BigPEmu's own
+        # user manual (only Jaguar CD titles would need a CD BIOS, not
+        # something this catalog entry covers).
+        "needs_bios": False,
+        "needs_keys": False,
+        "needs_firmware": False,
+        "args": _bigpemu_args,
+        # No grant_permissions needed -- confirmed LIVE via
+        # `flatpak info --show-permissions com.richwhitehouse.BigPEmu`
+        # on X1 (filesystems=home;host:ro), not just read from the
+        # manifest text.
+    },
+    "openMSX": {
+        "install_type": "flathub",
+        "app_id": "org.openmsx.openMSX",
+        "consoles": "MSX",
+        # Defaults to C-BIOS_MSX2+, openMSX's own bundled open-source
+        # BIOS replacement -- confirmed via its own Contrib/README.cbios.
+        # Real proprietary MSX system ROMs are an optional accuracy/
+        # compatibility upgrade (disk-based software needs them, C-BIOS
+        # has no disk-drive support), not required to boot cartridges.
+        "needs_bios": False,
+        "needs_keys": False,
+        "needs_firmware": False,
+        "args": _openmsx_args,
+        # Confirmed live on X1: its manifest only grants home (full
+        # read-write, not even :ro) -- no host:ro at all. Same gap as
+        # melonDS/RPCS3/Play!/shadPS4 before their own fixes.
         "grant_permissions": ["--filesystem=host:ro"],
     },
 }
