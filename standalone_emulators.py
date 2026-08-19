@@ -21,6 +21,7 @@ AppImage toggle:
 import configparser
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -220,6 +221,18 @@ def _ryubing_install_keys(entry, keys_path):
     return copied
 
 
+def _xemu_args(romfile):
+    # -full-screen (QEMU's own legacy option, still real and wired up --
+    # confirmed via ui/xemu.c: `gui_fullscreen = o->has_full_screen &&
+    # o->full_screen`) plus -dvd_path <path>, xemu's own added override
+    # (confirmed via system/vl.c: an explicit argv scan for "-dvd_path"
+    # that overrides the persisted g_config.sys.files.dvd_path setting
+    # for just this one launch). No bare positional romfile convention
+    # here unlike most other emulators -- this is a QEMU fork, and
+    # that's QEMU's own CLI style, not something xemu simplified away.
+    return ["-full-screen", "-dvd_path", shlex.quote(romfile)]
+
+
 def _melonds_args(romfile):
     # -f/--fullscreen plus a bare positional "nds" romfile -- both
     # confirmed real via melonDS's own source (src/frontend/qt_sdl/
@@ -379,6 +392,112 @@ def _cemu_install_keys(entry, keys_path):
 # upload folder as a watched game directory in the emulator's own
 # settings, so uploaded games show up in its own game list too, not
 # just as Steam shortcuts.
+def _toml_get_in_section(content, section, key):
+    """Read key = "value" back from inside [section] of a TOML file's
+    raw text. Hand-rolled instead of a real TOML parser -- Python's
+    stdlib only ships a *reader* (tomllib, no writer) and this only ever
+    needs to touch one flat table of plain string values (xemu's own
+    [sys.files]), not anything with arrays/nesting/other value types a
+    real parser would be needed to not mangle."""
+    section_re = re.compile(r"^\[" + re.escape(section) + r"\]\s*$", re.MULTILINE)
+    m = section_re.search(content)
+    if not m:
+        return None
+    body_start = m.end()
+    next_section = re.search(r"^\[", content[body_start:], re.MULTILINE)
+    body_end = body_start + next_section.start() if next_section else len(content)
+    body = content[body_start:body_end]
+    key_re = re.compile(r'^' + re.escape(key) + r'\s*=\s*"(.*)"\s*$', re.MULTILINE)
+    km = key_re.search(body)
+    return km.group(1) if km else None
+
+
+def _toml_set_in_section(content, section, key, value):
+    """Write key = "value" into [section] of a TOML file's raw text,
+    replacing an existing key = ... line in place if there is one,
+    appending one to the section if not, or appending the whole section
+    if it doesn't exist yet -- same "targeted line patch, not a full
+    rewrite" approach as Dolphin/Cemu's own ini/xml editors, just for
+    TOML's simpler [section]/key = "value" shape. See
+    _toml_get_in_section's own docstring for why this isn't a real TOML
+    library."""
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    line = f'{key} = "{escaped}"'
+    section_re = re.compile(r"^\[" + re.escape(section) + r"\]\s*$", re.MULTILINE)
+    m = section_re.search(content)
+    if not m:
+        sep = "\n" if content and not content.endswith("\n") else ""
+        return content + f"{sep}\n[{section}]\n{line}\n"
+    body_start = m.end()
+    next_section = re.search(r"^\[", content[body_start:], re.MULTILINE)
+    body_end = body_start + next_section.start() if next_section else len(content)
+    body = content[body_start:body_end]
+    key_re = re.compile(r"^" + re.escape(key) + r"\s*=.*$", re.MULTILINE)
+    if key_re.search(body):
+        new_body = key_re.sub(line, body, count=1)
+    else:
+        new_body = body.rstrip("\n") + f"\n{line}\n"
+    return content[:body_start] + new_body + content[body_end:]
+
+
+# slot prefix (matches the em_<prefix>file/path/source state keys) ->
+# (label, xemu's own real TOML key under [sys.files], confirmed via its
+# own config_spec.yml) -- xemu is the first (and so far only) emulator
+# here with more than one required BIOS-type file, since original Xbox
+# emulation has no HLE fallback the way GameCube/DS/N64 do (confirmed:
+# no "enable HLE"-style toggle exists anywhere in its settings).
+XEMU_BIOS_SLOTS = [
+    ("bios", "Select MCPX Boot ROM", "bootrom_path"),
+    ("bios2", "Select Xbox BIOS", "flashrom_path"),
+    ("bios3", "Select EEPROM", "eeprom_path"),
+]
+
+
+def _xemu_toml_path(entry):
+    # SDL_GetPrefPath("xemu", "xemu") -- confirmed via xemu's own source
+    # (ui/xemu-settings.cc) -- resolves to $XDG_DATA_HOME/xemu/xemu/ on
+    # Linux (SDL's own GetPrefPath reads XDG_DATA_HOME, not
+    # XDG_CONFIG_HOME), so this is a bare os.path.expanduser join, not
+    # _flatpak_config_dir like most other emulators here.
+    return os.path.join(os.path.expanduser(f"~/.var/app/{entry['app_id']}/data"), "xemu", "xemu", "xemu.toml")
+
+
+def xemu_bios_slot_installed(entry, slot_prefix):
+    """Real filename already configured for this slot, or None. Doesn't
+    copy files anywhere the way Ryubing/Cemu's keys installers do --
+    xemu's own Flathub manifest already grants --filesystem=host:ro, so
+    xemu.toml just points straight at wherever the user's real file
+    already lives on disk, same as Dolphin's own ISOPaths referencing
+    real host paths rather than copies."""
+    toml_key = next(k for p, _label, k in XEMU_BIOS_SLOTS if p == slot_prefix)
+    toml_path = _xemu_toml_path(entry)
+    if not os.path.isfile(toml_path):
+        return None
+    with open(toml_path) as f:
+        content = f.read()
+    value = _toml_get_in_section(content, "sys.files", toml_key)
+    return os.path.basename(value) if value and os.path.isfile(value) else None
+
+
+def install_xemu_bios_slot(entry, slot_prefix, file_path):
+    """Points xemu.toml's real [sys.files] key at file_path -- bootstraps
+    a fresh xemu.toml if one doesn't exist yet (unlike Dolphin/Ryubing's
+    own configurators, which only touch an existing file), since xemu is
+    installed here via a bare `flatpak install`, never an actual first
+    launch, so nothing would ever create one otherwise -- every real
+    BIOS write would silently no-op on a fresh install without this."""
+    toml_key = next(k for p, _label, k in XEMU_BIOS_SLOTS if p == slot_prefix)
+    toml_path = _xemu_toml_path(entry)
+    os.makedirs(os.path.dirname(toml_path), exist_ok=True)
+    content = ""
+    if os.path.isfile(toml_path):
+        with open(toml_path) as f:
+            content = f.read()
+    content = _toml_set_in_section(content, "sys.files", toml_key, file_path)
+    with open(toml_path, "w") as f:
+        f.write(content)
+
+
 EMULATORS = {
     "Dolphin": {
         "install_type": "flathub",
@@ -509,6 +628,27 @@ EMULATORS = {
         # root) doesn't hit the same NotFound crash gopher64/RMG/M64Py
         # did before they got this same fix.
         "grant_permissions": ["--filesystem=host:ro"],
+    },
+    "xemu": {
+        "install_type": "flathub",
+        "app_id": "app.xemu.xemu",
+        "consoles": "Original Xbox",
+        # Original Xbox emulation has no HLE fallback -- confirmed via
+        # its own config_spec.yml, [sys.files] requires a real MCPX
+        # bootrom, Xbox BIOS (flashrom), and EEPROM dump, no toggle
+        # anywhere to run without them. Three separate files, not one,
+        # so needs_bios/bios_slots both point at XEMU_BIOS_SLOTS rather
+        # than the single-file bios picker every other emulator here
+        # uses.
+        "needs_bios": True,
+        "bios_slots": XEMU_BIOS_SLOTS,
+        "bios_slot_installed": xemu_bios_slot_installed,
+        "install_bios_slot": install_xemu_bios_slot,
+        "needs_keys": False,
+        "needs_firmware": False,
+        "args": _xemu_args,
+        # No grant_permissions needed -- confirmed via its own Flathub
+        # manifest, it already ships --filesystem=host:ro.
     },
 }
 
@@ -663,6 +803,30 @@ def _flatpak_data_dir(app_id, *parts):
     # the way RetroArch/Ryubing do (see Cemu's keys.txt, confirmed via
     # its own source to live under XDG_DATA_HOME specifically).
     return os.path.join(os.path.expanduser(f"~/.var/app/{app_id}/data"), *parts)
+
+
+def bios_slots(name):
+    """The (prefix, label, ...) list an entry's own "bios_slots" field
+    declares, or None for an emulator with no BIOS requirement (or the
+    single-file needs_bios case every other emulator here uses)."""
+    entry = EMULATORS.get(name)
+    return entry.get("bios_slots") if entry else None
+
+
+def bios_slot_installed(name, slot_prefix):
+    """Dispatches to the entry's own "bios_slot_installed" handler --
+    see keys_installed's own comment for why there's no shared
+    implementation across emulators."""
+    entry = EMULATORS.get(name)
+    handler = entry.get("bios_slot_installed") if entry else None
+    return handler(entry, slot_prefix) if handler else None
+
+
+def install_bios_slot(name, slot_prefix, file_path):
+    """Dispatches to the entry's own "install_bios_slot" handler."""
+    entry = EMULATORS.get(name)
+    handler = entry.get("install_bios_slot") if entry else None
+    return handler(entry, slot_prefix, file_path) if handler else None
 
 
 def keys_installed(name):

@@ -1513,7 +1513,14 @@ def _retroarch_tab_panel_html(state, chosen=None):
 _EM_STATE_KEYS = [
     "em_install_source", "em_emulator",
     "em_rompath", "em_romfile", "em_romsource",
-    "em_biospath", "em_biosfile", "em_biossource",
+    "em_biospath", "em_biosfile", "em_biossource", "em_bios_skip",
+    # bios2/bios3: extra BIOS-type file slots beyond the single one above
+    # -- xemu is the first emulator here needing more than one (MCPX
+    # bootrom, Xbox BIOS, EEPROM), see standalone_emulators.XEMU_BIOS_SLOTS.
+    # Reuses the exact same em_<prefix>path/file/source/_skip shape as
+    # every other picker, just with "bios2"/"bios3" as the prefix.
+    "em_bios2path", "em_bios2file", "em_bios2source", "em_bios2_skip",
+    "em_bios3path", "em_bios3file", "em_bios3source", "em_bios3_skip",
     "em_keyspath", "em_keysfile", "em_keyssource", "em_keys_skip",
     "em_firmwarepath", "em_firmwarefile", "em_firmwaresource", "em_firmware_skip",
     "em_resolved", "em_sgdb_q", "em_sgdb_cleared", "em_name_cleared",
@@ -1756,7 +1763,8 @@ def _emulators_tab_panel_html(state, chosen=None):
         # AppImage list would just be wrong, not merely stale.
         href = _em_url(
             "/new", state, em_install_source=value, em_emulator="",
-            em_romfile="", em_biosfile="", em_keysfile="", em_firmwarefile="", em_resolved="",
+            em_romfile="", em_biosfile="", em_bios2file="", em_bios3file="",
+            em_keysfile="", em_firmwarefile="", em_resolved="",
         )
         return f'<a class="{active}" href="{href}" onclick="return selfsteamEmNav(this)">{text}</a>'
 
@@ -1766,7 +1774,21 @@ def _emulators_tab_panel_html(state, chosen=None):
       {_source_toggle_link("appimage", "AppImage")}
     </div>"""
 
-    bios_block = _em_picker_section("bios", "Select BIOS", state) if needs_bios else ""
+    # bios_slots (xemu so far): more than one required BIOS-type file,
+    # rendered as its own picker per slot rather than the single generic
+    # one every other needs_bios emulator uses -- see
+    # standalone_emulators.XEMU_BIOS_SLOTS.
+    bios_slots = entry.get("bios_slots") if entry else None
+    if bios_slots:
+        bios_block = "".join(
+            _em_picker_section(
+                prefix, label, state,
+                already_installed=standalone_emulators.bios_slot_installed(emulator, prefix),
+            )
+            for prefix, label, *_rest in bios_slots
+        )
+    else:
+        bios_block = _em_picker_section("bios", "Select BIOS", state) if needs_bios else ""
     keys_block = (
         _em_picker_section(
             "keys", "Select Keys", state,
@@ -2310,7 +2332,15 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
     # split as ra_ready above, same reasoning.
     em_prereqs_ready = bool(
         em_entry and em_state.get("em_romfile")
-        and (em_state.get("em_biosfile") if em_entry.get("needs_bios") else True)
+        and (
+            all(
+                em_state.get(f"em_{prefix}file")
+                or (standalone_emulators.bios_slot_installed(em_emulator, prefix) and not em_state.get(f"em_{prefix}_skip"))
+                for prefix, _label, *_rest in em_entry.get("bios_slots")
+            )
+            if em_entry.get("bios_slots")
+            else (em_state.get("em_biosfile") if em_entry.get("needs_bios") else True)
+        )
         and (
             (em_state.get("em_keysfile") or (standalone_emulators.keys_installed(em_emulator) and not em_state.get("em_keys_skip")))
             if em_entry.get("needs_keys") else True
@@ -3358,6 +3388,20 @@ class Handler(BaseHTTPRequestHandler):
         if em_biosfile and (_ra_safe_join(em_biosfile) is None or not os.path.isfile(_ra_safe_join(em_biosfile))):
             self._send_html(render_done(match_name, ok=False, error="BIOS file not found -- please pick it again"))
             return
+        # bios_slots (xemu so far): the same file-not-found check as
+        # em_biosfile above, just per-slot -- see
+        # standalone_emulators.XEMU_BIOS_SLOTS.
+        em_bios_slots = standalone_emulators.EMULATORS.get(em_emulator, {}).get("bios_slots") or []
+        em_bios_slot_files = {}
+        for prefix, label, *_rest in em_bios_slots:
+            picked = (params.get(f"em_{prefix}file") or [""])[0]
+            if not picked:
+                continue
+            picked_abs = _ra_safe_join(picked)
+            if picked_abs is None or not os.path.isfile(picked_abs):
+                self._send_html(render_done(match_name, ok=False, error=f"{label.replace('Select ', '')} file not found -- please pick it again"))
+                return
+            em_bios_slot_files[prefix] = picked_abs
         # Keys can be a file *or* a folder (see _em_picker_section's
         # "Select current folder" and standalone_emulators.install_keys,
         # which accepts either) -- os.path.isdir alongside os.path.isfile
@@ -3409,6 +3453,8 @@ class Handler(BaseHTTPRequestHandler):
                 standalone_emulators.install_keys(em_emulator, em_keysfile_abs)
             if em_firmwarefile_abs:
                 standalone_emulators.install_firmware_zip(em_emulator, em_firmwarefile_abs)
+            for prefix, bios_abs in em_bios_slot_files.items():
+                standalone_emulators.install_bios_slot(em_emulator, prefix, bios_abs)
 
             args = standalone_emulators.launch_args(em_emulator, romfile_abs)
             if args is None:
@@ -3519,7 +3565,7 @@ class Handler(BaseHTTPRequestHandler):
         params = urllib.parse.parse_qs(parsed.query)
         em_state = _em_state_from_params(params)
         slot = (params.get("slot") or [""])[0]
-        if slot not in ("rom", "bios", "keys", "firmware"):
+        if slot not in ("rom", "bios", "bios2", "bios3", "keys", "firmware"):
             self._send_html(render("<p>Invalid upload slot</p>"), status=400)
             return
 
