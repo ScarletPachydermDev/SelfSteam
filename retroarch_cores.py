@@ -22,50 +22,70 @@ import host_exec
 RETROARCH_APP_ID = "org.libretro.RetroArch"
 _BUILDBOT_BASE = "https://buildbot.libretro.com/nightly/linux/x86_64/latest"
 
-# (console name shown in the picker, libretro core name, needs BIOS).
-# Wider than the original 7-console starter list, but still a curated
-# pick -- one core per mainstream system RetroArch/libretro actually
-# ships a real, currently-published core build for (every name below
-# confirmed against buildbot.libretro.com/nightly/linux/x86_64/latest/
-# directly, not assumed), not the full ~150-entry libretro catalog
-# (which includes homebrew/fantasy-console/engine-port cores this
-# picker has no reason to list). BIOS flags are best-effort based on
-# each core/system's own documented requirements, not individually
-# live-tested the way PS1/mGBA were.
-CONSOLES = [
-    ("Atari 2600", "stella", False),
-    ("Atari 7800", "prosystem", True),
-    ("Nintendo (NES)", "nestopia", False),
-    ("Super Nintendo", "snes9x", False),
-    ("Nintendo 64", "mupen64plus_next", False),
-    ("Game Boy", "gambatte", False),
-    ("Game Boy Color", "gambatte", False),
-    ("Game Boy Advance", "mgba", False),
-    ("Nintendo DS", "melonds", False),
-    ("Sega Master System", "genesis_plus_gx", False),
-    ("Sega Game Gear", "genesis_plus_gx", False),
-    ("Sega Genesis", "genesis_plus_gx", False),
-    ("Sega CD", "genesis_plus_gx", True),
-    ("Sega 32X", "picodrive", True),
-    ("Sega Saturn", "mednafen_saturn", True),
-    ("Sega Dreamcast", "flycast", True),
-    ("PlayStation 1", "pcsx_rearmed", True),
-    ("PlayStation 2", "pcsx2", True),
-    ("PSP", "ppsspp", False),
-    ("TurboGrafx-16 / PC Engine", "mednafen_pce", False),
-    ("Neo Geo", "fbneo", True),
-    ("Neo Geo Pocket", "mednafen_ngp", False),
-    ("WonderSwan", "mednafen_wswan", False),
-    ("Atari Lynx", "handy", True),
-    ("ColecoVision", "gearcoleco", True),
-    ("Intellivision", "freeintv", True),
-    ("Vectrex", "vecx", False),
-    ("MSX", "bluemsx", True),
-    ("Commodore Amiga", "puae", True),
-    ("Commodore 64", "vice_x64sc", False),
+# (console group, libretro core name, needs BIOS, core's own real display
+# name). Wider than the original 7-console starter list, but still a
+# curated pick -- one or more cores per mainstream system RetroArch/
+# libretro actually ships a real, currently-published core build for
+# (every entry below confirmed against buildbot.libretro.com/nightly/
+# linux/x86_64/latest/ for the .so.zip itself, and against libretro's own
+# libretro-core-info repo for its corename field, not guessed), not the
+# full ~150-entry libretro catalog (which includes homebrew/fantasy-
+# console/engine-port cores this picker has no reason to list). BIOS
+# flags are best-effort based on each core/system's own documented
+# requirements, not individually live-tested the way PS1/mGBA were.
+#
+# More than one core per console group is deliberate (N64 currently has
+# two) -- every core actually available gets its own picker entry rather
+# than this module picking a single "best" one on the user's behalf, so
+# the group name alone is NOT a unique identifier; the picker shows (and
+# state stores) "<group> - <corename>" as the real unique value instead.
+_CONSOLE_ENTRIES = [
+    ("Atari 2600", "stella", False, "Stella"),
+    ("Atari 7800", "prosystem", True, "ProSystem"),
+    ("Nintendo (NES)", "nestopia", False, "Nestopia"),
+    ("Super Nintendo", "snes9x", False, "Snes9x"),
+    ("Nintendo 64", "mupen64plus_next", False, "Mupen64Plus-Next"),
+    ("Nintendo 64", "parallel_n64", False, "ParaLLEl N64"),
+    ("Game Boy", "gambatte", False, "Gambatte"),
+    ("Game Boy Color", "gambatte", False, "Gambatte"),
+    ("Game Boy Advance", "mgba", False, "mGBA"),
+    ("Nintendo DS", "melonds", False, "melonDS"),
+    ("Sega Master System", "genesis_plus_gx", False, "Genesis Plus GX"),
+    ("Sega Game Gear", "genesis_plus_gx", False, "Genesis Plus GX"),
+    ("Sega Genesis", "genesis_plus_gx", False, "Genesis Plus GX"),
+    ("Sega CD", "genesis_plus_gx", True, "Genesis Plus GX"),
+    ("Sega 32X", "picodrive", True, "PicoDrive"),
+    ("Sega Saturn", "mednafen_saturn", True, "Beetle Saturn"),
+    ("Sega Dreamcast", "flycast", True, "Flycast"),
+    ("PlayStation 1", "pcsx_rearmed", True, "PCSX-ReARMed"),
+    ("PlayStation 2", "pcsx2", True, "LRPS2"),
+    ("PSP", "ppsspp", False, "PPSSPP"),
+    ("TurboGrafx-16 / PC Engine", "mednafen_pce", False, "Beetle PCE"),
+    ("Neo Geo", "fbneo", True, "FinalBurn Neo"),
+    ("Neo Geo Pocket", "mednafen_ngp", False, "Beetle NeoPop"),
+    ("WonderSwan", "mednafen_wswan", False, "Beetle WonderSwan"),
+    ("Atari Lynx", "handy", True, "Handy"),
+    ("ColecoVision", "gearcoleco", True, "Gearcoleco"),
+    ("Intellivision", "freeintv", True, "FreeIntv"),
+    ("Vectrex", "vecx", False, "vecx"),
+    ("MSX", "bluemsx", True, "blueMSX"),
+    ("Commodore Amiga", "puae", True, "PUAE"),
+    ("Commodore 64", "vice_x64sc", False, "VICE x64sc"),
 ]
-_CORE_FOR_CONSOLE = {name: core for name, core, _ in CONSOLES}
-CONSOLES_NEEDING_BIOS = {name for name, _, needs in CONSOLES if needs}
+
+# (label, core, needs_bios), sorted alphabetically by the combined
+# "<group> - <corename>" label -- single source of truth for ordering,
+# so every consumer (the picker dropdown, BIOS lookups, install/launch)
+# sees the same alphabetical order with no separate sort step of its own.
+CONSOLES = sorted(
+    (
+        (f"{group} - {core_display}", core, needs_bios)
+        for group, core, needs_bios, core_display in _CONSOLE_ENTRIES
+    ),
+    key=lambda entry: entry[0].lower(),
+)
+_CORE_FOR_CONSOLE = {label: core for label, core, _ in CONSOLES}
+CONSOLES_NEEDING_BIOS = {label for label, _, needs in CONSOLES if needs}
 
 
 def _cores_dir():
@@ -147,16 +167,22 @@ def _system_dir():
 # both need a whole romset/folder dropped in, not one system-dir file;
 # Sega 32X's own BIOS docs list no required file at all) -- those consoles
 # just always show the picker, same as before this existed.
+#
+# Keyed by the same combined "<group> - <corename>" label CONSOLES now
+# uses, not the bare group name -- each of these BIOS files is really
+# tied to one specific core's own system dir, not the console group as a
+# whole (a second core for one of these systems would need its own entry
+# here too, since it may expect a different filename or directory).
 _BIOS_FILENAMES = {
-    "Atari 7800": ("any", ["7800 BIOS (U).rom"]),
-    "Sega CD": ("any", ["bios_CD_U.bin", "bios_CD_E.bin", "bios_CD_J.bin"]),
-    "Sega Saturn": ("any", ["sega_101.bin", "mpr-17933.bin"]),
-    "Sega Dreamcast": ("any", ["dc/dc_boot.bin"]),
-    "PlayStation 1": ("any", ["scph5501.bin", "scph1001.bin", "scph7001.bin", "scph101.bin", "PSXONPSP660.bin"]),
-    "Atari Lynx": ("any", ["lynxboot.img"]),
-    "ColecoVision": ("any", ["colecovision.rom", "coleco.rom"]),
-    "Intellivision": ("all", ["exec.bin", "grom.bin"]),
-    "Commodore Amiga": ("any", ["kick34005.A500", "kick37175.A500", "kick40063.A600", "kick39106.A1200", "kick40068.A1200", "kick33180.A500"]),
+    "Atari 7800 - ProSystem": ("any", ["7800 BIOS (U).rom"]),
+    "Sega CD - Genesis Plus GX": ("any", ["bios_CD_U.bin", "bios_CD_E.bin", "bios_CD_J.bin"]),
+    "Sega Saturn - Beetle Saturn": ("any", ["sega_101.bin", "mpr-17933.bin"]),
+    "Sega Dreamcast - Flycast": ("any", ["dc/dc_boot.bin"]),
+    "PlayStation 1 - PCSX-ReARMed": ("any", ["scph5501.bin", "scph1001.bin", "scph7001.bin", "scph101.bin", "PSXONPSP660.bin"]),
+    "Atari Lynx - Handy": ("any", ["lynxboot.img"]),
+    "ColecoVision - Gearcoleco": ("any", ["colecovision.rom", "coleco.rom"]),
+    "Intellivision - FreeIntv": ("all", ["exec.bin", "grom.bin"]),
+    "Commodore Amiga - PUAE": ("any", ["kick34005.A500", "kick37175.A500", "kick40063.A600", "kick39106.A1200", "kick40068.A1200", "kick33180.A500"]),
 }
 
 

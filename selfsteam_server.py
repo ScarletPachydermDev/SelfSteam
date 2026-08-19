@@ -1213,14 +1213,19 @@ def _ra_breadcrumbs_html(rel_path, state, path_key):
     # own comment. "" round-trips through _ra_qs indistinguishably from
     # "never set", which would land back on the home-dir default instead
     # of true root.
-    crumbs = [f'<a href="{_ra_url("/new", state, **{path_key: "/"})}" onclick="return selfsteamRaNav(this)">{html.escape(_RA_ROOT)}</a>']
+    root_crumb = f'<a href="{_ra_url("/new", state, **{path_key: "/"})}" onclick="return selfsteamRaNav(this)">{html.escape(_RA_ROOT)}</a>'
+    crumbs = []
     built = ""
     for part in parts:
         built += f"/{part}"
         crumbs.append(
             f'<a href="{_ra_url("/new", state, **{path_key: built.lstrip("/")})}" onclick="return selfsteamRaNav(this)">{html.escape(part)}</a>'
         )
-    return " / ".join(crumbs)
+    # root_crumb's own text is already "/" -- joining it with " / " like
+    # every other crumb produced a visible "/ / part" double-slash right
+    # at the start, since the separator duplicates what the root label
+    # already shows.
+    return root_crumb + (" " + " / ".join(crumbs) if crumbs else "")
 
 
 def _ra_list_rows(abs_path, rel_path, state, path_key, file_key):
@@ -1536,14 +1541,16 @@ def _em_breadcrumbs_html(rel_path, state, path_key):
     parts = [p for p in rel_path.split("/") if p]
     # path_key="/" here on purpose, not "" -- see _ra_resolve_relpath's
     # own comment.
-    crumbs = [f'<a href="{_em_url("/new", state, **{path_key: "/"})}" onclick="return selfsteamEmNav(this)">{html.escape(_RA_ROOT)}</a>']
+    root_crumb = f'<a href="{_em_url("/new", state, **{path_key: "/"})}" onclick="return selfsteamEmNav(this)">{html.escape(_RA_ROOT)}</a>'
+    crumbs = []
     built = ""
     for part in parts:
         built += f"/{part}"
         crumbs.append(
             f'<a href="{_em_url("/new", state, **{path_key: built.lstrip("/")})}" onclick="return selfsteamEmNav(this)">{html.escape(part)}</a>'
         )
-    return " / ".join(crumbs)
+    # Same double-slash fix as _ra_breadcrumbs_html -- see its own comment.
+    return root_crumb + (" " + " / ".join(crumbs) if crumbs else "")
 
 
 def _em_list_rows(abs_path, rel_path, state, path_key, file_key):
@@ -1705,7 +1712,6 @@ def _emulators_tab_panel_html(state, chosen=None):
     needs_keys = bool(entry and entry.get("needs_keys"))
     needs_firmware = bool(entry and entry.get("needs_firmware"))
 
-    names = standalone_emulators.by_install_type(install_source)
     # If the previously-picked emulator doesn't belong to whichever
     # install source is now active (e.g. toggled from Flathub to
     # AppImage), it's simply not a valid option in this dropdown --
@@ -1718,6 +1724,14 @@ def _emulators_tab_panel_html(state, chosen=None):
         e = standalone_emulators.EMULATORS.get(name, {})
         consoles = e.get("consoles")
         return f"{name} - {consoles}" if consoles else name
+
+    # Sorted by the same "consoles" text the label itself shows, not
+    # insertion order -- same alphabetical-by-console rule the RA tab's
+    # own picker follows (see retroarch_cores.CONSOLES).
+    names = sorted(
+        standalone_emulators.by_install_type(install_source),
+        key=lambda n: (standalone_emulators.EMULATORS.get(n, {}).get("consoles") or "").lower(),
+    )
 
     emulator_options = "".join(
         f'<option value="{html.escape(e)}"{" selected" if e == emulator else ""}>'
