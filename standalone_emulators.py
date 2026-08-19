@@ -229,6 +229,15 @@ def _azahar_args(romfile):
     return ["-f", shlex.quote(romfile)]
 
 
+def _play_args(romfile):
+    # --disc <path> and --fullscreen, both confirmed real via Play!'s
+    # own source (Source/ui_qt/main.cpp's QCommandLineParser setup:
+    # explicit "disc" option feeding w.LoadCDROM()/w.BootCDROM(), and
+    # "fullscreen" feeding w.showFullScreen()). Named option, not a bare
+    # positional arg, unlike most other emulators here.
+    return ["--fullscreen", "--disc", shlex.quote(romfile)]
+
+
 def _pcsx2_args(romfile):
     # -batch (skip the game list UI, quit instead of returning to it on
     # close) and -fullscreen, both confirmed real via PCSX2's own source
@@ -890,6 +899,24 @@ EMULATORS = {
         # `flatpak info --show-permissions org.ppsspp.PPSSPP` on X1
         # (filesystems=host:ro;xdg-run/gamescope-0:ro), not just read
         # from the manifest text.
+    },
+    "Play!": {
+        "install_type": "flathub",
+        "app_id": "org.purei.Play",
+        "consoles": "PlayStation 2",
+        # Play! ships its own built-in HLE BIOS -- confirmed via its own
+        # README: "Play! uses a built-in high-level emulation BIOS.
+        # Using an external BIOS file is not necessary or possible."
+        # Unlike PCSX2/LRPS2, no real PS2 BIOS dump is needed at all.
+        "needs_bios": False,
+        "needs_keys": False,
+        "needs_firmware": False,
+        "args": _play_args,
+        # Confirmed live on X1: its Flathub manifest only grants
+        # home:ro (+ /media, /mnt, /run/media, all :ro) -- same gap as
+        # melonDS/RPCS3 before their own fixes. Upgraded to host:ro so
+        # the widened (real filesystem root) file picker works.
+        "grant_permissions": ["--filesystem=host:ro"],
     },
 }
 
