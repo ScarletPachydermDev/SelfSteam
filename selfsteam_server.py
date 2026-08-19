@@ -1675,12 +1675,20 @@ def _em_picker_section(prefix, label, state, already_installed=None, info_toolti
     label_text = f'{label} <span class="required-asterisk">*</span>'
     if info_tooltip:
         label_text += f' {_info_tooltip_icon_html(info_tooltip)}'
-    if info_link:
+    # Hidden once a file is either freshly picked or already installed --
+    # at that point there's nothing left to download, so the link would
+    # just be clutter next to the checkmark state.
+    if info_link and not selected_file and not show_installed:
         link_url, link_text = info_link
+        # Plain inline flow, no position/display override -- vertical-
+        # align defaults to "baseline", which is what actually lines up
+        # a smaller font-size run with the rest of the label; the
+        # earlier position:relative;top:-0.2em hack was fighting that
+        # default instead of relying on it, which is what threw the
+        # underline off.
         label_text += (
             f' <a href="{html.escape(link_url)}" target="_blank" rel="noopener" '
-            f'style="font-size:0.8em;color:var(--text-dim);white-space:nowrap;'
-            f'display:inline-block;position:relative;top:-0.2em">{html.escape(link_text)} &#8599;</a>'
+            f'style="font-size:0.8em;color:var(--text-dim);white-space:nowrap">{html.escape(link_text)} &#8599;</a>'
         )
 
     if selected_file:
