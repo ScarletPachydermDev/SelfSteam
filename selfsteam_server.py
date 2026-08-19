@@ -2405,6 +2405,8 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
   <input type="hidden" name="em_emulator" value="{html.escape(em_emulator)}">
   <input type="hidden" name="em_romfile" value="{html.escape(em_state.get('em_romfile', ''))}">
   <input type="hidden" name="em_biosfile" value="{html.escape(em_state.get('em_biosfile', ''))}">
+  <input type="hidden" name="em_bios2file" value="{html.escape(em_state.get('em_bios2file', ''))}">
+  <input type="hidden" name="em_bios3file" value="{html.escape(em_state.get('em_bios3file', ''))}">
   <input type="hidden" name="em_keysfile" value="{html.escape(em_state.get('em_keysfile', ''))}">
   <input type="hidden" name="em_firmwarefile" value="{html.escape(em_state.get('em_firmwarefile', ''))}">
 </form>
