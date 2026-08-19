@@ -43,6 +43,12 @@ _CONSOLE_ENTRIES = [
     ("Atari 2600", "stella", False, "Stella"),
     ("Atari 7800", "prosystem", True, "ProSystem"),
     ("Nintendo (NES)", "nestopia", False, "Nestopia"),
+    # Confirmed real and non-experimental via libretro's own core-info
+    # entry (citra_libretro.info: is_experimental="false") -- needs
+    # decrypted ROMs to function per that same entry's description, not
+    # a system-file/BIOS requirement this module's own needs_bios flag
+    # is meant to gate on.
+    ("Nintendo 3DS", "citra", False, "Citra"),
     ("Super Nintendo", "snes9x", False, "Snes9x"),
     ("Nintendo 64", "mupen64plus_next", False, "Mupen64Plus-Next"),
     ("Nintendo 64", "parallel_n64", False, "ParaLLEl N64"),

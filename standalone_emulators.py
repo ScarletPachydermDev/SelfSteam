@@ -221,6 +221,14 @@ def _ryubing_install_keys(entry, keys_path):
     return copied
 
 
+def _azahar_args(romfile):
+    # -f/--fullscreen plus a bare positional romfile -- both confirmed
+    # real via Azahar's own source (src/citra_qt/citra_qt.cpp's
+    # ParseArguments: explicit "-f"/"--fullscreen" check, and the last
+    # non-flag argument becomes game_path).
+    return ["-f", shlex.quote(romfile)]
+
+
 def _pcsx2_args(romfile):
     # -batch (skip the game list UI, quit instead of returning to it on
     # close) and -fullscreen, both confirmed real via PCSX2's own source
@@ -573,6 +581,54 @@ def install_pcsx2_bios_slot(entry, slot_prefix, file_path):
         cp.write(f, space_around_delimiters=True)
 
 
+def _rpcs3_args(romfile):
+    # --no-gui --fullscreen plus a bare positional romfile -- confirmed
+    # real via RPCS3's own source (rpcs3/rpcs3.cpp: arg_no_gui/
+    # arg_fullscreen QCommandLineOptions, "fullscreen ... Only used when
+    # no-gui is set"; positionalArguments()[0] becomes the boot path).
+    return ["--no-gui", "--fullscreen", shlex.quote(romfile)]
+
+
+def _rpcs3_dev_flash_dir(entry):
+    # $(EmulatorDir)dev_flash/ where EmulatorDir defaults to
+    # fs::get_config_dir() -- confirmed via source (Emu/vfs_config.h,
+    # Utilities/File.cpp's Linux branch: $XDG_CONFIG_HOME/rpcs3/, i.e.
+    # ~/.var/app/<id>/config/rpcs3/ under Flatpak).
+    return _flatpak_config_dir(entry["app_id"], "rpcs3", "dev_flash")
+
+
+def rpcs3_firmware_installed(entry, slot_prefix):
+    # vsh/etc/version.txt only exists once a real firmware install has
+    # actually completed -- confirmed via source (util/sysinfo.cpp's
+    # get_firmware_version(), the same file RPCS3 itself reads to know
+    # its own installed firmware version).
+    version_path = os.path.join(_rpcs3_dev_flash_dir(entry), "vsh", "etc", "version.txt")
+    if not os.path.isfile(version_path):
+        return None
+    with open(version_path) as f:
+        version = f.read().strip()
+    return f"firmware {version}" if version else "firmware installed"
+
+
+def install_rpcs3_firmware(entry, slot_prefix, file_path):
+    """Firmware install isn't a plain file copy the way keys/BIOS are
+    elsewhere in this module -- a PS3 PUP is a signed, encrypted
+    package RPCS3 has to decrypt and unpack itself, no shortcut around
+    that. RPCS3's own --installfw <path> flag does exactly this
+    (confirmed via source: rpcs3.cpp calls main_window::InstallPup for
+    it) -- run for real here rather than reimplementing PUP decryption
+    ourselves. Real caveat, not swept under the rug: --installfw can't
+    run in --no-gui mode (confirmed via source: report_fatal_error
+    otherwise), so this genuinely pops up RPCS3's own install dialog
+    rather than staying silent, and this call blocks until that
+    process exits (the user closing/finishing the dialog) rather than
+    us polling for completion some other way."""
+    flatpak = host_exec.which("flatpak")
+    subprocess.run(
+        host_exec.wrap([flatpak, "run", entry["app_id"], "--installfw", file_path]),
+    )
+
+
 EMULATORS = {
     "Dolphin": {
         "install_type": "flathub",
@@ -746,6 +802,44 @@ EMULATORS = {
         "args": _pcsx2_args,
         # No grant_permissions needed -- confirmed via its own Flathub
         # manifest, it already ships --filesystem=host:ro.
+    },
+    "Azahar": {
+        "install_type": "flathub",
+        "app_id": "org.azahar_emu.Azahar",
+        "consoles": "Nintendo 3DS",
+        # Citra/Azahar can boot many games without real system files
+        # via HLE, same "optional accuracy upgrade, not required to
+        # boot" category as Dolphin's GameCube IPL -- unlike PS2/Xbox/
+        # PS3, which all hard-require real dumps.
+        "needs_bios": False,
+        "needs_keys": False,
+        "needs_firmware": False,
+        "args": _azahar_args,
+        # No grant_permissions needed -- confirmed via its own Flathub
+        # manifest, it already ships --filesystem=host:ro.
+    },
+    "RPCS3": {
+        "install_type": "flathub",
+        "app_id": "net.rpcs3.RPCS3",
+        "consoles": "PlayStation 3",
+        # PS3 emulation has no HLE fallback -- a real firmware (PUP)
+        # install is mandatory. Routed through bios_slots (a single
+        # slot) so the label reads "Select PS3 Firmware" rather than
+        # the generic "Select BIOS" every needs_bios-only emulator
+        # shows -- see install_rpcs3_firmware's own docstring for why
+        # this can't be a plain file copy the way PCSX2's is.
+        "needs_bios": True,
+        "bios_slots": [("bios", "Select PS3 Firmware (PUP)", "firmware")],
+        "bios_slot_installed": rpcs3_firmware_installed,
+        "install_bios_slot": install_rpcs3_firmware,
+        "needs_keys": False,
+        "needs_firmware": False,
+        "args": _rpcs3_args,
+        # Upgraded from its own Flathub manifest's --filesystem=home:ro
+        # (+/media, /run/media) to host:ro -- same reasoning as
+        # melonDS's own fix, the file picker's root was widened to the
+        # real filesystem root, not just home/removable-media mounts.
+        "grant_permissions": ["--filesystem=host:ro"],
     },
 }
 
