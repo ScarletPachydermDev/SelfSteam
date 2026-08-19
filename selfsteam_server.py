@@ -1650,7 +1650,7 @@ def _em_list_rows(abs_path, rel_path, state, path_key, file_key):
     return "".join(rows)
 
 
-def _em_picker_section(prefix, label, state, already_installed=None, info_tooltip=None):
+def _em_picker_section(prefix, label, state, already_installed=None, info_tooltip=None, info_link=None):
     path_key = f"em_{prefix}path"
     file_key = f"em_{prefix}file"
     source_key = f"em_{prefix}source"
@@ -1675,6 +1675,12 @@ def _em_picker_section(prefix, label, state, already_installed=None, info_toolti
     label_text = f'{label} <span class="required-asterisk">*</span>'
     if info_tooltip:
         label_text += f' {_info_tooltip_icon_html(info_tooltip)}'
+    if info_link:
+        link_url, link_text = info_link
+        label_text += (
+            f' <a href="{html.escape(link_url)}" target="_blank" rel="noopener" '
+            f'style="font-size:0.8em;color:var(--text-dim);white-space:nowrap">{html.escape(link_text)} &#8599;</a>'
+        )
 
     if selected_file:
         remove_overrides = {file_key: ""}
@@ -1827,10 +1833,12 @@ def _emulators_tab_panel_html(state, chosen=None):
     # standalone_emulators.XEMU_BIOS_SLOTS.
     bios_slots = entry.get("bios_slots") if entry else None
     if bios_slots:
+        bios_slot_links = entry.get("bios_slot_links") or {}
         bios_block = "".join(
             _em_picker_section(
                 prefix, label, state,
                 already_installed=standalone_emulators.bios_slot_installed(emulator, prefix),
+                info_link=bios_slot_links.get(prefix),
             )
             for prefix, label, *_rest in bios_slots
         )

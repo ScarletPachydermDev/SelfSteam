@@ -874,6 +874,11 @@ EMULATORS = {
         # this can't be a plain file copy the way PCSX2's is.
         "needs_bios": True,
         "bios_slots": [("bios", "Select PS3 Firmware (PUP)", "firmware")],
+        # Sony's own official download for the PUP -- linked directly
+        # next to the picker since it's not obtainable any other
+        # legitimate way (unlike PS1/PS2 BIOS dumps, which are commonly
+        # sourced from a user's own console).
+        "bios_slot_links": {"bios": "https://www.playstation.com/en-gb/support/hardware/ps3/system-software/"},
         "bios_slot_installed": rpcs3_firmware_installed,
         "install_bios_slot": install_rpcs3_firmware,
         "needs_keys": False,
