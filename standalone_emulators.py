@@ -945,9 +945,10 @@ EMULATORS = {
         "needs_keys": False,
         "needs_firmware": False,
         "args": _shadps4_args,
-        # PENDING: not yet verified live via
-        # `flatpak info --show-permissions net.shadps4.shadPS4` on X1 --
-        # check before trusting this is filesystem-clean.
+        # Confirmed live on X1: its manifest only grants home (full
+        # read-write, not even :ro) + /media, /run/media -- no host:ro.
+        # Same gap as melonDS/RPCS3/Play! before their own fixes.
+        "grant_permissions": ["--filesystem=host:ro"],
     },
 }
 
