@@ -241,6 +241,15 @@ def _pcsx2_args(romfile):
     return ["-batch", "-fullscreen", shlex.quote(romfile)]
 
 
+def _ppsspp_args(romfile):
+    # --fullscreen (forces fullscreen, ignoring saved config -- confirmed
+    # real via PPSSPP's own command-line docs) plus a bare positional
+    # romfile -- confirmed real via PPSSPP's own source (SDL/SDLMain.cpp
+    # logs "Boot filename found in args" for the first non-flag arg it
+    # sees).
+    return ["--fullscreen", shlex.quote(romfile)]
+
+
 def _xemu_args(romfile):
     # -full-screen (QEMU's own legacy option, still real and wired up --
     # confirmed via ui/xemu.c: `gui_fullscreen = o->has_full_screen &&
@@ -866,6 +875,21 @@ EMULATORS = {
         # melonDS's own fix, the file picker's root was widened to the
         # real filesystem root, not just home/removable-media mounts.
         "grant_permissions": ["--filesystem=host:ro"],
+    },
+    "PPSSPP": {
+        "install_type": "flathub",
+        "app_id": "org.ppsspp.PPSSPP",
+        "consoles": "PlayStation Portable",
+        # PPSSPP's HLE covers PSP system calls without a real firmware
+        # dump -- same "not required to boot" category as Azahar/Citra.
+        "needs_bios": False,
+        "needs_keys": False,
+        "needs_firmware": False,
+        "args": _ppsspp_args,
+        # No grant_permissions needed -- confirmed LIVE via
+        # `flatpak info --show-permissions org.ppsspp.PPSSPP` on X1
+        # (filesystems=host:ro;xdg-run/gamescope-0:ro), not just read
+        # from the manifest text.
     },
 }
 
