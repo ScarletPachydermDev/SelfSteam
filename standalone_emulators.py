@@ -619,6 +619,16 @@ def install_pcsx2_bios_slot(entry, slot_prefix, file_path):
         cp.write(f, space_around_delimiters=True)
 
 
+def _shadps4_args(romfile):
+    # --fullscreen true plus a bare positional game path (its CLI11
+    # option name is "guest_arg", aliased -g/--game) -- confirmed real
+    # via shadPS4's own source (src/main.cpp:
+    # app.add_option("guest_arg", gamePath, "Game path or ID") and
+    # app.add_option("-f,--fullscreen", fullscreenStr, "Fullscreen mode
+    # (true|false)")).
+    return ["--fullscreen", "true", shlex.quote(romfile)]
+
+
 def _rpcs3_args(romfile):
     # --no-gui --fullscreen plus a bare positional romfile -- confirmed
     # real via RPCS3's own source (rpcs3/rpcs3.cpp: arg_no_gui/
@@ -922,6 +932,22 @@ EMULATORS = {
         # melonDS/RPCS3 before their own fixes. Upgraded to host:ro so
         # the widened (real filesystem root) file picker works.
         "grant_permissions": ["--filesystem=host:ro"],
+    },
+    "shadPS4": {
+        "install_type": "flathub",
+        "app_id": "net.shadps4.shadPS4",
+        "consoles": "PlayStation 4",
+        # HLE of the PS4 system libraries -- confirmed via its own
+        # README: real firmware .sprx modules are only optional (for
+        # better compatibility on games that lean on them), never
+        # required to boot, unlike RPCS3's mandatory real PUP.
+        "needs_bios": False,
+        "needs_keys": False,
+        "needs_firmware": False,
+        "args": _shadps4_args,
+        # PENDING: not yet verified live via
+        # `flatpak info --show-permissions net.shadps4.shadPS4` on X1 --
+        # check before trusting this is filesystem-clean.
     },
 }
 

@@ -1786,12 +1786,13 @@ def _emulators_tab_panel_html(state, chosen=None):
         consoles = e.get("consoles")
         return f"{name} - {consoles}" if consoles else name
 
-    # Sorted by the same "consoles" text the label itself shows, not
-    # insertion order -- same alphabetical-by-console rule the RA tab's
-    # own picker follows (see retroarch_cores.CONSOLES).
+    # Sorted by emulator name -- unlike the RA tab's own "console - core"
+    # picker (retroarch_cores.CONSOLES), where console is the meaningful
+    # grouping, this tab's own label is "EmulatorName - Console", so
+    # alphabetical-by-emulator is what the user actually asked for here.
     names = sorted(
         standalone_emulators.by_install_type(install_source),
-        key=lambda n: (standalone_emulators.EMULATORS.get(n, {}).get("consoles") or "").lower(),
+        key=lambda n: n.lower(),
     )
 
     emulator_options = "".join(
