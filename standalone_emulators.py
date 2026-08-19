@@ -220,6 +220,23 @@ def _ryubing_install_keys(entry, keys_path):
     return copied
 
 
+def _parallel_launcher_args(romfile):
+    # Bare positional romfile -- confirmed real via Parallel Launcher's
+    # own source (src/main.cpp: tryGetRomPath() reads argv[1], and a
+    # non-empty romPath routes to DirectPlay::start() instead of
+    # runMainWindow(), skipping its own launcher UI entirely and going
+    # straight to gameplay). Matches its own .desktop file's
+    # `Exec=parallel-launcher %u` convention.
+    #
+    # Fullscreen is a real, persisted setting here (unlike M64Py) --
+    # confirmed via src/core/retroarch.cpp, which writes
+    # video_fullscreen into the retroarch.cfg it generates based on
+    # AppSettings.fullscreen -- but that's a one-time toggle in its own
+    # settings UI, not something this args builder can reach, so first
+    # launches still open windowed until the user flips it once.
+    return [shlex.quote(romfile)]
+
+
 def _m64py_args(romfile):
     # Bare positional romfile -- confirmed real via M64Py's own source
     # (src/m64py/opts.py: `usage = 'usage: %prog <romfile>'`, only other
@@ -480,6 +497,18 @@ EMULATORS = {
         # pulseaudio/x11/wayland sockets), so a ROM picked from anywhere
         # crashes the same way until this is granted.
         "grant_permissions": ["--filesystem=host:ro"],
+    },
+    "Parallel Launcher": {
+        "install_type": "flathub",
+        "app_id": "ca.parallel_launcher.ParallelLauncher",
+        "consoles": "Nintendo 64",
+        "needs_bios": False,
+        "needs_keys": False,
+        "needs_firmware": False,
+        "args": _parallel_launcher_args,
+        # No grant_permissions needed -- confirmed via its own Flathub
+        # manifest, it already ships --filesystem=host, unlike
+        # gopher64/RMG/M64Py.
     },
 }
 
