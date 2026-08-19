@@ -19,6 +19,17 @@ import steam_paths
 
 POLL_INTERVAL = 0.5
 POLL_TIMEOUT = 60
+# Cold-start-after-reinstall margin for the post-launch wait specifically
+# (see _launch_and_wait) -- confirmed live on X1: a steady-state
+# kill+relaunch comes back in ~5s, but right after another Flatpak app
+# install/reinstall was contending for disk/repo access in parallel
+# (Bazaar, in this case), Steam's own bwrap/pressure-vessel bootstrap
+# took well over 60s to reach the point where its unwrapped "steam"
+# binary process exists for pidof to see -- the launch itself was never
+# broken (Popen already detached it), but the wait gave up before
+# confirming success, which is what actually looked like "not
+# restarting" from the UI side.
+LAUNCH_POLL_TIMEOUT = 150
 
 
 def is_steam_running():
@@ -72,7 +83,7 @@ def steam_pids():
 def _launch_and_wait(argv):
     subprocess.Popen(host_exec.wrap(argv), start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     waited = 0.0
-    while not is_steam_running() and waited < POLL_TIMEOUT:
+    while not is_steam_running() and waited < LAUNCH_POLL_TIMEOUT:
         time.sleep(POLL_INTERVAL)
         waited += POLL_INTERVAL
 

@@ -577,6 +577,26 @@ def install_pcsx2_bios_slot(entry, slot_prefix, file_path):
     if not cp.has_section("Filenames"):
         cp.add_section("Filenames")
     cp.set("Filenames", "BIOS", os.path.basename(file_path))
+    # PCSX2 checks "UI"/"SettingsVersion" against its own hardcoded
+    # SETTINGS_VERSION constant (confirmed via source: VMManager.cpp's
+    # CheckSettingsVersion/SetDefaultSettings, SETTINGS_VERSION = 1) --
+    # a fresh ini bootstrapped by us that's missing this key fails that
+    # check on PCSX2's own first real launch, which makes it silently
+    # discard everything (including the BIOS line just written above)
+    # and reset to full defaults, setting "UI"/"SetupWizardIncomplete" =
+    # true in the process (confirmed via source: QtHost.cpp's
+    # InitializeConfig) -- forcing PCSX2's own onboarding wizard on
+    # every launch instead of booting straight into -batch -fullscreen
+    # isopath. Stamping both keys ourselves up front (only if not
+    # already present, so a wizard the user genuinely ran later isn't
+    # clobbered back to "incomplete") makes PCSX2 treat this ini as a
+    # real, already-configured one from its very first real launch.
+    if not cp.has_section("UI"):
+        cp.add_section("UI")
+    if not cp.has_option("UI", "SettingsVersion"):
+        cp.set("UI", "SettingsVersion", "1")
+    if not cp.has_option("UI", "SetupWizardIncomplete"):
+        cp.set("UI", "SetupWizardIncomplete", "false")
     with open(ini_path, "w") as f:
         cp.write(f, space_around_delimiters=True)
 
@@ -800,8 +820,14 @@ EMULATORS = {
         "needs_keys": False,
         "needs_firmware": False,
         "args": _pcsx2_args,
-        # No grant_permissions needed -- confirmed via its own Flathub
-        # manifest, it already ships --filesystem=host:ro.
+        # Confirmed live on X1 (not just from the manifest, which was
+        # misread earlier as already granting this): PCSX2's real
+        # Flathub manifest grants NO general filesystem access at all
+        # (`flatpak info --show-permissions` shows only
+        # xdg-config/kdeglobals:ro and xdg-run/gamescope-0:ro, no home
+        # or host) -- same "file not found" crash class as gopher64/
+        # RMG/M64Py before they got this same fix.
+        "grant_permissions": ["--filesystem=host:ro"],
     },
     "Azahar": {
         "install_type": "flathub",
