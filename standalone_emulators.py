@@ -220,6 +220,14 @@ def _ryubing_install_keys(entry, keys_path):
     return copied
 
 
+def _melonds_args(romfile):
+    # -f/--fullscreen plus a bare positional "nds" romfile -- both
+    # confirmed real via melonDS's own source (src/frontend/qt_sdl/
+    # CLI.cpp: addOption({"f","fullscreen"}, ...), addPositionalArgument
+    # ("nds", ...)).
+    return ["-f", shlex.quote(romfile)]
+
+
 def _m64py_args(romfile):
     # Bare positional romfile -- confirmed real via M64Py's own source
     # (src/m64py/opts.py: `usage = 'usage: %prog <romfile>'`, only other
@@ -479,6 +487,27 @@ EMULATORS = {
         # RMG, zero filesystem access granted at all (only ipc/device/
         # pulseaudio/x11/wayland sockets), so a ROM picked from anywhere
         # crashes the same way until this is granted.
+        "grant_permissions": ["--filesystem=host:ro"],
+    },
+    "melonDS": {
+        "install_type": "flathub",
+        "app_id": "net.kuribo64.melonDS",
+        "consoles": "Nintendo DS",
+        # Confirmed via source (Config.cpp): ExternalBIOSEnable defaults
+        # to false -- melonDS's own built-in HLE BIOS is what a fresh
+        # install actually boots with, same category as Dolphin's own
+        # GameCube IPL HLE. Real BIOS/firmware dumps are an optional
+        # accuracy upgrade the user can add later via melonDS's own
+        # settings, not something Create needs to gate on.
+        "needs_bios": False,
+        "needs_keys": False,
+        "needs_firmware": False,
+        "args": _melonds_args,
+        # Its own Flathub manifest only grants --filesystem=home, not
+        # host -- upgraded to host:ro so a ROM picked from outside home
+        # (the file picker's root was widened to the real filesystem
+        # root) doesn't hit the same NotFound crash gopher64/RMG/M64Py
+        # did before they got this same fix.
         "grant_permissions": ["--filesystem=host:ro"],
     },
 }
