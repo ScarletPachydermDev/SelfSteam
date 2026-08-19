@@ -414,6 +414,11 @@ EMULATORS = {
         "needs_keys": False,
         "needs_firmware": False,
         "args": _gopher64_args,
+        # Confirmed live (see grant_permissions' own docstring): unlike
+        # every other emulator here, gopher64's own Flathub manifest
+        # grants zero filesystem access, so it can't read a ROM from
+        # anywhere outside its own sandbox at all until this is granted.
+        "grant_permissions": ["--filesystem=host:ro"],
     },
 }
 
@@ -489,6 +494,36 @@ def install(name):
     raise RuntimeError(
         f"flatpak install failed after {_INSTALL_ATTEMPTS} attempts: "
         f"{last_result.stderr.strip() or last_result.stdout.strip()}"
+    )
+
+
+def grant_permissions(name):
+    """flatpak override --user <app_id> <perm>... for an entry's own
+    "grant_permissions" list -- most emulators here (Dolphin, Cemu,
+    Flycast, Ryubing) already ship --filesystem=host:ro or home:ro in
+    their own Flathub manifest, so this is a no-op for them (empty/
+    absent list). gopher64's own manifest grants no filesystem access
+    at all (confirmed live: a ROM picked from anywhere outside its own
+    Flatpak sandbox -- which is anywhere, since it declares zero
+    filesystem permissions -- crashes with
+    `std::fs::File::open(file_path).unwrap()` -> NotFound the instant
+    it tries to actually read the file), so its own entry lists
+    ["--filesystem=host:ro"] to grant read access the same way those
+    other emulators' own manifests already do by default.
+
+    Idempotent (flatpak override just rewrites a permissions file) and
+    run every time a shortcut is created for this emulator, not just on
+    a fresh install -- unlike install() itself, this needs to reach an
+    emulator that was already installed (by SelfSteam or otherwise)
+    before this permission gap was noticed, not just future installs."""
+    entry = EMULATORS.get(name)
+    perms = entry.get("grant_permissions") if entry else None
+    if not perms:
+        return
+    flatpak = host_exec.which("flatpak")
+    subprocess.run(
+        host_exec.wrap([flatpak, "override", "--user", entry["app_id"], *perms]),
+        capture_output=True,
     )
 
 

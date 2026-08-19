@@ -3374,6 +3374,15 @@ class Handler(BaseHTTPRequestHandler):
                 standalone_emulators.configure_game_dir(
                     em_emulator, os.path.join(_RA_UPLOAD_DIR, "em-rom"),
                 )
+            # Unlike install()/configure_game_dir above, this runs every
+            # time regardless of was_already_installed -- it needs to
+            # reach an emulator (gopher64) that was already installed,
+            # by SelfSteam or otherwise, before this permission gap was
+            # noticed, not just future fresh installs. No-op for every
+            # other emulator (empty/absent grant_permissions list). See
+            # grant_permissions' own docstring for the real bug this
+            # fixes.
+            standalone_emulators.grant_permissions(em_emulator)
             # Keys/firmware installs are real, verified (not guessed)
             # ports of Ryubing's own ContentManager.InstallKeys/
             # InstallFirmware -- see standalone_emulators.py's own
