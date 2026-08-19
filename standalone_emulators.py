@@ -233,29 +233,6 @@ def _m64py_args(romfile):
     return [shlex.quote(romfile)]
 
 
-def _m64py_configure_game_dir(entry, game_dir):
-    # m64py.conf, [Paths] section, ROM key -- a single directory, not a
-    # list (confirmed via source: src/m64py/frontend/romlist.py reads
-    # `self.qset.value("Paths/ROM")`, QSettings' own "/" group-separator
-    # syntax for a plain string value, and settings.py's own
-    # `QSettings(config_file, QSettings.Format.IniFormat)` confirms it's
-    # a real configparser-compatible ini file, not some other backend).
-    #
-    # Only touches an existing config file, same reasoning as Dolphin's
-    # own configurator -- a fresh install has never run yet and M64Py
-    # creates its own m64py.conf with its own defaults on first launch.
-    config_path = _flatpak_config_dir(entry["app_id"], "m64py", "m64py.conf")
-    if not os.path.isfile(config_path):
-        return
-    cp = configparser.ConfigParser(interpolation=None)
-    cp.read(config_path)
-    if not cp.has_section("Paths"):
-        cp.add_section("Paths")
-    cp.set("Paths", "ROM", game_dir)
-    with open(config_path, "w") as f:
-        cp.write(f, space_around_delimiters=True)
-
-
 def _rmg_args(romfile):
     # -f/-n/-q (fullscreen, hide menubar/toolbar/statusbar, quit once
     # emulation ends) plus a bare positional ROM path -- confirmed real
@@ -498,7 +475,6 @@ EMULATORS = {
         "needs_keys": False,
         "needs_firmware": False,
         "args": _m64py_args,
-        "configure_game_dir": _m64py_configure_game_dir,
         # Confirmed via its own Flathub manifest: same gap as gopher64/
         # RMG, zero filesystem access granted at all (only ipc/device/
         # pulseaudio/x11/wayland sockets), so a ROM picked from anywhere
