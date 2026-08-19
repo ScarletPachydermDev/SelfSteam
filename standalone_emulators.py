@@ -220,6 +220,22 @@ def _ryubing_install_keys(entry, keys_path):
     return copied
 
 
+def _rmg_args(romfile):
+    # -f/-n/-q (fullscreen, hide menubar/toolbar/statusbar, quit once
+    # emulation ends) plus a bare positional ROM path -- confirmed real
+    # via RMG's own source (Source/RMG/main.cpp's QCommandLineParser
+    # setup: fullscreenOption/noGuiOption/quitAfterEmulationOption,
+    # addPositionalArgument("ROM", ...)). No configure_game_dir entry --
+    # RMG does have a real watched-folder setting (RomBrowser_Directory,
+    # confirmed via Source/RMG-Core/Settings.cpp), unlike gopher64's
+    # capped recent-list-only approach, but its on-disk config file path
+    # wasn't pinned down with the same confidence as Dolphin/Cemu/
+    # Flycast's own configure_game_dir writers, so this skips writing to
+    # it rather than guessing a path that could silently no-op or hit
+    # the wrong file.
+    return ["-f", "-n", "-q", shlex.quote(romfile)]
+
+
 def _gopher64_args(romfile):
     # -f/--fullscreen (clap's derive macro auto-shortens "fullscreen" to
     # -f since no explicit short letter is given) plus a bare positional
@@ -418,6 +434,24 @@ EMULATORS = {
         # every other emulator here, gopher64's own Flathub manifest
         # grants zero filesystem access, so it can't read a ROM from
         # anywhere outside its own sandbox at all until this is granted.
+        "grant_permissions": ["--filesystem=host:ro"],
+    },
+    "Rosalie's Mupen GUI": {
+        "install_type": "flathub",
+        "app_id": "com.github.Rosalie241.RMG",
+        "consoles": "Nintendo 64",
+        # Same reasoning as gopher64/mupen64plus_next -- N64 emulators
+        # HLE-emulate the PIF boot ROM's function, no real BIOS dump
+        # needed.
+        "needs_bios": False,
+        "needs_keys": False,
+        "needs_firmware": False,
+        "args": _rmg_args,
+        # Confirmed via its own Flathub manifest: same gap as gopher64,
+        # zero general filesystem access (only its own
+        # xdg-pictures/RMG:rw screenshot folder is granted), so a ROM
+        # picked from anywhere else crashes the same way until this is
+        # granted.
         "grant_permissions": ["--filesystem=host:ro"],
     },
 }
