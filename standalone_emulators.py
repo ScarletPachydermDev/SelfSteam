@@ -220,6 +220,19 @@ def _ryubing_install_keys(entry, keys_path):
     return copied
 
 
+def _gopher64_args(romfile):
+    # -f/--fullscreen (clap's derive macro auto-shortens "fullscreen" to
+    # -f since no explicit short letter is given) plus a bare positional
+    # rom path -- confirmed real via gopher64's own source
+    # (src/lib.rs's Args struct: `pub game: Option<String>` with no
+    # #[arg(...)] above it is clap's plain-positional convention,
+    # `#[arg(short, long)] pub fullscreen: bool`). No configure_game_dir
+    # entry for this one -- confirmed via source (src/ui/gui.rs) that
+    # gopher64 only keeps a capped 5-item "recently played" list, no
+    # watched-folder/library concept at all to register anything into.
+    return ["-f", shlex.quote(romfile)]
+
+
 # The single commented-out line Cemu's own KeyCache.cpp writes into a
 # freshly-created keys.txt on first run ("541b9889519b27d363cd21604b97c67a
 # # example key (can be deleted)") -- confirmed via source. keys.txt
@@ -388,6 +401,19 @@ EMULATORS = {
         "needs_firmware": False,
         "args": _flycast_args,
         "configure_game_dir": _flycast_configure_game_dir,
+    },
+    "gopher64": {
+        "install_type": "flathub",
+        "app_id": "io.github.gopher64.gopher64",
+        "consoles": "Nintendo 64",
+        # No BIOS/PIF ROM needed -- N64 emulators HLE-emulate the boot
+        # ROM's function (same reason retroarch_cores.py's own N64
+        # console entry, mupen64plus_next, needs_bios=False too), and
+        # gopher64's own README makes no mention of one at all.
+        "needs_bios": False,
+        "needs_keys": False,
+        "needs_firmware": False,
+        "args": _gopher64_args,
     },
 }
 
