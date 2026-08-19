@@ -1679,7 +1679,8 @@ def _em_picker_section(prefix, label, state, already_installed=None, info_toolti
         link_url, link_text = info_link
         label_text += (
             f' <a href="{html.escape(link_url)}" target="_blank" rel="noopener" '
-            f'style="font-size:0.8em;color:var(--text-dim);white-space:nowrap">{html.escape(link_text)} &#8599;</a>'
+            f'style="font-size:0.8em;color:var(--text-dim);white-space:nowrap;'
+            f'display:inline-block;position:relative;top:-0.2em">{html.escape(link_text)} &#8599;</a>'
         )
 
     if selected_file:

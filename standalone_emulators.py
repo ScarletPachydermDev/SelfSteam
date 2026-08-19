@@ -878,7 +878,7 @@ EMULATORS = {
         # next to the picker since it's not obtainable any other
         # legitimate way (unlike PS1/PS2 BIOS dumps, which are commonly
         # sourced from a user's own console).
-        "bios_slot_links": {"bios": ("https://www.playstation.com/en-gb/support/hardware/ps3/system-software/", "Get from Sony")},
+        "bios_slot_links": {"bios": ("https://www.playstation.com/en-gb/support/hardware/ps3/system-software/", "Get it from Sony")},
         "bios_slot_installed": rpcs3_firmware_installed,
         "install_bios_slot": install_rpcs3_firmware,
         "needs_keys": False,
