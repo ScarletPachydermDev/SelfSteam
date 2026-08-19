@@ -43,6 +43,10 @@ _CONSOLE_ENTRIES = [
     ("Atari 2600", "stella", False, "Stella"),
     ("Atari 7800", "prosystem", True, "ProSystem"),
     ("Nintendo (NES)", "nestopia", False, "Nestopia"),
+    # corename confirmed via libretro-core-info's own fceumm_libretro.info
+    # ("FCEUmm") and mesen_libretro.info ("Mesen").
+    ("Nintendo (NES)", "fceumm", False, "FCEUmm"),
+    ("Nintendo (NES)", "mesen", False, "Mesen"),
     # Confirmed real and non-experimental via libretro's own core-info
     # entry (citra_libretro.info: is_experimental="false") -- needs
     # decrypted ROMs to function per that same entry's description, not
@@ -50,6 +54,10 @@ _CONSOLE_ENTRIES = [
     # is meant to gate on.
     ("Nintendo 3DS", "citra", False, "Citra"),
     ("Super Nintendo", "snes9x", False, "Snes9x"),
+    # corename confirmed via libretro-core-info's own bsnes_libretro.info
+    # ("bsnes") and mesen-s_libretro.info ("Mesen-S").
+    ("Super Nintendo", "bsnes", False, "bsnes"),
+    ("Super Nintendo", "mesen-s", False, "Mesen-S"),
     ("Nintendo 64", "mupen64plus_next", False, "Mupen64Plus-Next"),
     ("Nintendo 64", "parallel_n64", False, "ParaLLEl N64"),
     ("Game Boy", "gambatte", False, "Gambatte"),
