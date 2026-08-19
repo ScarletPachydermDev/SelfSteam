@@ -36,6 +36,7 @@ import html
 import http.cookies
 import json
 import os
+import re
 import socket
 import tempfile
 import urllib.parse
@@ -1409,11 +1410,57 @@ def _ra_picker_section(prefix, label, state, already_installed=None):
   </div>"""
 
 
+_RA_LEADING_CATALOG_NUM_RE = re.compile(r"^\d+\s*[-.]\s*")
+_RA_PAREN_BRACKET_RE = re.compile(r"\(.*?\)|\[.*?\]")
+_RA_WHITESPACE_RE = re.compile(r"\s+")
+_RA_DASH_SUBTITLE_RE = re.compile(r"\s+-\s+")
+_RA_TRAILING_THE_RE = re.compile(r"^(.*?),\s*(the)\b(.*)$", re.IGNORECASE)
+_RA_SMALL_WORDS = {"a", "an", "and", "as", "at", "but", "by", "for", "in", "nor", "of", "on", "or", "the", "to", "vs"}
+_RA_ROMAN_NUMERAL_RE = re.compile(r"^(?=[MDCLXVI])M{0,4}(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,3})$", re.IGNORECASE)
+
+
 def _ra_guess_name_from_filename(rel_path):
+    # Port of the same core cleanup steam-rom-manager's own
+    # fuzzy-matcher.ts modifyString() does (confirmed via its source):
+    # strip every parenthetical/bracketed tag -- region, language,
+    # revision, dump-verification flags like "[!]" -- rather than
+    # matching against a hardcoded handful of literal tag strings,
+    # which missed anything not exactly in that list (e.g. a real report:
+    # "(En,Fr,De,Es,It)" was never stripped since only "(USA)"-style
+    # single-region tags were listed). Two extra steps beyond SRM's own,
+    # both aimed at No-Intro/Redump-numbered romsets specifically: strip
+    # a leading catalog/serial number ("3092 - "), and turn a
+    # " - " subtitle separator into ": " (the actual title's usual
+    # punctuation) before title-casing.
     base = os.path.splitext(os.path.basename(rel_path))[0]
-    for junk in ("(USA)", "(Europe)", "(World)", "(Rev 1)", "(Rev 2)", "[!]"):
-        base = base.replace(junk, "")
-    return " ".join(base.replace("_", " ").split()).strip()
+    base = _RA_LEADING_CATALOG_NUM_RE.sub("", base)
+    base = _RA_PAREN_BRACKET_RE.sub("", base)
+    # Same trailing-", The" reorder SRM's own fuzzy-matcher.ts does
+    # (/(.*?),\s*(the)/i), e.g. "Legend of Zelda, The" -> "The Legend of
+    # Zelda" -- run after brackets are stripped so a trailing region tag
+    # doesn't shield the comma from the end-of-string match.
+    the_match = _RA_TRAILING_THE_RE.match(base.strip())
+    if the_match:
+        base = f"{the_match.group(2)} {the_match.group(1)}{the_match.group(3)}".strip()
+    base = base.replace("_", " ").replace(".", " ")
+    base = _RA_WHITESPACE_RE.sub(" ", base).strip(" -")
+    base = _RA_DASH_SUBTITLE_RE.sub(": ", base)
+
+    words = [w for w in base.split(" ") if w]
+    titled = []
+    for i, word in enumerate(words):
+        # A word right after a ":" starts a new clause (the subtitle),
+        # same as the very first/last word -- "the" in "Kirby 64: The
+        # Crystal Shards" should stay capitalized, not get treated as a
+        # mid-sentence small word.
+        at_boundary = i == 0 or i == len(words) - 1 or titled[-1].endswith(":")
+        if _RA_ROMAN_NUMERAL_RE.match(word):
+            titled.append(word.upper())
+        elif word.lower() in _RA_SMALL_WORDS and not at_boundary:
+            titled.append(word.lower())
+        else:
+            titled.append(word[:1].upper() + word[1:])
+    return " ".join(titled)
 
 
 def _retroarch_tab_panel_html(state, chosen=None):
