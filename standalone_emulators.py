@@ -221,6 +221,18 @@ def _ryubing_install_keys(entry, keys_path):
     return copied
 
 
+def _pcsx2_args(romfile):
+    # -batch (skip the game list UI, quit instead of returning to it on
+    # close) and -fullscreen, both confirmed real via PCSX2's own source
+    # (pcsx2-qt/QtHost.cpp's ParseCommandLineOptions) -- notably the
+    # exact same flags PCSX2's own built-in "Create Shortcut" dialog
+    # generates for a fullscreen shortcut (confirmed via
+    # pcsx2-qt/ShortcutCreationDialog.cpp), not independently guessed.
+    # Bare positional romfile -- any non-flag token accumulates into the
+    # boot filename (same file, same ParseCommandLineOptions).
+    return ["-batch", "-fullscreen", shlex.quote(romfile)]
+
+
 def _xemu_args(romfile):
     # -full-screen (QEMU's own legacy option, still real and wired up --
     # confirmed via ui/xemu.c: `gui_fullscreen = o->has_full_screen &&
@@ -498,6 +510,69 @@ def install_xemu_bios_slot(entry, slot_prefix, file_path):
         f.write(content)
 
 
+def _pcsx2_bios_dir(entry):
+    # [Folders] Bios = "bios" (relative to DataRoot), confirmed via
+    # source (Pcsx2Config.cpp's EmuFolders::SetDataDirectory) --
+    # DataRoot itself is $XDG_CONFIG_HOME/PCSX2 on Linux, so under
+    # Flatpak that's ~/.var/app/<id>/config/PCSX2/bios. Unlike xemu,
+    # PCSX2 scans this folder for BIOS files rather than accepting an
+    # arbitrary path, so the picked file has to actually be copied here,
+    # not just referenced.
+    return _flatpak_config_dir(entry["app_id"], "PCSX2", "bios")
+
+
+def _pcsx2_ini_path(entry):
+    # DataRoot/inis/PCSX2.ini -- confirmed via source
+    # (EmuFolders::Settings = Path::Combine(DataRoot, "inis")).
+    return _flatpak_config_dir(entry["app_id"], "PCSX2", "inis", "PCSX2.ini")
+
+
+def pcsx2_bios_slot_installed(entry, slot_prefix):
+    # [Filenames] BIOS = <basename>, confirmed via source
+    # (Pcsx2Config.cpp: SettingsWrapSection("Filenames") immediately
+    # precedes wrap.Entry(..., "BIOS", Bios, Bios)) -- just the
+    # filename, matched against what's actually sitting in
+    # _pcsx2_bios_dir, same real-on-disk-check convention as every
+    # other *_installed helper here.
+    ini_path = _pcsx2_ini_path(entry)
+    if not os.path.isfile(ini_path):
+        return None
+    cp = configparser.ConfigParser(interpolation=None)
+    cp.optionxform = str  # preserve exact key casing -- PCSX2's own "BIOS" key is case-sensitive, not configparser's default lowercasing convention
+    cp.read(ini_path)
+    filename = cp.get("Filenames", "BIOS", fallback="") if cp.has_section("Filenames") else ""
+    if filename and os.path.isfile(os.path.join(_pcsx2_bios_dir(entry), filename)):
+        return filename
+    return None
+
+
+def install_pcsx2_bios_slot(entry, slot_prefix, file_path):
+    """Copies the picked BIOS file into PCSX2's own bios/ folder (unlike
+    xemu's install_xemu_bios_slot, which just points at the original
+    path -- PCSX2 scans its own folder rather than accepting an
+    arbitrary one) and points [Filenames] BIOS at its basename.
+    Bootstraps a fresh PCSX2.ini if one doesn't exist yet, same
+    reasoning as install_xemu_bios_slot's own docstring -- installed()
+    here only ever runs a bare `flatpak install`, never a real first
+    launch."""
+    bios_dir = _pcsx2_bios_dir(entry)
+    os.makedirs(bios_dir, exist_ok=True)
+    dest = os.path.join(bios_dir, os.path.basename(file_path))
+    shutil.copy2(file_path, dest)
+
+    ini_path = _pcsx2_ini_path(entry)
+    os.makedirs(os.path.dirname(ini_path), exist_ok=True)
+    cp = configparser.ConfigParser(interpolation=None)
+    cp.optionxform = str  # preserve exact key casing -- see pcsx2_bios_slot_installed's own comment
+    if os.path.isfile(ini_path):
+        cp.read(ini_path)
+    if not cp.has_section("Filenames"):
+        cp.add_section("Filenames")
+    cp.set("Filenames", "BIOS", os.path.basename(file_path))
+    with open(ini_path, "w") as f:
+        cp.write(f, space_around_delimiters=True)
+
+
 EMULATORS = {
     "Dolphin": {
         "install_type": "flathub",
@@ -647,6 +722,28 @@ EMULATORS = {
         "needs_keys": False,
         "needs_firmware": False,
         "args": _xemu_args,
+        # No grant_permissions needed -- confirmed via its own Flathub
+        # manifest, it already ships --filesystem=host:ro.
+    },
+    "PCSX2": {
+        "install_type": "flathub",
+        "app_id": "net.pcsx2.PCSX2",
+        "consoles": "PlayStation 2",
+        # PS2 emulation has no HLE fallback either -- confirmed via
+        # source (Pcsx2Config.cpp expects a real BIOS file matched
+        # against its own bios/ folder, no toggle to skip it). Single
+        # slot (unlike xemu's three), but still routed through
+        # bios_slots rather than the bare needs_bios flag so it
+        # actually gets installed -- see install_pcsx2_bios_slot's own
+        # docstring for why PCSX2 needs a real copy, not just a
+        # referenced path the way xemu's does.
+        "needs_bios": True,
+        "bios_slots": [("bios", "Select BIOS", "BIOS")],
+        "bios_slot_installed": pcsx2_bios_slot_installed,
+        "install_bios_slot": install_pcsx2_bios_slot,
+        "needs_keys": False,
+        "needs_firmware": False,
+        "args": _pcsx2_args,
         # No grant_permissions needed -- confirmed via its own Flathub
         # manifest, it already ships --filesystem=host:ro.
     },
