@@ -804,6 +804,27 @@ function selfsteamShowCreating(form) {
 // chase any <meta refresh> the same way a real browser would have".
 // Splitting this out is what let the upload path below drop its real
 // top-level navigation without duplicating the meta-refresh chase logic.
+// Sets each artwork tile's width as a real pixel value computed from
+// its row's own actual rendered height (data-artwork-ratio, set server-
+// side per category) instead of leaving that derivation to CSS
+// aspect-ratio -- see cell_style's own comment (selfsteam_server.py)
+// for why: a flex item stretched to a percentage/flex-derived height
+// with aspect-ratio deriving its width from that is a genuine cross-
+// engine interop gap (Firefox/Zen showed a real gap after the "none"
+// tile that Chromium-family browsers never did, on the exact same
+// markup -- matches Mozilla bug 1658441 and the wider flexbugs history
+// here). Once every cell has an explicit pixel width, aspect-ratio has
+// no missing dimension left to derive, so it can't disagree anymore.
+function selfsteamSizeArtworkCells() {
+  document.querySelectorAll(".artwork-row[data-artwork-ratio]").forEach(function (row) {
+    var ratio = parseFloat(row.getAttribute("data-artwork-ratio"));
+    var h = row.clientHeight;
+    if (!ratio || !h) return;
+    var w = Math.round(h * ratio) + "px";
+    row.querySelectorAll(".artwork-cell").forEach(function (cell) { cell.style.width = w; });
+  });
+}
+
 function selfsteamApplySwap(htmlText, url, swapIds) {
   history.replaceState(null, "", url);
   var doc = new DOMParser().parseFromString(htmlText, "text/html");
@@ -821,6 +842,7 @@ function selfsteamApplySwap(htmlText, url, swapIds) {
   var meta = doc.querySelector('meta[http-equiv="refresh"]');
   var match = meta && /url=(.*)$/.exec(meta.getAttribute("content") || "");
   if (match) selfsteamTabFetch(match[1], swapIds);
+  selfsteamSizeArtworkCells();
 }
 
 function selfsteamTabFetch(url, swapIds) {
@@ -918,6 +940,21 @@ function selfsteamEmEmulatorChanged(select) {
   });
   selfsteamEmFormNav(form);
 }
+
+// Initial pass on real page load (not just after an AJAX swap, which
+// selfsteamApplySwap's own call already covers), plus on resize since
+// the category rows' real heights are flex-grow-derived from the
+// viewport (see .artwork-category's own comment) and therefore change
+// whenever the window does. Debounced -- a resize fires continuously
+// while dragging, not once at the end.
+window.addEventListener("load", selfsteamSizeArtworkCells);
+(function () {
+  var resizeTimer;
+  window.addEventListener("resize", function () {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(selfsteamSizeArtworkCells, 150);
+  });
+})();
 </script>
 </body></html>"""
 
@@ -2389,7 +2426,22 @@ def _artwork_picker_html(candidates_by_category, prefix=""):
         # aspect-ratio still derives width from that, same as before.
         weight = base_h / _ARTWORK_HEIGHT_WEIGHT_SUM
         category_style = f' style="flex:{weight:.4f} 1 0; min-height:0;"'
-        row_style = ' style="flex:1; min-height:0; height:100%;"'
+        # aspect-ratio is only a first-paint fallback here (before
+        # selfsteamSizeArtworkCells below runs and sets a real pixel
+        # width) -- confirmed live, real cross-browser interop gap: a
+        # flex item stretched to a percentage/flex-derived height with
+        # aspect-ratio deriving its width is a genuinely different
+        # calculation between engines (Firefox/Gecko vs Chromium/Blink;
+        # matches Mozilla bug 1658441 and the wider "flexbugs" history
+        # around percentage heights + aspect-ratio in flex children),
+        # not something fixable by moving the style between the cell
+        # and its label -- Chromium rendered this fine, Firefox/Zen
+        # both showed a real, reproducible gap on the exact same markup.
+        # data-artwork-ratio on the row (read by that JS) is what
+        # actually settles this identically everywhere: once JS sets an
+        # explicit pixel width, aspect-ratio no longer has a missing
+        # dimension left to derive, so it can no longer disagree.
+        row_style = f' style="flex:1; min-height:0; height:100%;" data-artwork-ratio="{base_w / base_h:.6f}"'
         cell_style = f"height:100%; min-height:60px; aspect-ratio: {base_w} / {base_h};"
         # Always the first cell. value="" already flows through
         # do_POST's existing "falsy selection -> skip this category"
