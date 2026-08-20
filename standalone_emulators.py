@@ -1109,6 +1109,55 @@ EMULATORS = {
         # Ryubing, its other fork) per real user testing, not guessed.
         "rom_exclude_extensions": {".nsp"},
     },
+    "Eden (Legacy)": {
+        "install_type": "binary",
+        "release_api": "https://git.eden-emu.dev/api/v1/repos/eden-emu/eden/releases?limit=1",
+        # "legacy" target -- pre-Ryzen/pre-Haswell CPUs, per Eden's own
+        # release page ("Pre-Ryzen or Haswell CPUs (expect sadness)").
+        "binary_asset_re": re.compile(r"^Eden-Linux-v[\d.]+-legacy-clang-pgo\.AppImage$"),
+        "consoles": "Nintendo Switch",
+        "needs_bios": False,
+        "needs_keys": True,
+        "needs_firmware": False,
+        "args": _eden_args,
+        "keys_installed": _eden_keys_installed,
+        "install_keys": _eden_install_keys,
+        "keys_tooltip": "Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
+        "rom_exclude_extensions": {".nsp"},
+    },
+    "Eden (Steam Deck)": {
+        "install_type": "binary",
+        "release_api": "https://git.eden-emu.dev/api/v1/repos/eden-emu/eden/releases?limit=1",
+        # "steamdeck" target -- Zen 2, per Eden's own release page.
+        "binary_asset_re": re.compile(r"^Eden-Linux-v[\d.]+-steamdeck-clang-pgo\.AppImage$"),
+        "consoles": "Nintendo Switch",
+        "needs_bios": False,
+        "needs_keys": True,
+        "needs_firmware": False,
+        "args": _eden_args,
+        "keys_installed": _eden_keys_installed,
+        "install_keys": _eden_install_keys,
+        "keys_tooltip": "Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
+        "rom_exclude_extensions": {".nsp"},
+    },
+    "Eden (Steam Machine/Zen4)": {
+        "install_type": "binary",
+        "release_api": "https://git.eden-emu.dev/api/v1/repos/eden-emu/eden/releases?limit=1",
+        # "rog-ally" target in Eden's own release naming -- Zen 4, per
+        # its release page ("AMD Z1/Z2, ROG Ally X, Legion Go S").
+        # Renamed here from the upstream "rog-ally" label to
+        # "Steam Machine/Zen4" per the user's own hardware.
+        "binary_asset_re": re.compile(r"^Eden-Linux-v[\d.]+-rog-ally-clang-pgo\.AppImage$"),
+        "consoles": "Nintendo Switch",
+        "needs_bios": False,
+        "needs_keys": True,
+        "needs_firmware": False,
+        "args": _eden_args,
+        "keys_installed": _eden_keys_installed,
+        "install_keys": _eden_install_keys,
+        "keys_tooltip": "Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
+        "rom_exclude_extensions": {".nsp"},
+    },
     "openMSX": {
         "install_type": "flathub",
         "app_id": "org.openmsx.openMSX",
@@ -1136,17 +1185,23 @@ def by_install_type(install_type):
     return [name for name, entry in EMULATORS.items() if entry["install_type"] == install_type]
 
 
+def _binary_dir_name(name):
+    # Catalog names are free-form display text (e.g. "Eden (Steam
+    # Machine/Zen4)") -- "/" would otherwise be read as a real path
+    # separator, splitting one emulator's folder into two nested ones.
+    return name.replace("/", "-")
+
+
 def _binary_dir(name):
     # One folder per binary-installed emulator, kept entirely separate
     # from anything Flatpak-related -- an AppImage here is just a file
     # SelfSteam downloaded and chmod +x'd, not a sandboxed app with its
     # own ~/.var/app/<id> tree.
-    return os.path.join(_xdg_data_dir("selfsteam", "appimages"), name)
+    return os.path.join(_xdg_data_dir("selfsteam", "appimages"), _binary_dir_name(name))
 
 
 def _binary_path(name, entry):
-    ext = ".AppImage"
-    return os.path.join(_binary_dir(name), f"{name}{ext}")
+    return os.path.join(_binary_dir(name), f"{_binary_dir_name(name)}.AppImage")
 
 
 def installed(name):
