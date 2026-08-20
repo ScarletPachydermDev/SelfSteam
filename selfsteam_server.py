@@ -258,7 +258,7 @@ header.selfsteam-header {
    height instead of a sane share of the actual screen. Setting
    min-height:0 lets each level actually respect its bounded height
    and overflow internally (see .card's overflow-y:auto) instead. */
-main { width: 100%; padding: 2rem; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+main { width: 100%; padding: 1.25rem; flex: 1; min-height: 0; display: flex; flex-direction: column; }
 /* flex-wrap deliberately off here: with wrap enabled, a flex line's
    cross size gets computed from its items' content instead of the
    container's own (bounded) height, so align-items:stretch silently
@@ -266,7 +266,7 @@ main { width: 100%; padding: 2rem; flex: 1; min-height: 0; display: flex; flex-d
    (e.g. the artwork column's images) pushed the whole page taller.
    Wrapping only ever matters for the stacked mobile layout below,
    which sets its own rules including flex-wrap. */
-.selfsteam-columns { display: flex; gap: 1.5rem; align-items: stretch; flex-wrap: nowrap; flex: 1; min-height: 0; }
+.selfsteam-columns { display: flex; gap: 1rem; align-items: stretch; flex-wrap: nowrap; flex: 1; min-height: 0; }
 .selfsteam-left, .selfsteam-middle, .selfsteam-right { display: flex; flex-direction: column; min-height: 0; }
 .selfsteam-left, .selfsteam-middle { flex: 1 1 300px; min-width: 280px; }
 .selfsteam-right { flex: 1.4 1 400px; min-width: 320px; }
@@ -276,7 +276,7 @@ main { width: 100%; padding: 2rem; flex: 1; min-height: 0; display: flex; flex-d
 .selfsteam-spacer { flex: 1 1 auto; }
 .card {
   background: var(--card-bg); border: 1px solid var(--border);
-  border-radius: 12px; padding: 1.15rem; display: flex; flex-direction: column; gap: 0.9rem;
+  border-radius: 12px; padding: 0.85rem; display: flex; flex-direction: column; gap: 0.9rem;
   flex: 1; min-height: 0; overflow-y: auto;
 }
 .card h2 { font-size: 0.85rem; font-weight: 700; color: var(--text); margin: 0; }
@@ -633,6 +633,18 @@ input[type=file]::file-selector-button {
   color: var(--text-dim);
 }
 .add-poster-plus { font-size: 3.5rem; line-height: 1; font-weight: 300; }
+/* Steam Deck-class widths (~1280px) still fit 3 columns side by side
+   (the 960px breakpoint below is what actually stacks them), but
+   min-width:280px/320px per column plus the base padding/gaps above
+   left very little room for the cards' own content -- confirmed as
+   the real complaint ("looked bad" on Deck specifically, not on a
+   narrower phone-width screen where columns already stack). Tightens
+   the same three paddings further without changing the layout itself. */
+@media (max-width: 1400px) {
+  main { padding: 0.75rem; }
+  .selfsteam-columns { gap: 0.65rem; }
+  .card { padding: 0.65rem; }
+}
 @media (max-width: 960px) {
   /* Stacked columns don't work with the bounded-height/internal-scroll
      trick above -- three independently-scrolling panels stacked
