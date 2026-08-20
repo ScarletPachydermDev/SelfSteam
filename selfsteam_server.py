@@ -396,26 +396,26 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
    matches exactly rather than approximately. */
 .artwork-category { display: flex; flex-direction: column; gap: 0.35rem; }
 .artwork-category h3 { font-size: 0.85rem; font-weight: 700; margin: 0; color: var(--text); }
-/* overflow-y:visible explicit on both rules below, not left to the
-   default -- a real CSS Overflow spec quirk, confirmed live via actual
-   computed styles: setting overflow-x to anything but visible (hidden
-   here, auto for .has-artwork below) is not allowed to pair with a
-   default/visible overflow-y, so the engine silently coerces
-   overflow-y to auto too. That auto then genuinely clipped-and-
-   scrolled any row whose real content (a label's own min-height:60px
-   floor, see cell_style's own comment, exceeding a smaller category's
-   mobile height) was even slightly taller than the row's own computed
-   height -- confirmed live as exactly the "last 3 vertically
-   scrollable inside their own row" report on mobile. Declaring
-   overflow-y:visible explicitly opts back out of that coercion. */
-.artwork-row { display: flex; gap: 0.7rem; overflow-x: hidden; overflow-y: visible; padding-bottom: 0.05rem; }
+/* overflow-x set to anything but visible here (hidden normally, auto
+   for .has-artwork below) has a real CSS Overflow spec consequence:
+   the *computed* value of overflow-y gets silently forced to auto too
+   -- confirmed live via actual computed styles that this can't be
+   opted back out of by just also declaring overflow-y:visible (tried
+   first; had no effect at all, the spec overrides the authored value
+   at used-value computation time regardless). So overflow-y:auto here
+   is unavoidable given overflow-x isn't visible -- the actual fix for
+   "auto genuinely clipping/scrolling a row" is making sure no row's
+   real content is ever taller than its own box in the first place
+   (see the mobile @media block's own min-height:0 override, right
+   next to this same row's --mobile-cell-height). */
+.artwork-row { display: flex; gap: 0.7rem; overflow-x: hidden; padding-bottom: 0.05rem; }
 /* Scrollable only once there's real artwork to scroll through -- the
    blank/skeleton state (no search run yet, or nothing found) has
    nothing behind the extra filler tiles (see _SKELETON_TILE_COUNTS'
    own comment on why there are more of them than typically fit), so
    letting that scroll just invited dragging through empty placeholder
    tiles for no reason. */
-.artwork-row.has-artwork { overflow-x: auto; overflow-y: visible; }
+.artwork-row.has-artwork { overflow-x: auto; }
 .artwork-cell { flex: 0 0 auto; }
 .artwork-cell input[type=radio] { display: none; }
 .artwork-cell label {
@@ -758,7 +758,19 @@ input[type=file]::file-selector-button {
      label-wrapped, so none of them picked up --mobile-cell-height,
      all falling back to the old desktop height:100% of an ancestor
      that's no longer flex-grown, collapsing unpredictably). */
-  .artwork-cell, .artwork-cell label { height: var(--mobile-cell-height, 140px) !important; }
+  /* min-height:0 too, not just height -- confirmed live via actual
+     computed styles (getComputedStyle) that overflow-y:visible cannot
+     actually be declared back in once overflow-x is non-visible
+     (.artwork-row's own overflow-x:hidden/auto): per the CSS Overflow
+     spec, the *computed* value of overflow-y is forced to auto
+     whenever overflow-x isn't visible, regardless of what's explicitly
+     authored for overflow-y -- fighting that coercion is a dead end.
+     The actual fix is making sure content never overflows the row's
+     box in the first place: cell_style's own inline min-height:60px
+     (untouched by the height override above) was taller than the
+     smaller categories' real mobile height (Logo/Icon at 55-57px),
+     which is exactly what auto had real content to clip/scroll. */
+  .artwork-cell, .artwork-cell label { height: var(--mobile-cell-height, 140px) !important; min-height: 0 !important; }
 }
 </style></head><body>
 <header class="selfsteam-header">
