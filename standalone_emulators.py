@@ -1338,6 +1338,19 @@ def _binary_path(name, entry):
     return os.path.join(_binary_dir(name), f"{_binary_dir_name(name)}.AppImage")
 
 
+def binary_path(name):
+    """Public wrapper around _binary_path -- used by
+    create_webapp._extract_standalone_emulator_info to reverse-map a
+    binary-install shortcut's own LaunchOptions (which starts with the
+    AppImage's real path directly, not "flatpak run <app_id>" the way
+    every flathub-install entry's does) back to which catalog entry it
+    is. Returns None for a flathub-install (or unknown) name."""
+    entry = EMULATORS.get(name)
+    if not entry or entry["install_type"] != "binary":
+        return None
+    return _binary_path(name, entry)
+
+
 def installed(name):
     # Callers (see _add_standalone_emulator_shortcut) check this first
     # and only call install() when it's False -- a real Flatpak app,

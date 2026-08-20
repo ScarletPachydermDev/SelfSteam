@@ -840,6 +840,17 @@ function selfsteamRaFormNav(form) {
   selfsteamRaFetch(action + "?" + qs + "#tab-retroarch");
 }
 
+// Same reasoning as selfsteamEmEmulatorChanged's own comment -- a BIOS
+// picked for the previously-selected console/core is tied to that
+// core specifically, not the ROM, so it shouldn't show as "already
+// selected" once a different console/core is chosen.
+function selfsteamRaConsoleChanged(select) {
+  var form = select.form;
+  var el = form.elements["ra_biosfile"];
+  if (el) el.value = "";
+  selfsteamRaFormNav(form);
+}
+
 var SELFSTEAM_EM_SWAP_IDS = [
   "selfsteam-em-tab-panel", "selfsteam-em-middle", "selfsteam-em-right",
   "selfsteam-add-form-slot", "selfsteam-add-button",
@@ -856,6 +867,25 @@ function selfsteamEmFormNav(form) {
   var qs = new URLSearchParams(new FormData(form)).toString();
   var action = form.getAttribute("action").split("#")[0];
   selfsteamEmFetch(action + "?" + qs + "#tab-emulators");
+}
+
+// Switching the Emulator picker to a different emulator, not just
+// re-submitting the same one -- the bios/keys/firmware fields carried
+// forward as hidden inputs in this same form are real file picks made
+// for whichever emulator was previously selected (e.g. Ryubing's own
+// prod.keys), which would otherwise show up as "already selected" for
+// the new one too even when that's a completely different, wrong file
+// format for it. ROM selection itself is left alone -- switching
+// engines for the same already-picked game is the common case this is
+// for, unlike the BIOS/keys/firmware picks, which really are tied to
+// the specific emulator, not the game.
+function selfsteamEmEmulatorChanged(select) {
+  var form = select.form;
+  ["em_biosfile", "em_bios2file", "em_bios3file", "em_keysfile", "em_firmwarefile"].forEach(function (name) {
+    var el = form.elements[name];
+    if (el) el.value = "";
+  });
+  selfsteamEmFormNav(form);
 }
 </script>
 </body></html>"""
@@ -1110,6 +1140,14 @@ _RA_STATE_KEYS = [
     "ra_console", "ra_rompath", "ra_romfile", "ra_biospath", "ra_biosfile",
     "ra_resolved", "ra_sgdb_q", "ra_romsource", "ra_biossource", "ra_bios_skip",
     "ra_sgdb_cleared", "ra_name_cleared",
+    # Set only when this /new session started from the gallery's own
+    # Edit link (see its own comment on edit_href) -- their presence is
+    # what switches the Add button to "Save Shortcut" and, if the Name
+    # field also changes before submitting, is what lets the submit
+    # handler clean up the shortcut being replaced instead of leaving it
+    # behind as a duplicate (add_shortcut's own appname-based dedup only
+    # catches that automatically when the name stays the same).
+    "ra_edit_appid", "ra_edit_name",
 ]
 _HOME_DIR = os.path.expanduser("~")
 # The local file-picker's sandbox boundary is the real filesystem root,
@@ -1410,6 +1448,24 @@ def _ra_picker_section(prefix, label, state, already_installed=None):
   </div>"""
 
 
+def _queue_edit_rename_cleanup(params, prefix, new_name):
+    """If this /add submit started from the gallery's own Edit link (see
+    edit_href's own comment) AND the Name field was changed before
+    submitting, queues removal of the shortcut being replaced -- without
+    this, it would be left behind as an orphaned duplicate rather than
+    actually replaced, since add_shortcut's own dedup only matches by
+    appname, and a changed name means the old entry's appname no longer
+    matches the new one at all. Not needed (a no-op) when the name
+    stayed the same: add_shortcut's own dedup already removes the old
+    entry by appname match in that case, appid included, regardless of
+    whether the emulator/core (and therefore exe, and therefore appid)
+    also changed."""
+    edit_appid = (params.get(f"{prefix}_edit_appid") or [""])[0]
+    edit_name = (params.get(f"{prefix}_edit_name") or [""])[0]
+    if edit_appid and edit_name and edit_name != new_name:
+        pending_queue.add_removal(int(edit_appid), edit_name)
+
+
 _RA_LEADING_CATALOG_NUM_RE = re.compile(r"^\d+\s*[-.]\s*")
 _RA_PAREN_BRACKET_RE = re.compile(r"\(.*?\)|\[.*?\]")
 _RA_WHITESPACE_RE = re.compile(r"\s+")
@@ -1537,7 +1593,7 @@ def _retroarch_tab_panel_html(state, chosen=None):
            an in-place swap instead of a real navigation costs nothing
            extra -- a JS-off browser was never going to auto-submit this
            either way. -->
-      <select name="ra_console" onchange="selfsteamRaFormNav(this.form)">
+      <select name="ra_console" onchange="selfsteamRaConsoleChanged(this)">
         {console_options}
       </select>
     </form>
@@ -1571,6 +1627,8 @@ _EM_STATE_KEYS = [
     "em_keyspath", "em_keysfile", "em_keyssource", "em_keys_skip",
     "em_firmwarepath", "em_firmwarefile", "em_firmwaresource", "em_firmware_skip",
     "em_resolved", "em_sgdb_q", "em_sgdb_cleared", "em_name_cleared",
+    # Same reasoning as _RA_STATE_KEYS' own ra_edit_appid/ra_edit_name.
+    "em_edit_appid", "em_edit_name",
 ]
 
 
@@ -1910,7 +1968,7 @@ def _emulators_tab_panel_html(state, chosen=None):
     {source_toggle}
     <form method="get" action="/new#tab-emulators" style="margin:0">
       {hidden_fields}
-      <select name="em_emulator" onchange="selfsteamEmFormNav(this.form)">
+      <select name="em_emulator" onchange="selfsteamEmEmulatorChanged(this)">
         {emulator_options}
       </select>
     </form>
@@ -2442,14 +2500,18 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
     # one -- confirmed live, this made clicking "Search" submit /add
     # (with stale data) instead of actually searching.
     if ra_ready:
+        ra_edit_appid = ra_state.get("ra_edit_appid", "")
         add_form = f"""
 <form id="{_ADD_FORM_ID}" action="/add" method="post" onsubmit="selfsteamShowCreating(this)">
   <input type="hidden" name="ra_console" value="{html.escape(ra_console)}">
   <input type="hidden" name="ra_romfile" value="{html.escape(ra_state.get('ra_romfile', ''))}">
   <input type="hidden" name="ra_biosfile" value="{html.escape(ra_state.get('ra_biosfile', ''))}">
+  <input type="hidden" name="ra_edit_appid" value="{html.escape(ra_edit_appid)}">
+  <input type="hidden" name="ra_edit_name" value="{html.escape(ra_state.get('ra_edit_name', ''))}">
 </form>
 """
-        add_button = f'<button type="submit" id="selfsteam-add-button" form="{_ADD_FORM_ID}">Create Steam Shortcut</button>'
+        add_button_text = "Save Shortcut" if ra_edit_appid else "Create Steam Shortcut"
+        add_button = f'<button type="submit" id="selfsteam-add-button" form="{_ADD_FORM_ID}">{add_button_text}</button>'
     elif em_ready:
         # onsubmit here, not onclick on the button: disabling a submit
         # button synchronously inside its own onclick can stop that same
@@ -2469,6 +2531,7 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
         # time; /add re-checks it again for real regardless of what
         # this says.
         em_already_installed = standalone_emulators.installed(em_emulator)
+        em_edit_appid = em_state.get("em_edit_appid", "")
         add_form = f"""
 <form id="{_ADD_FORM_ID}" action="/add" method="post" onsubmit="selfsteamShowCreating(this)"
       data-emulator="{html.escape(em_emulator)}" data-installed="{"1" if em_already_installed else ""}">
@@ -2479,9 +2542,12 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
   <input type="hidden" name="em_bios3file" value="{html.escape(em_state.get('em_bios3file', ''))}">
   <input type="hidden" name="em_keysfile" value="{html.escape(em_state.get('em_keysfile', ''))}">
   <input type="hidden" name="em_firmwarefile" value="{html.escape(em_state.get('em_firmwarefile', ''))}">
+  <input type="hidden" name="em_edit_appid" value="{html.escape(em_edit_appid)}">
+  <input type="hidden" name="em_edit_name" value="{html.escape(em_state.get('em_edit_name', ''))}">
 </form>
 """
-        add_button = f'<button type="submit" id="selfsteam-add-button" form="{_ADD_FORM_ID}">Create Steam Shortcut</button>'
+        add_button_text = "Save Shortcut" if em_edit_appid else "Create Steam Shortcut"
+        add_button = f'<button type="submit" id="selfsteam-add-button" form="{_ADD_FORM_ID}">{add_button_text}</button>'
     elif chosen is not None:
         couch_field = '<input type="hidden" name="couch_mode" value="1">' if couch_mode else ""
         # The Name field itself (see _url_tab_panel_html) is what
@@ -2804,6 +2870,12 @@ def _poster_card_html(shortcut, pending_removal_appids):
         edit_href = _ra_url("/new", {
             "ra_console": shortcut["ra_console"],
             "ra_romfile": romfile_rel,
+            # See _RA_STATE_KEYS' own comment on ra_edit_appid/
+            # ra_edit_name -- carries this shortcut's current identity
+            # forward so the Add form knows it's editing (swap the
+            # button to "Save Shortcut") and can clean up the old entry
+            # itself if the Name field changes before submitting.
+            "ra_edit_appid": str(appid), "ra_edit_name": name,
         })
     elif shortcut.get("em_emulator"):
         # Same relative-vs-absolute reasoning as ra_romfile above.
@@ -2811,6 +2883,7 @@ def _poster_card_html(shortcut, pending_removal_appids):
         edit_href = _em_url("/new", {
             "em_emulator": shortcut["em_emulator"],
             "em_romfile": romfile_rel,
+            "em_edit_appid": str(appid), "em_edit_name": name,
         })
     else:
         edit_href = f"/search?q={urllib.parse.quote(shortcut['url'] or name)}"
@@ -3428,6 +3501,7 @@ class Handler(BaseHTTPRequestHandler):
                 selection_url = (params.get(f"artwork_ra_{basename}") or [None])[0]
                 selections[basename] = {"url": selection_url} if selection_url else None
             asset_paths = create_webapp.download_selected_assets(slug, selections)
+            _queue_edit_rename_cleanup(params, "ra", match_name)
             pending_queue.add(match_name, None, False, asset_paths, launch_args=args)
             # Same "stay on this tab, cleaned" redirect as the URL tab's
             # own /add -- see its comment above. Console and the ROM
@@ -3540,6 +3614,7 @@ class Handler(BaseHTTPRequestHandler):
                 selection_url = (params.get(f"artwork_em_{basename}") or [None])[0]
                 selections[basename] = {"url": selection_url} if selection_url else None
             asset_paths = create_webapp.download_selected_assets(slug, selections)
+            _queue_edit_rename_cleanup(params, "em", match_name)
             pending_queue.add(match_name, None, False, asset_paths, launch_args=args)
             # Emulator (and its Flathub/AppImage source), plus the ROM
             # picker's own folder/source, carried forward -- same
