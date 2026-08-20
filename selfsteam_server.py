@@ -190,6 +190,11 @@ PAGE_HEAD = """<!doctype html>
   --text: #1a1a1a;
   --text-dim: #8a8a8a;
   --skeleton: #e4e4e4;
+  /* See _ARTWORK_VH_OVERHEAD_PX's own comment (selfsteam_server.py) --
+     tracks main's own vertical padding (top+bottom), which shrinks
+     further under the @media (max-width: 1400px) breakpoint below, so
+     this gets redeclared there too rather than staying fixed. */
+  --artwork-vh-overhead: 369px;
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; }
@@ -383,7 +388,7 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
 .placeholder-row:nth-child(even) { background: #f3f3f3; }
 /* Tightened chrome (padding/gaps/label size) vs the default .card,
    specifically to reclaim vertical space for the actual artwork --
-   every pixel trimmed here is a pixel _ARTWORK_VH_OVERHEAD_PX doesn't
+   every pixel trimmed here is a pixel --artwork-vh-overhead doesn't
    have to reserve, i.e. directly bigger tiles. */
 /* Extra space here (between category blocks) only ever shows above
    the 2nd-5th categories -- flex gap doesn't add anything before the
@@ -644,6 +649,11 @@ input[type=file]::file-selector-button {
   main { padding: 0.75rem; }
   .selfsteam-columns { gap: 0.65rem; }
   .card { padding: 0.65rem; }
+  /* main's own padding shrank further here than at the base :root
+     value above -- redeclared to match, or the artwork column would
+     under-fill itself by the difference (see _ARTWORK_VH_OVERHEAD_PX's
+     own comment). */
+  :root { --artwork-vh-overhead: 353px; }
 }
 @media (max-width: 960px) {
   /* Stacked columns don't work with the bounded-height/internal-scroll
@@ -2305,7 +2315,14 @@ _ARTWORK_HEIGHT_WEIGHT_SUM = sum(base_h for _b, _t, _f, _w, base_h in ARTWORK_CA
 # remainder by weight -- not exact (header height/main padding vary a
 # little), just close enough that all 5 categories land within the
 # column's real height rather than needing to scroll for one of them.
-_ARTWORK_VH_OVERHEAD_PX = 393
+# Lives as the --artwork-vh-overhead CSS custom property (:root, and
+# redeclared under @media (max-width: 1400px)), not a bare number baked
+# into the calc() below -- it has to track main's own vertical padding,
+# which differs across that same breakpoint; a fixed number here went
+# stale the moment that breakpoint's padding was tightened, reserving
+# more space than actually existed and leaving a visible empty gap
+# under the last category instead of actually filling the column
+# (confirmed live as exactly this after that padding change).
 
 
 # Skeleton tile counts per category before any search -- matches the
@@ -2374,7 +2391,7 @@ def _artwork_picker_html(candidates_by_category, prefix=""):
         # jump once a search actually returns candidates.
         weight = base_h / _ARTWORK_HEIGHT_WEIGHT_SUM
         cell_style = (
-            f"height:calc((100vh - {_ARTWORK_VH_OVERHEAD_PX}px) * {weight:.4f}); "
+            f"height:calc((100vh - var(--artwork-vh-overhead)) * {weight:.4f}); "
             f"min-height:60px; aspect-ratio: {base_w} / {base_h};"
         )
         # Always the first cell. value="" already flows through
