@@ -761,6 +761,48 @@ def install_rpcs3_firmware(entry, slot_prefix, file_path):
     )
 
 
+def _vita3k_args(romfile):
+    # --fullscreen,-F plus a positional content-path, both confirmed
+    # real via Vita3K's own source (vita3k/config/src/config.cpp's
+    # CLI11 setup: "content-path" is a positional option taking ".vpk/
+    # .zip extension or folder of content to install & run",
+    # "--fullscreen,-F" is a flag).
+    return ["--fullscreen", shlex.quote(romfile)]
+
+
+def _vita3k_fs_dir():
+    # $XDG_DATA_HOME/Vita3K/Vita3K -- confirmed via Vita3K's own docs
+    # (follows the XDG Base Directory spec; vita_fs defaults to
+    # ~/.local/share/Vita3K/Vita3K on Linux).
+    return _xdg_data_dir("Vita3K", "Vita3K")
+
+
+def vita3k_firmware_installed(entry, slot_prefix):
+    # vs0/ is the Vita OS system partition -- only populated once a real
+    # firmware .pup has actually been installed, same "real content
+    # exists" check RPCS3's own firmware-installed check uses (though
+    # unlike RPCS3, no single sentinel file with a version string inside
+    # it is confirmed here, so this only reports a count, not a real
+    # version number).
+    vs0_dir = os.path.join(_vita3k_fs_dir(), "vs0")
+    if not os.path.isdir(vs0_dir):
+        return None
+    count = len(os.listdir(vs0_dir))
+    return f"firmware ({count} items)" if count else None
+
+
+def install_vita3k_firmware(entry, slot_prefix, file_path):
+    """Unlike RPCS3, Vita3K has a real CLI flag for this --
+    "--firmware <path>" (confirmed via source: config.cpp's own
+    --firmware option feeds command_line.pup_path, which main.cpp
+    checks for and calls install_pup() with, logging progress via a
+    callback -- not gated behind opening a GUI dialog first the way
+    RPCS3's --installfw is). Still a real, separate binary launch that
+    blocks until it's done, same shape as RPCS3's own install call."""
+    path = _binary_path("Vita3K", EMULATORS["Vita3K"])
+    subprocess.run(host_exec.wrap([path, "--firmware", file_path]))
+
+
 def _xdg_data_dir(*parts):
     # Eden runs as a plain AppImage on the host, not inside a Flatpak
     # sandbox -- no ~/.var/app/<id> redirect the way _flatpak_data_dir
@@ -1224,6 +1266,28 @@ EMULATORS = {
         "install_keys": _switch_install_keys,
         "keys_tooltip": "Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
         "rom_exclude_extensions": {".nsz"},
+    },
+    "Vita3K": {
+        "install_type": "binary",
+        # Real GitHub, not DMCA-blocked -- confirmed live (unlike Eden's
+        # own GitHub mirror). Ships continuous CI builds under a fixed
+        # "continuous" tag rather than numbered releases, but the same
+        # /releases list (newest first) still works the same way.
+        "release_api": "https://api.github.com/repos/Vita3K/Vita3K/releases?per_page=1",
+        "binary_asset_re": re.compile(r"^Vita3K-x86_64\.AppImage$"),
+        "consoles": "PlayStation Vita",
+        # No HLE -- a real PS Vita firmware (.pup) is mandatory, same as
+        # RPCS3's PS3 firmware. Routed through bios_slots (a single
+        # slot) for the same reason RPCS3's own entry is: the label
+        # reads "Select PS Vita Firmware" instead of the generic
+        # "Select BIOS" every needs_bios-only emulator shows.
+        "needs_bios": True,
+        "bios_slots": [("bios", "Select PS Vita Firmware (PUP)", "firmware")],
+        "needs_keys": False,
+        "needs_firmware": False,
+        "bios_slot_installed": vita3k_firmware_installed,
+        "install_bios_slot": install_vita3k_firmware,
+        "args": _vita3k_args,
     },
     "openMSX": {
         "install_type": "flathub",
