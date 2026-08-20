@@ -734,7 +734,19 @@ input[type=file]::file-selector-button {
   .artwork-card { height: auto; flex: none; overflow-y: visible; }
   .artwork-category { flex: none !important; min-height: auto !important; }
   .artwork-row { flex: none !important; height: auto !important; }
-  .artwork-cell { height: var(--mobile-cell-height, 140px) !important; }
+  /* .artwork-cell label too, not just .artwork-cell itself -- confirmed
+     live via screenshot with real search results: only skeleton tiles
+     (.artwork-skeleton) apply cell_style directly to .artwork-cell, so
+     only those actually picked up the override above. The "none" cell
+     and every real-candidate cell instead wrap their sizing in a child
+     <label> (cell_style lives on the label, see none_cell/the real-
+     candidates loop in _artwork_picker_html) -- invisible with an
+     all-skeleton blank state (one mis-sized "none" cell blended in),
+     but broke completely once real results loaded (every cell is
+     label-wrapped, so none of them picked up --mobile-cell-height,
+     all falling back to the old desktop height:100% of an ancestor
+     that's no longer flex-grown, collapsing unpredictably). */
+  .artwork-cell, .artwork-cell label { height: var(--mobile-cell-height, 140px) !important; }
 }
 </style></head><body>
 <header class="selfsteam-header">
