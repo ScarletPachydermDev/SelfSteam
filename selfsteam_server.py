@@ -396,7 +396,14 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
    matches exactly rather than approximately. */
 .artwork-category { display: flex; flex-direction: column; gap: 0.35rem; }
 .artwork-category h3 { font-size: 0.85rem; font-weight: 700; margin: 0; color: var(--text); }
-.artwork-row { display: flex; gap: 0.7rem; overflow-x: auto; padding-bottom: 0.05rem; }
+.artwork-row { display: flex; gap: 0.7rem; overflow-x: hidden; padding-bottom: 0.05rem; }
+/* Scrollable only once there's real artwork to scroll through -- the
+   blank/skeleton state (no search run yet, or nothing found) has
+   nothing behind the extra filler tiles (see _SKELETON_TILE_COUNTS'
+   own comment on why there are more of them than typically fit), so
+   letting that scroll just invited dragging through empty placeholder
+   tiles for no reason. */
+.artwork-row.has-artwork { overflow-x: auto; }
 .artwork-cell { flex: 0 0 auto; }
 .artwork-cell input[type=radio] { display: none; }
 .artwork-cell label {
@@ -2493,7 +2500,7 @@ def _artwork_picker_html(candidates_by_category, prefix=""):
         sections.append(f"""
 <div class="artwork-category"{category_style}>
   <h3>{html.escape(title)}</h3>
-  <div class="artwork-row"{row_style}>{''.join(cells)}</div>
+  <div class="artwork-row has-artwork"{row_style}>{''.join(cells)}</div>
 </div>""")
     return "".join(sections)
 
