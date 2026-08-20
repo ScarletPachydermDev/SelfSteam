@@ -955,6 +955,20 @@ function selfsteamEmEmulatorChanged(select) {
 // whenever the window does. Debounced -- a resize fires continuously
 // while dragging, not once at the end.
 window.addEventListener("load", selfsteamSizeArtworkCells);
+// The RA/Emulators tabs' own artwork columns were sized once at page
+// load while display:none (0 height, since the URL tab is the default
+// :target) and never recalculated after that -- switching to either
+// tab is a plain #fragment change (see _tab_bar_targets_html's own
+// comment on why that's deliberately not a JS click handler), which
+// doesn't run any JS on its own, so nothing ever re-measured them once
+// they actually became visible. hashchange covers every way the
+// fragment can change (a tab click, back/forward, a pasted link) in
+// one place without touching that link markup at all. setTimeout(…, 0)
+// defers past the current tick so the browser has actually applied the
+// :target-driven display change before clientHeight is read -- reading
+// it synchronously inside the same handler that changed the fragment
+// isn't guaranteed to see the new layout yet.
+window.addEventListener("hashchange", function () { setTimeout(selfsteamSizeArtworkCells, 0); });
 (function () {
   var resizeTimer;
   window.addEventListener("resize", function () {
@@ -2379,17 +2393,29 @@ def _ra_loading_artwork_html():
     # read as "did my click even register?". Same skeleton grid as the
     # real empty state, just with a spinner next to each category
     # title instead of nothing.
+    #
+    # Uses the exact same weighted flex-grow sizing (category_style/
+    # row_style/cell_style) as _artwork_picker_html's own blank and
+    # real-results states, not the old fixed design-handoff pixel sizes
+    # (width:{w}px;height:{h}px) this used to have -- confirmed live as
+    # a real bug: the column's own proportions visibly jumped between
+    # blank -> searching -> results instead of staying put, since this
+    # was the one state still sized completely differently from the
+    # other two.
     sections = []
-    for basename, title, _fetch, w, h in ARTWORK_CATEGORIES:
-        cell_style = f"width:{w}px;height:{h}px"
+    for basename, title, _fetch, base_w, base_h in ARTWORK_CATEGORIES:
+        weight = base_h / _ARTWORK_HEIGHT_WEIGHT_SUM
+        category_style = f' style="flex:{weight:.4f} 1 0; min-height:0;"'
+        row_style = f' style="flex:1; min-height:0; height:100%;" data-artwork-ratio="{base_w / base_h:.6f}"'
+        cell_style = f"height:100%; min-height:60px; aspect-ratio: {base_w} / {base_h};"
         skeletons = "".join(
             f'<div class="artwork-cell artwork-skeleton" style="{cell_style}"></div>'
             for _ in range(_SKELETON_TILE_COUNTS[basename])
         )
         sections.append(f"""
-<div class="artwork-category">
+<div class="artwork-category"{category_style}>
   <h3>{html.escape(title)}<span class="spinner"></span></h3>
-  <div class="artwork-row">{skeletons}</div>
+  <div class="artwork-row"{row_style}>{skeletons}</div>
 </div>""")
     return "".join(sections)
 
