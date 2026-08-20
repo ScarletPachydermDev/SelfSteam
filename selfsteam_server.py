@@ -2380,20 +2380,41 @@ def _artwork_picker_html(candidates_by_category, prefix=""):
     # first result never looked selected (the Emulators tab's own
     # always-"no artwork" default, rendered after it, was overriding it).
     sections = []
-    for basename, title, _fetch, base_w, base_h in ARTWORK_CATEGORIES:
+    for idx, (basename, title, _fetch, base_w, base_h) in enumerate(ARTWORK_CATEGORIES):
         candidates = candidates_by_category.get(basename) or []
-        # Height-driven sizing (not width): each category's row height is
-        # a share of the viewport proportional to its own natural size,
-        # and aspect-ratio derives the width from that -- so the artwork
-        # column actually fills the screen instead of sitting at a fixed
-        # size tuned for one particular window height. Shared between
-        # real cells and empty-state skeleton tiles so the layout doesn't
-        # jump once a search actually returns candidates.
-        weight = base_h / _ARTWORK_HEIGHT_WEIGHT_SUM
-        cell_style = (
-            f"height:calc((100vh - var(--artwork-vh-overhead)) * {weight:.4f}); "
-            f"min-height:60px; aspect-ratio: {base_w} / {base_h};"
-        )
+        is_last = idx == len(ARTWORK_CATEGORIES) - 1
+        if is_last:
+            # The vh-based estimate below is inherently approximate
+            # (see --artwork-vh-overhead's own comment) -- close enough
+            # for the categories above it, but any leftover slack from
+            # that estimate being slightly off previously showed up as
+            # visible empty space under this last one specifically,
+            # since nothing after it could absorb the difference. Real
+            # flex-grow instead: .artwork-category/.artwork-row both
+            # stretch to consume whatever space is actually left in
+            # .artwork-card (min-height:0 so they can shrink below
+            # their own content size, standard flex-child requirement),
+            # and its cells are 100% of that real, exact height rather
+            # than another vh guess -- reaches the card's real bottom
+            # edge regardless of estimation error anywhere else.
+            category_style = ' style="flex:1 1 0; min-height:0;"'
+            row_style = ' style="flex:1; min-height:0; height:100%;"'
+            cell_style = f"height:100%; min-height:60px; aspect-ratio: {base_w} / {base_h};"
+        else:
+            category_style = ""
+            row_style = ""
+            # Height-driven sizing (not width): each category's row height is
+            # a share of the viewport proportional to its own natural size,
+            # and aspect-ratio derives the width from that -- so the artwork
+            # column actually fills the screen instead of sitting at a fixed
+            # size tuned for one particular window height. Shared between
+            # real cells and empty-state skeleton tiles so the layout doesn't
+            # jump once a search actually returns candidates.
+            weight = base_h / _ARTWORK_HEIGHT_WEIGHT_SUM
+            cell_style = (
+                f"height:calc((100vh - var(--artwork-vh-overhead)) * {weight:.4f}); "
+                f"min-height:60px; aspect-ratio: {base_w} / {base_h};"
+            )
         # Always the first cell. value="" already flows through
         # do_POST's existing "falsy selection -> skip this category"
         # logic untouched, so a shortcut can always be created with no
@@ -2423,9 +2444,9 @@ def _artwork_picker_html(candidates_by_category, prefix=""):
                 for _ in range(filler_count)
             )
             sections.append(f"""
-<div class="artwork-category">
+<div class="artwork-category"{category_style}>
   <h3>{html.escape(title)}</h3>
-  <div class="artwork-row">{none_cell}{skeletons}</div>
+  <div class="artwork-row"{row_style}>{none_cell}{skeletons}</div>
 </div>""")
             continue
         cells = [none_cell]
@@ -2442,9 +2463,9 @@ def _artwork_picker_html(candidates_by_category, prefix=""):
   </label>
 </div>""")
         sections.append(f"""
-<div class="artwork-category">
+<div class="artwork-category"{category_style}>
   <h3>{html.escape(title)}</h3>
-  <div class="artwork-row">{''.join(cells)}</div>
+  <div class="artwork-row"{row_style}>{''.join(cells)}</div>
 </div>""")
     return "".join(sections)
 
