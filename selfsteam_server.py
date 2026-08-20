@@ -567,7 +567,18 @@ input[type=file]::file-selector-button {
    library of hundreds of shortcuts is expected to need real scrolling. */
 .gallery-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; }
 .gallery-header h2 { font-size: 1.3rem; margin: 0; }
-.gallery-grid { display: flex; flex-wrap: wrap; gap: 24px; }
+/* Real grid, not flex-wrap -- auto-fill computes however many fixed-
+   230px columns actually fit the viewport and reflows on resize, same
+   behavior flex-wrap already gave for a normal left-to-right fill, but
+   without flex-wrap's own quirk of leaving a short last row's items
+   stretched/misaligned against the column grid the earlier rows
+   established. minmax(230px, 230px), not (230px, 1fr) -- these cards
+   are fixed-pixel-positioned inside (.poster-frame/.poster-art/
+   .add-poster are all absolute-positioned to exact 230x270 coordinates,
+   see .shortcut-poster's own comment), so letting the grid track
+   stretch wider than 230px would leave the art not covering its own
+   cell. */
+.gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 230px)); gap: 24px; }
 /* Fixed pixel sizes throughout this poster, not responsive/aspect-ratio
    based -- scaled up (195x229 -> 230x270, same ~0.852 aspect ratio) from
    the design handoff's own exact coordinates (steam-webapp-creator/
