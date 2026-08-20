@@ -789,9 +789,9 @@ EMULATORS = {
         "keys_installed": _ryubing_keys_installed,
         "install_keys": _ryubing_install_keys,
         "keys_tooltip": "Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
-        # .nsp omitted from the ROM picker -- not supported by Ryubing
+        # .nsz omitted from the ROM picker -- not supported by Ryubing
         # (or Eden, its other fork) per real user testing, not guessed.
-        "rom_exclude_extensions": {".nsp"},
+        "rom_exclude_extensions": {".nsz"},
     },
     "Cemu": {
         "install_type": "flathub",
@@ -1105,9 +1105,9 @@ EMULATORS = {
         "keys_installed": _eden_keys_installed,
         "install_keys": _eden_install_keys,
         "keys_tooltip": "Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
-        # .nsp omitted from the ROM picker -- not supported by Eden (or
+        # .nsz omitted from the ROM picker -- not supported by Eden (or
         # Ryubing, its other fork) per real user testing, not guessed.
-        "rom_exclude_extensions": {".nsp"},
+        "rom_exclude_extensions": {".nsz"},
     },
     "Eden (Legacy amd64 — pre-Ryzen/pre-Haswell CPUs)": {
         "install_type": "binary",
@@ -1123,7 +1123,7 @@ EMULATORS = {
         "keys_installed": _eden_keys_installed,
         "install_keys": _eden_install_keys,
         "keys_tooltip": "Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
-        "rom_exclude_extensions": {".nsp"},
+        "rom_exclude_extensions": {".nsz"},
     },
     "Eden (Zen 2 — Steam Deck)": {
         "install_type": "binary",
@@ -1138,7 +1138,7 @@ EMULATORS = {
         "keys_installed": _eden_keys_installed,
         "install_keys": _eden_install_keys,
         "keys_tooltip": "Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
-        "rom_exclude_extensions": {".nsp"},
+        "rom_exclude_extensions": {".nsz"},
     },
     "Eden (Zen 4 — AMD Z1/Z2, ROG Ally X, Legion Go S, Steam Machine)": {
         "install_type": "binary",
@@ -1154,7 +1154,7 @@ EMULATORS = {
         "keys_installed": _eden_keys_installed,
         "install_keys": _eden_install_keys,
         "keys_tooltip": "Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
-        "rom_exclude_extensions": {".nsp"},
+        "rom_exclude_extensions": {".nsz"},
     },
     "openMSX": {
         "install_type": "flathub",
