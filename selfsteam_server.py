@@ -1965,7 +1965,7 @@ def _emulators_tab_panel_html(state, chosen=None):
     # not a status message about what's about to happen this time.
     emulator_info_tooltip = (
         "Flatpaks will be downloaded from Flathub if not installed.\n\n"
-        "AppImage emulators will be downloaded from the developer's own source."
+        "AppImage emulators will be downloaded from developer's own source."
     )
 
     return f"""

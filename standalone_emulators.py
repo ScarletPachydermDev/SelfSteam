@@ -761,6 +761,18 @@ def install_rpcs3_firmware(entry, slot_prefix, file_path):
     )
 
 
+def _xenia_canary_args(romfile):
+    # --fullscreen=true plus a bare positional romfile -- confirmed real
+    # via xenia-canary's own source (src/xenia/app/emulator_window.cc:
+    # DEFINE_bool(fullscreen, false, "Whether to launch the emulator in
+    # fullscreen.", "Display") is a real cvar, overridable on the
+    # command line the same way its own wiki documents
+    # "xenia.exe path/to/game/default.xex --vsync=false" -- and that
+    # same wiki page confirms the game path itself comes before any
+    # flags as a bare positional argument).
+    return [shlex.quote(romfile), "--fullscreen=true"]
+
+
 def _vita3k_args(romfile):
     # --fullscreen,-F plus a positional content-path, both confirmed
     # real via Vita3K's own source (vita3k/config/src/config.cpp's
@@ -1291,6 +1303,27 @@ EMULATORS = {
         "bios_slot_installed": vita3k_firmware_installed,
         "install_bios_slot": install_vita3k_firmware,
         "args": _vita3k_args,
+    },
+    "Xenia Canary (AppImage)": {
+        "install_type": "binary",
+        # Official xenia-canary-releases only ships Linux as a
+        # .tar.xz/.tar.gz archive, NOT an AppImage -- confirmed live via
+        # its own releases API. This is the unofficial, actively-updated
+        # (weekly, tracking upstream canary commits) AppImage repackaging
+        # by pkgforge-dev/Samueru-sama instead, per explicit user choice
+        # over building new tarball-extraction handling for the official
+        # one. "(AppImage)" kept in the display name specifically to
+        # keep that distinction visible, not just buried in a comment.
+        "release_api": "https://api.github.com/repos/pkgforge-dev/xenia-canary-AppImage/releases?per_page=1",
+        "binary_asset_re": re.compile(r"^Xenia_Canary-.+-anylinux-x86_64\.AppImage$"),
+        "consoles": "Xbox 360",
+        # No HLE gap to fill with a BIOS -- Xenia reimplements the Xbox
+        # 360 kernel (Xboxkrnl/XAM) itself rather than requiring a real
+        # firmware dump, confirmed via its own project site.
+        "needs_bios": False,
+        "needs_keys": False,
+        "needs_firmware": False,
+        "args": _xenia_canary_args,
     },
     "openMSX": {
         "install_type": "flathub",
