@@ -3060,10 +3060,10 @@ def render_gallery():
   <h2>Non Steam shortcuts</h2>
 </div>
 <div class="gallery-grid">
-  {cards_html}
   <a class="add-poster" href="/new" title="Add a shortcut">
     <span class="add-poster-plus">+</span>
   </a>
+  {cards_html}
 </div>
 """, page_title=_hostname(), show_back=False)
 
