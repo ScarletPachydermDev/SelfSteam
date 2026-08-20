@@ -2776,7 +2776,6 @@ def render_restarting():
     body = """
 <div id="selfsteam-restarting-view" style="width:100%;height:70vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:1rem">
   <div style="font-size:3rem;font-weight:700">Restarting Steam&hellip;</div>
-  <div style="color:var(--text-dim);font-size:1.1rem">This can take a little while the first time -- hang tight.</div>
 </div>
 <script>
 (function poll() {
