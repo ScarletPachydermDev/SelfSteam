@@ -63,6 +63,7 @@ REMEMBER_COOKIE = "selfsteam_remember"
 _DARKREADER_PATH = os.path.join(os.path.dirname(__file__), "vendor", "darkreader.js")
 _POSTER_FRAME_PATH = os.path.join(os.path.dirname(__file__), "vendor", "poster-frame.webp")
 _NAME_FIELD_WAND_PATH = os.path.join(os.path.dirname(__file__), "vendor", "name-field-wand.webp")
+_SGDB_KEY_ICON_PATH = os.path.join(os.path.dirname(__file__), "vendor", "sgdb-key-icon.webp")
 _ADD_FORM_ID = "selfsteam-add-form"
 _SEARCH_ICON_SVG = (
     '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="white" '
@@ -237,13 +238,12 @@ header.selfsteam-header {
 }
 .queue-counter.empty { background: #d8d8d8; color: #9a9a9a; }
 .sgdb-key-badge {
-  width: auto; margin: 0; padding: 0.5rem 1rem; border-radius: 20px; font-size: 0.8rem; font-weight: 700;
-  display: inline-flex; align-items: center; gap: 0.4rem; cursor: pointer; text-decoration: none;
-  background: var(--success-bg); border: 1px solid var(--success-border); color: var(--success-text);
+  width: 3rem; height: 3rem; margin: 0; padding: 0; border-radius: 50%; flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: center; cursor: pointer; text-decoration: none;
+  background: #3bb54a; color: #fff;
 }
-.sgdb-key-badge.unverified {
-  background: #fdf3d9; border-color: #f0d68a; color: #8a6d1a;
-}
+.sgdb-key-badge.unverified { background: #e8b93a; color: #4a3b08; }
+.sgdb-key-badge-icon { width: 60%; height: 60%; object-fit: contain; display: block; }
 .steam-warning-banner {
   background: #fdf3d9; border-bottom: 1px solid #f0d68a; color: #8a6d1a;
   padding: 0.7rem 2rem; font-size: 0.9rem; text-align: center; flex: 0 0 auto;
@@ -664,6 +664,48 @@ input[type=file]::file-selector-button {
   .selfsteam-left, .selfsteam-middle, .selfsteam-right { flex-basis: 100%; min-height: auto; }
   .card { overflow-y: visible; }
   .selfsteam-spacer { flex: 0 0 0; }
+  /* The header itself was never given a narrow-screen pass -- its own
+     flex-wrap (needed on desktop for a very long hostname/page title)
+     let .selfsteam-header-actions wrap onto its own line below
+     .selfsteam-header-left on a real phone width, and the icons within
+     each half didn't shrink together, so the wrapped row's icons ended
+     up misaligned against each other and against the row above.
+     nowrap holds both halves on one line; the title (the one
+     unbounded-length piece here) is what actually gives up space,
+     truncating instead of forcing a wrap. */
+  header.selfsteam-header { flex-wrap: nowrap; padding: 0.8rem 1rem; gap: 0.5rem; }
+  .selfsteam-header-left { gap: 0.5rem; min-width: 0; flex: 1 1 auto; }
+  .selfsteam-header-title { min-width: 0; overflow: hidden; }
+  .selfsteam-header-title strong {
+    display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 1.05rem;
+  }
+  .selfsteam-header-actions { flex: 0 0 auto; gap: 0.4rem; }
+  .icon-btn-round, .sgdb-key-badge { width: 2.5rem; height: 2.5rem; }
+  .back-btn { width: 2.6rem; height: 2.6rem; }
+  .restart-btn { padding: 0.5rem 0.9rem; font-size: 0.8rem; }
+  /* _PLACEHOLDER_ROW_COUNT (30 fixed rows) exists to fill a viewport-
+     bound desktop column's real height -- once columns stack instead
+     of sitting side by side, that column's height is just its own
+     content, so the same 30 rows (30 * 2.3rem ≈ 69rem) turned into a
+     genuinely excessive empty scroll before ever reaching the search
+     box or real results below it. .placeholder-row only ever wraps
+     empty skeleton rows (real match rows are <a> elements sharing the
+     same .boxed-list, see _match_list_html/_em_list_rows/_ra_list_rows),
+     so this hides only the placeholder skeleton, never real results. */
+  .placeholder-row { display: none; }
+  /* The artwork column's own category/row flex-grow chain (see
+     .artwork-category's own comment) needs *some* definite height
+     somewhere upstream to distribute -- on desktop that's .card's own
+     flex:1 inside a viewport-bound .selfsteam-right/.selfsteam-columns.
+     Once columns stack (.selfsteam-left/.middle/.right above all get
+     flex-basis:100%; min-height:auto), that chain has nothing definite
+     left to grow into at any point, so every category/row/cell in it
+     collapsed to zero height -- confirmed live as exactly why artwork
+     stopped rendering on mobile after the flex-grow fix landed. Giving
+     .artwork-card its own explicit height here re-anchors the same
+     already-working downstream chain; nothing about the category/row/
+     cell styles themselves needs to change. */
+  .artwork-card { height: 65vh; flex: none; }
 }
 </style></head><body>
 <header class="selfsteam-header">
@@ -984,9 +1026,18 @@ def _sgdb_key_badge_html():
     # Always a link to /key, verified or not -- letting it update
     # an already-configured key (not just add a missing one) is what a
     # user actually expects from a clickable status badge.
+    #
+    # A circular icon-only badge (matching .icon-btn-round's own size),
+    # not the old wide text pill -- the pill's width was a real
+    # contributor to the header wrapping/misaligning on narrow phone
+    # widths, on top of just looking heavier than the other header
+    # icons next to it. Green when verified, yellow when not; the full
+    # status text moved to title (a native hover tooltip) instead of
+    # being permanently on-screen.
+    key_img = '<img src="/vendor/sgdb-key-icon.webp" alt="" class="sgdb-key-badge-icon">'
     if sgdb.has_api_key():
-        return '<a href="/key" class="sgdb-key-badge">&#10003; SGDB API key verified</a>'
-    return '<a href="/key" class="sgdb-key-badge unverified">&#9888; No SGDB API key</a>'
+        return f'<a href="/key" class="sgdb-key-badge" title="SGDB API key verified">{key_img}</a>'
+    return f'<a href="/key" class="sgdb-key-badge unverified" title="No SGDB API key">{key_img}</a>'
 
 
 def _hostname():
@@ -3357,6 +3408,16 @@ class Handler(BaseHTTPRequestHandler):
 
         if parsed.path == "/vendor/name-field-wand.webp":
             with open(_NAME_FIELD_WAND_PATH, "rb") as f:
+                body = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/webp")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        if parsed.path == "/vendor/sgdb-key-icon.webp":
+            with open(_SGDB_KEY_ICON_PATH, "rb") as f:
                 body = f.read()
             self.send_response(200)
             self.send_header("Content-Type", "image/webp")
