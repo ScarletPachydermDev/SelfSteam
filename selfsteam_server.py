@@ -2307,15 +2307,23 @@ def _ra_middle_column_html(state, matches, extra_class=""):
 _ARTWORK_HEIGHT_WEIGHT_SUM = sum(base_h for _b, _t, _f, _w, base_h in ARTWORK_CATEGORIES)
 
 
-# Skeleton tile counts per category before any search -- matches the
-# design handoff's own placeholder counts exactly, so the blank state
-# looks like real content is about to load rather than an empty column.
+# Skeleton tile counts per category before any search. The design
+# handoff's own placeholder counts (4/2/2/4/6) assumed a narrower
+# column than this card can actually be on a wide screen -- confirmed
+# live: on a 1920px-class display each row's real tiles ran out well
+# before the row's own available width did, leaving a visible blank
+# gap between the last skeleton and the card's right edge instead of
+# looking like content that's still loading. Bumped generously higher
+# (each row is horizontally scrollable regardless, see .artwork-row's
+# own overflow-x:auto, so a few extra off-screen tiles on a narrower
+# window cost nothing) rather than trying to compute an exact count for
+# an arbitrary, unknown-server-side viewport width.
 _SKELETON_TILE_COUNTS = {
-    "grid_vertical": 4,
-    "grid_horizontal": 2,
-    "hero": 2,
-    "logo": 4,
-    "icon": 6,
+    "grid_vertical": 10,
+    "grid_horizontal": 8,
+    "hero": 8,
+    "logo": 12,
+    "icon": 16,
 }
 
 
