@@ -1791,8 +1791,13 @@ def _emulators_tab_panel_html(state, chosen=None):
     # option; this is what was actually asked for instead.
     def _emulator_option_label(name):
         e = standalone_emulators.EMULATORS.get(name, {})
+        # display_name overrides the catalog's own (dict-key-unique)
+        # name for what's actually shown -- e.g. "Ryubing (AppImage)"
+        # displays as just "Ryubing" since the AppImage/Flathub toggle
+        # already disambiguates it from the Flathub "Ryubing" entry.
+        display = e.get("display_name", name)
         consoles = e.get("consoles")
-        return f"{name} - {consoles}" if consoles else name
+        return f"{display} - {consoles}" if consoles else display
 
     # Sorted by emulator name -- unlike the RA tab's own "console - core"
     # picker (retroarch_cores.CONSOLES), where console is the meaningful

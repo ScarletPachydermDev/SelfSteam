@@ -25,6 +25,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import tempfile
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -182,21 +183,45 @@ def _cemu_configure_game_dir(entry, game_dir):
     tree.write(settings_path, encoding="utf-8", xml_declaration=True)
 
 
-def _ryubing_keys_installed(entry):
-    keys_dir = _flatpak_config_dir(entry["app_id"], "Ryujinx", "system")
-    if not os.path.isdir(keys_dir):
-        return None
-    found = sorted(f for f in os.listdir(keys_dir) if f.endswith(".keys"))
-    return ", ".join(found) if found else None
+def _switch_keys_dirs():
+    """Every real prod.keys/title.keys directory across the whole
+    Switch-emulator family this catalog knows about: Flathub Ryubing
+    (sandboxed), the AppImage Ryubing build (shared by stable and
+    Canary -- confirmed via source, both are built from the same
+    AppDataManager.DefaultBaseDir="Ryujinx" regardless of channel, so
+    they were already going to land in the same real directory with no
+    extra work), and Eden (shared by all four of its own CPU-target
+    variants, which are likewise just different builds of one codebase
+    reading from the same $XDG_DATA_HOME/eden/keys/).
+
+    prod.keys/title.keys are a literal per-console dump with no
+    emulator-specific format -- there's no reason picking them once for
+    any one of these should still demand picking them again for any
+    other, so install/installed-check below write to and read from all
+    of these together rather than per-entry."""
+    return [
+        _flatpak_config_dir("io.github.ryubing.Ryujinx", "Ryujinx", "system"),
+        _xdg_config_dir("Ryujinx", "system"),
+        _xdg_data_dir("eden", "keys"),
+    ]
 
 
-def _ryubing_install_keys(entry, keys_path):
-    """Copies picked keys into Ryubing's own real keys directory --
-    confirmed via its actual source (AppDataManager.KeysDirPath =
-    BaseDirPath/system, i.e. ~/.config/Ryujinx/system on Linux,
-    ~/.var/app/<id>/config/Ryujinx/system/ under the Flatpak sandbox),
-    the same directory ContentManager.InstallKeys's own real caller
-    (MainWindowViewModel.HandleKeysInstallation) uses.
+def _switch_keys_installed(entry):
+    for keys_dir in _switch_keys_dirs():
+        if not os.path.isdir(keys_dir):
+            continue
+        found = sorted(f for f in os.listdir(keys_dir) if f.endswith(".keys"))
+        if found:
+            return ", ".join(found)
+    return None
+
+
+def _switch_install_keys(entry, keys_path):
+    """Copies picked keys into every real keys directory across the
+    whole Switch-emulator family (see _switch_keys_dirs) at once, not
+    just the one the current shortcut's emulator happens to use --
+    confirmed real per-directory paths via each emulator's own source,
+    same as the single-directory version this replaced.
 
     keys_path is a single picked file (prod.keys) -- a real Switch key
     dump typically has title.keys (per-game) sitting right alongside it
@@ -204,21 +229,21 @@ def _ryubing_install_keys(entry, keys_path):
     it's there, without the user needing to pick it separately (see
     _em_picker_section's own "keys" display for the matching UI side of
     this). Returns the list of files actually copied. No parsing/
-    verification of the keys' own contents either way -- Ryubing does
-    that itself on next launch."""
-    dest_dir = _flatpak_config_dir(entry["app_id"], "Ryujinx", "system")
-    os.makedirs(dest_dir, exist_ok=True)
+    verification of the keys' own contents either way -- each emulator
+    does that itself on next launch."""
+    sibling = os.path.join(os.path.dirname(keys_path), "title.keys")
+    has_sibling = os.path.basename(keys_path) != "title.keys" and os.path.isfile(sibling)
 
     copied = []
-    dest = os.path.join(dest_dir, os.path.basename(keys_path))
-    shutil.copy2(keys_path, dest)
-    copied.append(dest)
-
-    sibling = os.path.join(os.path.dirname(keys_path), "title.keys")
-    if os.path.basename(keys_path) != "title.keys" and os.path.isfile(sibling):
-        sibling_dest = os.path.join(dest_dir, "title.keys")
-        shutil.copy2(sibling, sibling_dest)
-        copied.append(sibling_dest)
+    for dest_dir in _switch_keys_dirs():
+        os.makedirs(dest_dir, exist_ok=True)
+        dest = os.path.join(dest_dir, os.path.basename(keys_path))
+        shutil.copy2(keys_path, dest)
+        copied.append(dest)
+        if has_sibling:
+            sibling_dest = os.path.join(dest_dir, "title.keys")
+            shutil.copy2(sibling, sibling_dest)
+            copied.append(sibling_dest)
 
     return copied
 
@@ -728,81 +753,9 @@ def _eden_args(romfile):
     return ["-f", "-g", shlex.quote(romfile)]
 
 
-def _eden_keys_installed(entry):
-    keys_dir = _xdg_data_dir("eden", "keys")
-    if not os.path.isdir(keys_dir):
-        return None
-    found = sorted(f for f in os.listdir(keys_dir) if f.endswith(".keys"))
-    return ", ".join(found) if found else None
-
-
-def _eden_install_keys(entry, keys_path):
-    # $XDG_DATA_HOME/eden/keys/ -- confirmed via Eden's own source
-    # (src/common/fs/path_util.cpp's Reinitialize(): on Linux,
-    # eden_path = GetDataDirectory("XDG_DATA_HOME") / EDEN_DIR, and
-    # EdenPath::KeysDir = eden_path / KEYS_DIR, with EDEN_DIR="eden" and
-    # KEYS_DIR="keys" from src/common/fs/fs_paths.h). Deliberately NOT
-    # the same directory Ryubing's own keys live in
-    # (~/.config/Ryujinx/system under its Flatpak sandbox) -- these are
-    # separate Switch-emulator codebases with their own conventions,
-    # confirmed independently rather than assumed identical.
-    #
-    # Same title.keys sibling-pickup as _ryubing_install_keys -- see its
-    # own comment for why.
-    dest_dir = _xdg_data_dir("eden", "keys")
-    os.makedirs(dest_dir, exist_ok=True)
-
-    copied = []
-    dest = os.path.join(dest_dir, os.path.basename(keys_path))
-    shutil.copy2(keys_path, dest)
-    copied.append(dest)
-
-    sibling = os.path.join(os.path.dirname(keys_path), "title.keys")
-    if os.path.basename(keys_path) != "title.keys" and os.path.isfile(sibling):
-        sibling_dest = os.path.join(dest_dir, "title.keys")
-        shutil.copy2(sibling, sibling_dest)
-        copied.append(sibling_dest)
-
-    return copied
-
-
 def _xdg_config_dir(*parts):
     base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
     return os.path.join(base, *parts)
-
-
-def _ryubing_appimage_keys_installed(entry):
-    # ~/.config/Ryujinx/system -- the real unsandboxed path
-    # AppDataManager.KeysDirPath resolves to (see _ryubing_install_keys'
-    # own comment, which already confirmed this via source when it
-    # noted the Flatpak sandbox's ~/.var/app/<id>/config/Ryujinx/system
-    # redirect is that same path, just relocated). An AppImage isn't
-    # sandboxed at all, so it's the real path directly, no redirect.
-    keys_dir = _xdg_config_dir("Ryujinx", "system")
-    if not os.path.isdir(keys_dir):
-        return None
-    found = sorted(f for f in os.listdir(keys_dir) if f.endswith(".keys"))
-    return ", ".join(found) if found else None
-
-
-def _ryubing_appimage_install_keys(entry, keys_path):
-    # Same title.keys sibling-pickup as _ryubing_install_keys/
-    # _eden_install_keys -- see either's own comment for why.
-    dest_dir = _xdg_config_dir("Ryujinx", "system")
-    os.makedirs(dest_dir, exist_ok=True)
-
-    copied = []
-    dest = os.path.join(dest_dir, os.path.basename(keys_path))
-    shutil.copy2(keys_path, dest)
-    copied.append(dest)
-
-    sibling = os.path.join(os.path.dirname(keys_path), "title.keys")
-    if os.path.basename(keys_path) != "title.keys" and os.path.isfile(sibling):
-        sibling_dest = os.path.join(dest_dir, "title.keys")
-        shutil.copy2(sibling, sibling_dest)
-        copied.append(sibling_dest)
-
-    return copied
 
 
 EMULATORS = {
@@ -825,8 +778,8 @@ EMULATORS = {
         "needs_firmware": True,
         "args": _ryubing_args,
         "configure_game_dir": _ryubing_configure_game_dir,
-        "keys_installed": _ryubing_keys_installed,
-        "install_keys": _ryubing_install_keys,
+        "keys_installed": _switch_keys_installed,
+        "install_keys": _switch_install_keys,
         "keys_tooltip": "Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
         # .nsz omitted from the ROM picker -- not supported by Ryubing
         # (or Eden, its other fork) per real user testing, not guessed.
@@ -1141,8 +1094,8 @@ EMULATORS = {
         # built against).
         "needs_firmware": False,
         "args": _eden_args,
-        "keys_installed": _eden_keys_installed,
-        "install_keys": _eden_install_keys,
+        "keys_installed": _switch_keys_installed,
+        "install_keys": _switch_install_keys,
         "keys_tooltip": "Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
         # .nsz omitted from the ROM picker -- not supported by Eden (or
         # Ryubing, its other fork) per real user testing, not guessed.
@@ -1159,8 +1112,8 @@ EMULATORS = {
         "needs_keys": True,
         "needs_firmware": False,
         "args": _eden_args,
-        "keys_installed": _eden_keys_installed,
-        "install_keys": _eden_install_keys,
+        "keys_installed": _switch_keys_installed,
+        "install_keys": _switch_install_keys,
         "keys_tooltip": "Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
         "rom_exclude_extensions": {".nsz"},
     },
@@ -1174,8 +1127,8 @@ EMULATORS = {
         "needs_keys": True,
         "needs_firmware": False,
         "args": _eden_args,
-        "keys_installed": _eden_keys_installed,
-        "install_keys": _eden_install_keys,
+        "keys_installed": _switch_keys_installed,
+        "install_keys": _switch_install_keys,
         "keys_tooltip": "Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
         "rom_exclude_extensions": {".nsz"},
     },
@@ -1190,13 +1143,18 @@ EMULATORS = {
         "needs_keys": True,
         "needs_firmware": False,
         "args": _eden_args,
-        "keys_installed": _eden_keys_installed,
-        "install_keys": _eden_install_keys,
+        "keys_installed": _switch_keys_installed,
+        "install_keys": _switch_install_keys,
         "keys_tooltip": "Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
         "rom_exclude_extensions": {".nsz"},
     },
     "Ryubing (AppImage)": {
         "install_type": "binary",
+        # Dropped from the dropdown's own display -- the AppImage/
+        # Flathub toggle already disambiguates, so repeating it in the
+        # name is just clutter (Eden's own entries don't repeat "Eden
+        # (AppImage)" either).
+        "display_name": "Ryubing",
         # Forgejo REST API, self-hosted (git.ryujinx.app) -- confirmed
         # live: the org's own repo listing (/api/v1/orgs/Ryubing/repos)
         # doesn't include the stable release repo at all; it actually
@@ -1211,15 +1169,22 @@ EMULATORS = {
         "consoles": "Nintendo Switch",
         "needs_bios": False,
         "needs_keys": True,
-        "needs_firmware": False,
+        # Same real firmware requirement as Flathub Ryubing -- was left
+        # False here originally (a real bug, not a deliberate skip):
+        # firmware_installed()/install_firmware_zip() used to be
+        # hardcoded to entry["app_id"], which this install_type doesn't
+        # have, so this entry could never have safely asked for it
+        # until that got generalized (see _ryujinx_family_contents_dirs).
+        "needs_firmware": True,
         "args": _ryubing_args,
-        "keys_installed": _ryubing_appimage_keys_installed,
-        "install_keys": _ryubing_appimage_install_keys,
+        "keys_installed": _switch_keys_installed,
+        "install_keys": _switch_install_keys,
         "keys_tooltip": "Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
         "rom_exclude_extensions": {".nsz"},
     },
     "Ryubing Canary (AppImage)": {
         "install_type": "binary",
+        "display_name": "Ryubing Canary",
         # Separate org/repo from stable -- confirmed via its own org
         # listing (/api/v1/orgs/Ryubing/repos includes "Canary").
         "release_api": "https://git.ryujinx.app/api/v1/repos/Ryubing/Canary/releases?limit=1",
@@ -1227,10 +1192,10 @@ EMULATORS = {
         "consoles": "Nintendo Switch",
         "needs_bios": False,
         "needs_keys": True,
-        "needs_firmware": False,
+        "needs_firmware": True,
         "args": _ryubing_args,
-        "keys_installed": _ryubing_appimage_keys_installed,
-        "install_keys": _ryubing_appimage_install_keys,
+        "keys_installed": _switch_keys_installed,
+        "install_keys": _switch_install_keys,
         "keys_tooltip": "Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
         "rom_exclude_extensions": {".nsz"},
     },
@@ -1561,17 +1526,31 @@ def keys_installed(name):
     return handler(entry) if handler else None
 
 
-def _firmware_marker_path(entry):
-    contents_dir = _flatpak_config_dir(entry["app_id"], "Ryujinx", "bis", "system", "Contents")
+def _ryujinx_family_contents_dirs():
+    """Every real bis/system/Contents dir across the whole Ryujinx
+    family: Flathub Ryubing (sandboxed) and the AppImage build (shared
+    by stable and Canary -- see _switch_keys_dirs' own comment on why
+    that's one directory, not two). Firmware installed via any one of
+    these should already satisfy the other two, same reasoning as
+    _switch_keys_dirs. Not Eden -- its own NAND/firmware directory
+    layout isn't confirmed compatible with this NCA-zip-explosion
+    format, unlike prod.keys/title.keys, which are a universal format
+    regardless of emulator."""
+    return [
+        _flatpak_config_dir("io.github.ryubing.Ryujinx", "Ryujinx", "bis", "system", "Contents"),
+        _xdg_config_dir("Ryujinx", "bis", "system", "Contents"),
+    ]
+
+
+def _firmware_marker_path(contents_dir):
     return os.path.join(contents_dir, ".selfsteam-firmware-source")
 
 
-def _old_firmware_marker_path(entry):
+def _old_firmware_marker_path(contents_dir):
     # Read-only fallback for a marker written before this app's SelfSteam
     # rename -- a real one already exists from prior firmware installs,
     # and losing it would silently regress firmware_installed()'s real-
     # filename display back to the generic "N titles" count-based label.
-    contents_dir = _flatpak_config_dir(entry["app_id"], "Ryujinx", "bis", "system", "Contents")
     return os.path.join(contents_dir, ".gridge-firmware-source")
 
 
@@ -1584,25 +1563,32 @@ def firmware_installed(name):
     (works whether that zip was uploaded or picked locally, and
     naturally reflects whatever was installed *last*) -- falling back to
     a count-based label ("148 titles") only for firmware installed
-    before that marker existed."""
+    before that marker existed.
+
+    Checks every dir in _ryujinx_family_contents_dirs(), not just
+    whichever one this specific entry would itself use -- firmware
+    installed via any one of the Ryujinx-family entries should already
+    read as installed for the other two."""
     entry = EMULATORS.get(name)
     if not entry:
         return None
-    registered_dir = _flatpak_config_dir(entry["app_id"], "Ryujinx", "bis", "system", "Contents", "registered")
-    if not os.path.isdir(registered_dir):
-        return None
-    count = len(os.listdir(registered_dir))
-    if not count:
-        return None
-    marker_path = _firmware_marker_path(entry)
-    if not os.path.isfile(marker_path):
-        marker_path = _old_firmware_marker_path(entry)
-    if os.path.isfile(marker_path):
-        with open(marker_path) as f:
-            marker = f.read().strip()
-        if marker:
-            return marker
-    return f"{count} titles"
+    for contents_dir in _ryujinx_family_contents_dirs():
+        registered_dir = os.path.join(contents_dir, "registered")
+        if not os.path.isdir(registered_dir):
+            continue
+        count = len(os.listdir(registered_dir))
+        if not count:
+            continue
+        marker_path = _firmware_marker_path(contents_dir)
+        if not os.path.isfile(marker_path):
+            marker_path = _old_firmware_marker_path(contents_dir)
+        if os.path.isfile(marker_path):
+            with open(marker_path) as f:
+                marker = f.read().strip()
+            if marker:
+                return marker
+        return f"{count} titles"
+    return None
 
 
 def install_keys(name, keys_path):
@@ -1625,60 +1611,66 @@ def install_firmware_zip(name, zip_path):
     ContentManager.InstallFirmware/InstallFromZip do for a .zip package
     specifically (confirmed via its actual source, not guessed): each
     zip entry's own path already encodes its NCA content id (entries
-    look like "<nca-id>.nca/00" or "<nca-id>.nca/<file>"), extracted to
-    a temp "<nca-id>.nca/00" layout, then atomically swapped in as the
-    real "registered" directory
-    (~/.var/app/<id>/config/Ryujinx/bis/system/Contents/registered).
-    Deliberately skips ContentManager.VerifyFirmwarePackage -- that's
-    real NCA decryption (needs Ryubing's own loaded keyset/LibHac, not
-    safely portable here) used only to show a nicer confirmation-dialog
-    message in the GUI flow, not required for the install itself to be
-    correct. An invalid zip here just means Ryubing finds no valid
-    firmware at next launch, same failure mode as picking the wrong
-    file in the GUI's own installer."""
+    look like "<nca-id>.nca/00" or "<nca-id>.nca/<file>"), extracted
+    once to a shared temp "<nca-id>.nca/00" layout, then propagated as
+    the real "registered" directory into every dir in
+    _ryujinx_family_contents_dirs() -- firmware installed via any one
+    of the Ryujinx-family entries ends up satisfying all of them, not
+    just the one used. Deliberately skips
+    ContentManager.VerifyFirmwarePackage -- that's real NCA decryption
+    (needs Ryubing's own loaded keyset/LibHac, not safely portable here)
+    used only to show a nicer confirmation-dialog message in the GUI
+    flow, not required for the install itself to be correct. An invalid
+    zip here just means Ryubing finds no valid firmware at next launch,
+    same failure mode as picking the wrong file in the GUI's own
+    installer."""
     entry = EMULATORS.get(name)
     if not entry:
         raise ValueError(f"No known standalone emulator: {name}")
-    contents_dir = _flatpak_config_dir(entry["app_id"], "Ryujinx", "bis", "system", "Contents")
-    registered_dir = os.path.join(contents_dir, "registered")
-    temp_dir = os.path.join(contents_dir, "temp")
 
-    if os.path.isdir(temp_dir):
-        shutil.rmtree(temp_dir)
-    os.makedirs(temp_dir, exist_ok=True)
+    extract_root = tempfile.mkdtemp(prefix="selfsteam-firmware-")
+    try:
+        with zipfile.ZipFile(zip_path) as z:
+            for info in z.infolist():
+                if info.is_dir():
+                    continue
+                cleaned = info.filename.replace(".cnmt", "")
+                parts = [p for p in cleaned.split("/") if p]
+                if not parts:
+                    continue
+                nca_id = parts[-1]
+                # Fragmented NCA: the real file is one level up from a
+                # literal "00" part-file name (same check
+                # InstallFromZip's own C# does: ncaId.Equals("00") ->
+                # use the previous path component instead).
+                if nca_id == "00" and len(parts) >= 2:
+                    nca_id = parts[-2]
+                if ".nca" not in nca_id:
+                    continue
+                dest_dir = os.path.join(extract_root, nca_id)
+                os.makedirs(dest_dir, exist_ok=True)
+                with z.open(info) as src, open(os.path.join(dest_dir, "00"), "wb") as dst:
+                    shutil.copyfileobj(src, dst)
 
-    with zipfile.ZipFile(zip_path) as z:
-        for info in z.infolist():
-            if info.is_dir():
-                continue
-            cleaned = info.filename.replace(".cnmt", "")
-            parts = [p for p in cleaned.split("/") if p]
-            if not parts:
-                continue
-            nca_id = parts[-1]
-            # Fragmented NCA: the real file is one level up from a
-            # literal "00" part-file name (same check InstallFromZip's
-            # own C# does: ncaId.Equals("00") -> use the previous
-            # path component instead).
-            if nca_id == "00" and len(parts) >= 2:
-                nca_id = parts[-2]
-            if ".nca" not in nca_id:
-                continue
-            dest_dir = os.path.join(temp_dir, nca_id)
-            os.makedirs(dest_dir, exist_ok=True)
-            with z.open(info) as src, open(os.path.join(dest_dir, "00"), "wb") as dst:
-                shutil.copyfileobj(src, dst)
-
-    if os.path.isdir(registered_dir):
-        shutil.rmtree(registered_dir)
-    shutil.move(temp_dir, registered_dir)
-    # A sidecar marker, not anything Ryujinx itself reads -- registered/
-    # only ever holds NCA-id-named content folders with no filename of
-    # their own, so this is the one place the real, human-readable name
-    # of whatever zip was actually installed survives, for
-    # firmware_installed's own display. Overwritten on every real
-    # install, so picking a different firmware later naturally replaces
-    # it -- there's nothing else to "reset" separately.
-    with open(_firmware_marker_path(entry), "w") as f:
-        f.write(os.path.basename(zip_path))
+        last_registered_dir = None
+        for contents_dir in _ryujinx_family_contents_dirs():
+            os.makedirs(contents_dir, exist_ok=True)
+            registered_dir = os.path.join(contents_dir, "registered")
+            if os.path.isdir(registered_dir):
+                shutil.rmtree(registered_dir)
+            shutil.copytree(extract_root, registered_dir)
+            # A sidecar marker, not anything Ryujinx itself reads --
+            # registered/ only ever holds NCA-id-named content folders
+            # with no filename of their own, so this is the one place
+            # the real, human-readable name of whatever zip was
+            # actually installed survives, for firmware_installed's own
+            # display. Overwritten on every real install, so picking a
+            # different firmware later naturally replaces it -- there's
+            # nothing else to "reset" separately.
+            with open(_firmware_marker_path(contents_dir), "w") as f:
+                f.write(os.path.basename(zip_path))
+            last_registered_dir = registered_dir
+        return last_registered_dir
+    finally:
+        shutil.rmtree(extract_root, ignore_errors=True)
     return registered_dir
