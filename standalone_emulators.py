@@ -1368,7 +1368,17 @@ def launch_args(name, romfile):
         path = _binary_path(name, entry)
         if not os.path.isfile(path):
             return None
-        return [path, *entry["args"](romfile)]
+        # shlex.quote the AppImage path itself, not just the romfile --
+        # LaunchOptions is stored/joined as one shell-like string with a
+        # plain " ".join (see register_steam_shortcut), so every element
+        # needs to already be shell-safe going in. Confirmed live: an
+        # unquoted path with spaces/parens/an em-dash in it (e.g. "Eden
+        # (Legacy amd64 — pre-Ryzen/pre-Haswell CPUs)") broke the
+        # wrapper script's own shell parsing with a real "syntax error
+        # near unexpected token" -- the flathub branch below never hit
+        # this because `flatpak` and an app_id are never anything but
+        # plain, space-free tokens.
+        return [shlex.quote(path), *entry["args"](romfile)]
     if entry["install_type"] != "flathub":
         return None
     flatpak = host_exec.which("flatpak")
