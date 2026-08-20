@@ -2404,6 +2404,7 @@ def _artwork_picker_html(candidates_by_category, prefix=""):
 
 def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None, match_index=0,
                  candidates_by_category=None, resolved_url=None, chosen=None,
+                 url_edit_appid="", url_edit_name="",
                  ra_state=None, ra_candidates_by_category=None, ra_chosen=None, ra_loading=False,
                  em_state=None, em_candidates_by_category=None, em_chosen=None, em_loading=False):
     """Single page-builder for every state (home, unresolved input, no
@@ -2568,10 +2569,13 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
   <input type="hidden" name="query" value="{html.escape(query)}">
   <input type="hidden" name="resolved_url" value="{html.escape(resolved_url or '')}">
   <input type="hidden" name="browser" value="{html.escape(_default_browser(browser))}">
+  <input type="hidden" name="url_edit_appid" value="{html.escape(url_edit_appid)}">
+  <input type="hidden" name="url_edit_name" value="{html.escape(url_edit_name)}">
   {couch_field}
 </form>
 """
-        add_button = f'<button type="submit" id="selfsteam-add-button" form="{_ADD_FORM_ID}">Create Steam Shortcut</button>'
+        add_button_text = "Save Shortcut" if url_edit_appid else "Create Steam Shortcut"
+        add_button = f'<button type="submit" id="selfsteam-add-button" form="{_ADD_FORM_ID}">{add_button_text}</button>'
     elif ra_awaiting_artwork or em_awaiting_artwork:
         # Everything else (console/rom/bios, or emulator/rom/keys/
         # firmware) is already picked -- just waiting on the SGDB fetch
@@ -2970,7 +2974,10 @@ def _poster_card_html(shortcut, pending_removal_appids):
             "em_edit_appid": str(appid), "em_edit_name": name,
         })
     else:
-        edit_href = f"/search?q={urllib.parse.quote(shortcut['url'] or name)}"
+        edit_href = (
+            f"/search?q={urllib.parse.quote(shortcut['url'] or name)}"
+            f"&url_edit_appid={urllib.parse.quote(str(appid))}&url_edit_name={urllib.parse.quote(name)}"
+        )
     # A RetroArch/Emulators-tab shortcut's ROM might be a local pick
     # (referenced in place, wherever it already lives -- see the local
     # file browser) rather than something SelfSteam uploaded itself, so
@@ -3327,8 +3334,18 @@ class Handler(BaseHTTPRequestHandler):
             # /new#tab-retroarch was reached again).
             ra_state = _ra_state_from_params(params)
             em_state = _em_state_from_params(params)
+            # Carried through the same way as ra_state/em_state above --
+            # set only when this /search came from the gallery's own
+            # Edit link (see edit_href's own comment), and read back by
+            # render_page to swap the Add button to "Save Shortcut" and
+            # let /add clean up the old entry if the Name field changes.
+            url_edit_appid = (params.get("url_edit_appid") or [""])[0]
+            url_edit_name = (params.get("url_edit_name") or [""])[0]
             if not query:
-                self._send_html(render_page(browser=browser, ra_state=ra_state, em_state=em_state))
+                self._send_html(render_page(
+                    browser=browser, ra_state=ra_state, em_state=em_state,
+                    url_edit_appid=url_edit_appid, url_edit_name=url_edit_name,
+                ))
                 return
 
             # Recognized service (e.g. "netflix" -> netflix.com) or a
@@ -3341,7 +3358,10 @@ class Handler(BaseHTTPRequestHandler):
             # an invalid "https://netflix" (missing .com) shortcut URL.
             resolved = service_resolver.resolve(query)
             if not resolved.url:
-                self._send_html(render_page(query, couch_mode, browser, ra_state=ra_state, em_state=em_state))
+                self._send_html(render_page(
+                    query, couch_mode, browser, ra_state=ra_state, em_state=em_state,
+                    url_edit_appid=url_edit_appid, url_edit_name=url_edit_name,
+                ))
                 return
 
             # sgdb_q (the magnifying-glass direct search) overrides
@@ -3355,6 +3375,7 @@ class Handler(BaseHTTPRequestHandler):
                 query, couch_mode, browser, sgdb_q, matches, match_index,
                 candidates, resolved.url, chosen=matches[match_index],
                 ra_state=ra_state, em_state=em_state,
+                url_edit_appid=url_edit_appid, url_edit_name=url_edit_name,
             ))
             return
 
@@ -3547,6 +3568,7 @@ class Handler(BaseHTTPRequestHandler):
                 selection_url = (params.get(f"artwork_{basename}") or [None])[0]
                 selections[basename] = {"url": selection_url} if selection_url else None
             asset_paths = create_webapp.download_selected_assets(slug, selections)
+            _queue_edit_rename_cleanup(params, "url", match_name)
             pending_queue.add(match_name, url, couch_mode, asset_paths, browser_app_id=browser or None)
             self._redirect("/new#tab-url")
         except Exception as e:  # noqa: BLE001 -- surfaced to the user, not swallowed
