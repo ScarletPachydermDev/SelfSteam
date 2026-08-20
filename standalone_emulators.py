@@ -1283,6 +1283,9 @@ EMULATORS = {
         # "Select BIOS" every needs_bios-only emulator shows.
         "needs_bios": True,
         "bios_slots": [("bios", "Select PS Vita Firmware (PUP)", "firmware")],
+        # Sony's own official download -- same reasoning as RPCS3's own
+        # entry: not obtainable any other legitimate way.
+        "bios_slot_links": {"bios": ("https://www.playstation.com/en-gb/support/hardware/psvita/system-software/", "Get it from Sony")},
         "needs_keys": False,
         "needs_firmware": False,
         "bios_slot_installed": vita3k_firmware_installed,
