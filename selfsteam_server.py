@@ -63,7 +63,6 @@ REMEMBER_COOKIE = "selfsteam_remember"
 _DARKREADER_PATH = os.path.join(os.path.dirname(__file__), "vendor", "darkreader.js")
 _POSTER_FRAME_PATH = os.path.join(os.path.dirname(__file__), "vendor", "poster-frame.webp")
 _NAME_FIELD_WAND_PATH = os.path.join(os.path.dirname(__file__), "vendor", "name-field-wand.webp")
-_SGDB_KEY_ICON_PATH = os.path.join(os.path.dirname(__file__), "vendor", "sgdb-key-icon.webp")
 _ADD_FORM_ID = "selfsteam-add-form"
 _SEARCH_ICON_SVG = (
     '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="white" '
@@ -238,12 +237,13 @@ header.selfsteam-header {
 }
 .queue-counter.empty { background: #d8d8d8; color: #9a9a9a; }
 .sgdb-key-badge {
-  width: 3rem; height: 3rem; margin: 0; padding: 0; border-radius: 50%; flex: 0 0 auto;
-  display: flex; align-items: center; justify-content: center; cursor: pointer; text-decoration: none;
-  background: #3bb54a; color: #fff;
+  width: auto; margin: 0; padding: 0.5rem 1rem; border-radius: 20px; font-size: 0.8rem; font-weight: 700;
+  display: inline-flex; align-items: center; gap: 0.4rem; cursor: pointer; text-decoration: none;
+  background: var(--success-bg); border: 1px solid var(--success-border); color: var(--success-text);
 }
-.sgdb-key-badge.unverified { background: #e8b93a; color: #4a3b08; }
-.sgdb-key-badge-icon { width: 60%; height: 60%; object-fit: contain; display: block; }
+.sgdb-key-badge.unverified {
+  background: #fdf3d9; border-color: #f0d68a; color: #8a6d1a;
+}
 .steam-warning-banner {
   background: #fdf3d9; border-bottom: 1px solid #f0d68a; color: #8a6d1a;
   padding: 0.7rem 2rem; font-size: 0.9rem; text-align: center; flex: 0 0 auto;
@@ -666,22 +666,30 @@ input[type=file]::file-selector-button {
   .selfsteam-spacer { flex: 0 0 0; }
   /* The header itself was never given a narrow-screen pass -- its own
      flex-wrap (needed on desktop for a very long hostname/page title)
-     let .selfsteam-header-actions wrap onto its own line below
-     .selfsteam-header-left on a real phone width, and the icons within
-     each half didn't shrink together, so the wrapped row's icons ended
-     up misaligned against each other and against the row above.
-     nowrap holds both halves on one line; the title (the one
-     unbounded-length piece here) is what actually gives up space,
-     truncating instead of forcing a wrap. */
-  header.selfsteam-header { flex-wrap: nowrap; padding: 0.8rem 1rem; gap: 0.5rem; }
-  .selfsteam-header-left { gap: 0.5rem; min-width: 0; flex: 1 1 auto; }
+     let .selfsteam-header-actions wrap unpredictably against
+     .selfsteam-header-left on a real phone width, reading as
+     misaligned icons rather than a deliberate layout. Rebuilt as 3
+     explicit rows instead, via flex-wrap + flex-basis:100% on the two
+     pieces that need their own line -- no HTML restructuring needed,
+     since .queue-actions and .selfsteam-header-actions are already
+     real elements, just forced onto their own full-width line each:
+       1. back button + title (unchanged, stays put -- .selfsteam-
+          header-left's own children fit on one line already)
+       2. .queue-actions (the restart button + its counter), centered
+       3. .selfsteam-header-actions (favorite/key badge/dark toggle),
+          centered
+     flex-basis:100% is what forces each onto a fresh line (nothing
+     else fits alongside something that already claims the full row
+     width), same trick .placeholder-row's own removal doesn't need but
+     this does. */
+  header.selfsteam-header { flex-wrap: wrap; padding: 0.8rem 1rem; gap: 0.6rem; }
+  .selfsteam-header-left { flex-wrap: wrap; gap: 0.5rem; min-width: 0; flex: 1 1 auto; }
   .selfsteam-header-title { min-width: 0; overflow: hidden; }
   .selfsteam-header-title strong {
     display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 1.05rem;
   }
-  .selfsteam-header-actions { flex: 0 0 auto; gap: 0.4rem; }
-  .icon-btn-round, .sgdb-key-badge { width: 2.5rem; height: 2.5rem; }
-  .back-btn { width: 2.6rem; height: 2.6rem; }
+  .queue-actions { flex: 1 1 100%; justify-content: center; }
+  .selfsteam-header-actions { flex: 1 1 100%; justify-content: center; gap: 0.6rem; }
   .restart-btn { padding: 0.5rem 0.9rem; font-size: 0.8rem; }
   /* _PLACEHOLDER_ROW_COUNT (30 fixed rows) exists to fill a viewport-
      bound desktop column's real height -- once columns stack instead
@@ -705,7 +713,16 @@ input[type=file]::file-selector-button {
      .artwork-card its own explicit height here re-anchors the same
      already-working downstream chain; nothing about the category/row/
      cell styles themselves needs to change. */
-  .artwork-card { height: 65vh; flex: none; }
+  /* overflow-y:auto, not the general .card{overflow-y:visible} mobile
+     rule above -- each category's own min-height:60px floor (see
+     cell_style's own comment) can push the smaller-weight categories'
+     real height past their flex-grow "fair share" of 65vh, and Logo/
+     Icon (the two smallest) sit last, so visible-not-scrollable let
+     their content spill past the card's own bottom edge into whatever
+     follows in the page instead of being reachable at all -- confirmed
+     live as exactly the "looked cropped" report. auto keeps them
+     reachable by scrolling within the card instead. */
+  .artwork-card { height: 65vh; flex: none; overflow-y: auto; }
 }
 </style></head><body>
 <header class="selfsteam-header">
@@ -1025,19 +1042,15 @@ window.addEventListener("hashchange", function () { setTimeout(selfsteamSizeArtw
 def _sgdb_key_badge_html():
     # Always a link to /key, verified or not -- letting it update
     # an already-configured key (not just add a missing one) is what a
-    # user actually expects from a clickable status badge.
-    #
-    # A circular icon-only badge (matching .icon-btn-round's own size),
-    # not the old wide text pill -- the pill's width was a real
-    # contributor to the header wrapping/misaligning on narrow phone
-    # widths, on top of just looking heavier than the other header
-    # icons next to it. Green when verified, yellow when not; the full
-    # status text moved to title (a native hover tooltip) instead of
-    # being permanently on-screen.
-    key_img = '<img src="/vendor/sgdb-key-icon.webp" alt="" class="sgdb-key-badge-icon">'
+    # user actually expects from a clickable status badge. Reverted back
+    # to the original text-pill treatment (a circular icon-only version
+    # using the key-lock artwork was tried and explicitly reverted --
+    # the header's own mobile layout was fixed separately instead, see
+    # the @media (max-width: 960px) block's own comment on the 3-row
+    # header structure).
     if sgdb.has_api_key():
-        return f'<a href="/key" class="sgdb-key-badge" title="SGDB API key verified">{key_img}</a>'
-    return f'<a href="/key" class="sgdb-key-badge unverified" title="No SGDB API key">{key_img}</a>'
+        return '<a href="/key" class="sgdb-key-badge">&#10003; SGDB API key verified</a>'
+    return '<a href="/key" class="sgdb-key-badge unverified">&#9888; No SGDB API key</a>'
 
 
 def _hostname():
@@ -3408,16 +3421,6 @@ class Handler(BaseHTTPRequestHandler):
 
         if parsed.path == "/vendor/name-field-wand.webp":
             with open(_NAME_FIELD_WAND_PATH, "rb") as f:
-                body = f.read()
-            self.send_response(200)
-            self.send_header("Content-Type", "image/webp")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-            return
-
-        if parsed.path == "/vendor/sgdb-key-icon.webp":
-            with open(_SGDB_KEY_ICON_PATH, "rb") as f:
                 body = f.read()
             self.send_response(200)
             self.send_header("Content-Type", "image/webp")
