@@ -597,7 +597,7 @@ input[type=file]::file-selector-button {
    see .shortcut-poster's own comment), so letting the grid track
    stretch wider than 230px would leave the art not covering its own
    cell. */
-.gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 230px)); gap: 24px; }
+.gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 230px)); gap: 24px; justify-content: center; }
 /* Fixed pixel sizes throughout this poster, not responsive/aspect-ratio
    based -- scaled up (195x229 -> 230x270, same ~0.852 aspect ratio) from
    the design handoff's own exact coordinates (steam-webapp-creator/
