@@ -766,6 +766,45 @@ def _eden_install_keys(entry, keys_path):
     return copied
 
 
+def _xdg_config_dir(*parts):
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    return os.path.join(base, *parts)
+
+
+def _ryubing_appimage_keys_installed(entry):
+    # ~/.config/Ryujinx/system -- the real unsandboxed path
+    # AppDataManager.KeysDirPath resolves to (see _ryubing_install_keys'
+    # own comment, which already confirmed this via source when it
+    # noted the Flatpak sandbox's ~/.var/app/<id>/config/Ryujinx/system
+    # redirect is that same path, just relocated). An AppImage isn't
+    # sandboxed at all, so it's the real path directly, no redirect.
+    keys_dir = _xdg_config_dir("Ryujinx", "system")
+    if not os.path.isdir(keys_dir):
+        return None
+    found = sorted(f for f in os.listdir(keys_dir) if f.endswith(".keys"))
+    return ", ".join(found) if found else None
+
+
+def _ryubing_appimage_install_keys(entry, keys_path):
+    # Same title.keys sibling-pickup as _ryubing_install_keys/
+    # _eden_install_keys -- see either's own comment for why.
+    dest_dir = _xdg_config_dir("Ryujinx", "system")
+    os.makedirs(dest_dir, exist_ok=True)
+
+    copied = []
+    dest = os.path.join(dest_dir, os.path.basename(keys_path))
+    shutil.copy2(keys_path, dest)
+    copied.append(dest)
+
+    sibling = os.path.join(os.path.dirname(keys_path), "title.keys")
+    if os.path.basename(keys_path) != "title.keys" and os.path.isfile(sibling):
+        sibling_dest = os.path.join(dest_dir, "title.keys")
+        shutil.copy2(sibling, sibling_dest)
+        copied.append(sibling_dest)
+
+    return copied
+
+
 EMULATORS = {
     "Dolphin": {
         "install_type": "flathub",
@@ -1156,6 +1195,45 @@ EMULATORS = {
         "keys_tooltip": "Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
         "rom_exclude_extensions": {".nsz"},
     },
+    "Ryubing (AppImage)": {
+        "install_type": "binary",
+        # Forgejo REST API, self-hosted (git.ryujinx.app) -- confirmed
+        # live: the org's own repo listing (/api/v1/orgs/Ryubing/repos)
+        # doesn't include the stable release repo at all; it actually
+        # lives under a differently-cased owner ("projects", not
+        # "Ryubing"), found via the real Flathub manifest's own source
+        # link (git.ryujinx.app/ryubing/ryujinx) redirecting there, not
+        # guessed.
+        "release_api": "https://git.ryujinx.app/api/v1/repos/projects/Ryubing/releases?limit=1",
+        # Single x64 AppImage per release -- no separate CPU-target/PGO
+        # variants the way Eden publishes.
+        "binary_asset_re": re.compile(r"^ryujinx-[\d.]+-x64\.AppImage$"),
+        "consoles": "Nintendo Switch",
+        "needs_bios": False,
+        "needs_keys": True,
+        "needs_firmware": False,
+        "args": _ryubing_args,
+        "keys_installed": _ryubing_appimage_keys_installed,
+        "install_keys": _ryubing_appimage_install_keys,
+        "keys_tooltip": "Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
+        "rom_exclude_extensions": {".nsz"},
+    },
+    "Ryubing Canary (AppImage)": {
+        "install_type": "binary",
+        # Separate org/repo from stable -- confirmed via its own org
+        # listing (/api/v1/orgs/Ryubing/repos includes "Canary").
+        "release_api": "https://git.ryujinx.app/api/v1/repos/Ryubing/Canary/releases?limit=1",
+        "binary_asset_re": re.compile(r"^ryujinx-canary-[\d.]+-x64\.AppImage$"),
+        "consoles": "Nintendo Switch",
+        "needs_bios": False,
+        "needs_keys": True,
+        "needs_firmware": False,
+        "args": _ryubing_args,
+        "keys_installed": _ryubing_appimage_keys_installed,
+        "install_keys": _ryubing_appimage_install_keys,
+        "keys_tooltip": "Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
+        "rom_exclude_extensions": {".nsz"},
+    },
     "openMSX": {
         "install_type": "flathub",
         "app_id": "org.openmsx.openMSX",
@@ -1265,8 +1343,21 @@ def install_binary(name):
         raise ValueError(f"{name} is not a binary-install emulator")
 
     req = urllib.request.Request(entry["release_api"], headers={"User-Agent": "SelfSteam"})
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        releases = json.load(resp)
+    # Same transient-network retry as the download below -- confirmed
+    # live: a fresh TLS handshake to git.ryujinx.app timed out once,
+    # then succeeded immediately on retry, no different from the
+    # "Connection reset by peer" case the download loop already handles.
+    releases = None
+    last_meta_error = None
+    for attempt in range(1, _INSTALL_ATTEMPTS + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                releases = json.load(resp)
+            break
+        except (urllib.error.URLError, OSError) as e:
+            last_meta_error = e
+    if releases is None:
+        raise RuntimeError(f"{name}: release API failed after {_INSTALL_ATTEMPTS} attempts: {last_meta_error}")
     if not releases:
         raise RuntimeError(f"{name}: release API returned no releases")
     release = releases[0]
