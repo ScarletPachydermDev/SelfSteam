@@ -604,15 +604,22 @@ input[type=file]::file-selector-button {
   cursor: pointer; text-decoration: none; color: #fff;
 }
 .poster-icon-btn:disabled { opacity: 0.55; cursor: not-allowed; }
-/* Sized/offset to match the *artwork* region of the other posters
-   exactly (166x249, 11px inset), not their full outer box -- the add
-   card has no blue frame of its own, so aligning by outer edges would
-   leave its "+" sitting visibly higher than every other poster's real
-   content. */
+/* Outer box matches .shortcut-poster's own flex-item footprint exactly
+   (230x270) so row alignment holds no matter where this tile sits in
+   the grid -- confirmed live: with only the inner 166x249 box as the
+   flex item (its old shape), moving this tile to the front of the grid
+   made its shorter flex-item height throw off the whole first row's
+   vertical alignment, not just this one tile. The visible "+" box
+   itself stays inset the same way as a real poster's own artwork
+   region (.poster-art's own left:11px/top:11px/166x249) -- the add
+   card still has no blue frame graphic of its own, so aligning by
+   outer edges alone would leave its "+" sitting visibly higher than
+   every other poster's real content. */
+.add-poster-frame { position: relative; width: 230px; height: 270px; flex: 0 0 auto; text-decoration: none; }
 .add-poster {
-  width: 166px; height: 249px; margin-top: 11px; border-radius: 8px; background: var(--skeleton);
-  flex: 0 0 auto; display: flex; align-items: center; justify-content: center;
-  color: var(--text-dim); text-decoration: none;
+  position: absolute; left: 11px; top: 11px; width: 166px; height: 249px; border-radius: 8px; background: var(--skeleton);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-dim);
 }
 .add-poster-plus { font-size: 3.5rem; line-height: 1; font-weight: 300; }
 @media (max-width: 960px) {
@@ -3060,8 +3067,10 @@ def render_gallery():
   <h2>Non Steam shortcuts</h2>
 </div>
 <div class="gallery-grid">
-  <a class="add-poster" href="/new" title="Add a shortcut">
-    <span class="add-poster-plus">+</span>
+  <a class="add-poster-frame" href="/new" title="Add a shortcut">
+    <span class="add-poster">
+      <span class="add-poster-plus">+</span>
+    </span>
   </a>
   {cards_html}
 </div>
