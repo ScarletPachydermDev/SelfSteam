@@ -38,6 +38,7 @@ import json
 import os
 import re
 import socket
+import threading
 import tempfile
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -925,8 +926,15 @@ def _steam_warning_html():
 def _queue_actions_html():
     # Always present, but disabled/greyed out with nothing queued --
     # native button[disabled] blocks the form submit itself, no JS
-    # needed to keep an empty commit from doing anything.
-    n = pending_queue.count()
+    # needed to keep an empty commit from doing anything. Also disabled
+    # while a commit is already running in the background (see
+    # _run_commit_in_background/render_restarting) -- pending_queue
+    # isn't cleared until that background thread actually finishes, so
+    # without this a second click on /restarting itself (still showing
+    # a stale non-empty count) could fire a second, overlapping commit.
+    with _commit_status_lock:
+        commit_running = _commit_status["running"]
+    n = 0 if commit_running else pending_queue.count()
     disabled = "" if n else " disabled"
     counter_class = "queue-counter" if n else "queue-counter empty"
     return f"""
@@ -2719,6 +2727,83 @@ def render_done(name, ok, error=None):
     return render(body, page_title=_hostname())
 
 
+# Shared between the request thread that kicks off a commit and the
+# background thread that actually runs it -- a commit blocks on Steam
+# fully stopping and restarting (steam_restart.LAUNCH_POLL_TIMEOUT alone
+# allows up to 150s), which used to mean the "Save changes and restart
+# Steam" form's own POST just hung with a blank/spinning tab for that
+# whole stretch. Running it in a background thread and polling this
+# instead lets /commit redirect to /restarting immediately, which is
+# what actually shows something (big "Restarting Steam..." text) for
+# the duration instead of nothing.
+_commit_status = {"running": False, "done": False, "ok": None, "label": "", "error": None}
+_commit_status_lock = threading.Lock()
+
+
+def _run_commit_in_background(items, label):
+    def apply():
+        for item in items:
+            if item.get("type") == "remove":
+                create_webapp.remove_gridge_shortcut(item["appid"])
+                romfile = item.get("romfile")
+                if romfile and os.path.isfile(romfile):
+                    os.remove(romfile)
+            else:
+                create_webapp.register_steam_shortcut(
+                    item["name"], item["url"], item["asset_paths"],
+                    couch_mode=item["couch_mode"], browser_app_id=item.get("browser_app_id"),
+                    launch_args=item.get("launch_args"),
+                )
+
+    try:
+        maintenance.run_with_steam_stopped(apply, message=f"Applying {label}…")
+        pending_queue.clear()
+        with _commit_status_lock:
+            _commit_status.update(running=False, done=True, ok=True, error=None)
+    except Exception as e:  # noqa: BLE001 -- surfaced to the polling page, not swallowed
+        with _commit_status_lock:
+            _commit_status.update(running=False, done=True, ok=False, error=str(e))
+
+
+def render_restarting():
+    # Big, minimal, on purpose -- this is what actually fills the gap
+    # that used to be a blank/spinning tab for up to ~150s (Steam's own
+    # stop+relaunch cycle, see steam_restart.LAUNCH_POLL_TIMEOUT). Polls
+    # /commit/status every second; redirects to / the moment Steam is
+    # confirmed back up (done && ok), or swaps in the error text in
+    # place if the commit itself failed (done && !ok) rather than
+    # bouncing anywhere.
+    body = """
+<div id="selfsteam-restarting-view" style="width:100%;height:70vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:1rem">
+  <div style="font-size:3rem;font-weight:700">Restarting Steam&hellip;</div>
+  <div style="color:var(--text-dim);font-size:1.1rem">This can take a little while the first time -- hang tight.</div>
+</div>
+<script>
+(function poll() {
+  fetch("/commit/status").then(function (r) { return r.json(); }).then(function (s) {
+    if (s.done && s.ok) {
+      window.location.href = "/";
+      return;
+    }
+    if (s.done && !s.ok) {
+      var view = document.getElementById("selfsteam-restarting-view");
+      view.innerHTML =
+        '<div style="font-size:2rem;font-weight:700;color:#c00">Something went wrong</div>'
+        + '<div id="selfsteam-restarting-error" style="color:var(--text-dim);font-size:1.1rem"></div>'
+        + '<a class="btn" href="/" style="display:inline-block;text-decoration:none;margin-top:1rem">Back to shortcuts</a>';
+      // textContent, not innerHTML -- s.error is a raw exception
+      // message from the server, not markup to trust.
+      document.getElementById("selfsteam-restarting-error").textContent = s.error || "Unknown error";
+      return;
+    }
+    setTimeout(poll, 1000);
+  }).catch(function () { setTimeout(poll, 1000); });
+})();
+</script>
+"""
+    return render(body, page_title=_hostname(), show_back=False)
+
+
 def render_pending():
     items = pending_queue.all_items()
     if not items:
@@ -3003,6 +3088,14 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_json(self, obj, status=200):
+        body = json.dumps(obj).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def _redirect(self, location, set_cookie=None):
         # set_cookie may be a single Set-Cookie value or a list of them
         # (e.g. login setting both the session cookie and, if "remember
@@ -3196,6 +3289,16 @@ class Handler(BaseHTTPRequestHandler):
 
         if parsed.path == "/pending":
             self._send_html(render_pending())
+            return
+
+        if parsed.path == "/restarting":
+            self._send_html(render_restarting())
+            return
+
+        if parsed.path == "/commit/status":
+            with _commit_status_lock:
+                status = dict(_commit_status)
+            self._send_json({"done": status["done"], "ok": status["ok"], "error": status["error"]})
             return
 
         if parsed.path == "/key":
@@ -3766,31 +3869,10 @@ class Handler(BaseHTTPRequestHandler):
         if removed:
             parts.append(f"{removed} removed")
         label = " and ".join(parts) if parts else f"{len(items)} shortcut{'s' if len(items) != 1 else ''}"
-        try:
-            def apply():
-                for item in items:
-                    if item.get("type") == "remove":
-                        create_webapp.remove_gridge_shortcut(item["appid"])
-                        # isfile guard, not a bare remove -- already
-                        # gone (removed by hand, or the same shortcut
-                        # queued for removal twice) is fine, silently
-                        # a no-op rather than a failed commit over a
-                        # file that just isn't there anymore.
-                        romfile = item.get("romfile")
-                        if romfile and os.path.isfile(romfile):
-                            os.remove(romfile)
-                    else:
-                        create_webapp.register_steam_shortcut(
-                            item["name"], item["url"], item["asset_paths"],
-                            couch_mode=item["couch_mode"], browser_app_id=item.get("browser_app_id"),
-                            launch_args=item.get("launch_args"),
-                        )
-
-            maintenance.run_with_steam_stopped(apply, message=f"Applying {label}…")
-            pending_queue.clear()
-            self._send_html(render_done(label, ok=True))
-        except Exception as e:  # noqa: BLE001 -- surfaced to the user, not swallowed
-            self._send_html(render_done(label, ok=False, error=e))
+        with _commit_status_lock:
+            _commit_status.update(running=True, done=False, ok=None, label=label, error=None)
+        threading.Thread(target=_run_commit_in_background, args=(items, label), daemon=True).start()
+        self._redirect("/restarting")
 
     def log_message(self, fmt, *args):
         print(f"[selfsteam-server] {self.address_string()} - {fmt % args}")
