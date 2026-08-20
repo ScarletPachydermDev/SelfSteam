@@ -207,13 +207,39 @@ def _switch_keys_dirs():
 
 
 def _switch_keys_installed(entry):
-    for keys_dir in _switch_keys_dirs():
+    dirs = _switch_keys_dirs()
+    source_dir, source_files = None, None
+    for keys_dir in dirs:
         if not os.path.isdir(keys_dir):
             continue
         found = sorted(f for f in os.listdir(keys_dir) if f.endswith(".keys"))
         if found:
-            return ", ".join(found)
-    return None
+            source_dir, source_files = keys_dir, found
+            break
+    if not source_dir:
+        return None
+
+    # Backfill any sibling dir that's missing what this one has --
+    # closes a real gap confirmed live: keys/firmware installed before
+    # this sharing mechanism existed (e.g. via Flathub Ryubing alone)
+    # made this function report "already installed" for every family
+    # member, but a member whose own directory was never actually
+    # populated would still be missing the real files at launch --
+    # Ryubing Canary AppImage hit exactly this, reporting installed
+    # while its own ~/.config/Ryujinx/system stayed empty until a fresh
+    # reinstall happened to propagate it. Checking here instead of only
+    # propagating on a fresh install makes the "already installed"
+    # claim actually true, not just true for one directory.
+    for keys_dir in dirs:
+        if keys_dir == source_dir:
+            continue
+        os.makedirs(keys_dir, exist_ok=True)
+        for fname in source_files:
+            dest = os.path.join(keys_dir, fname)
+            if not os.path.isfile(dest):
+                shutil.copy2(os.path.join(source_dir, fname), dest)
+
+    return ", ".join(source_files)
 
 
 def _switch_install_keys(entry, keys_path):
@@ -1568,27 +1594,50 @@ def firmware_installed(name):
     Checks every dir in _ryujinx_family_contents_dirs(), not just
     whichever one this specific entry would itself use -- firmware
     installed via any one of the Ryujinx-family entries should already
-    read as installed for the other two."""
+    read as installed for the other two. Also backfills any sibling dir
+    that's missing the real registered/ content -- see
+    _switch_keys_installed's own comment for why this needs to actually
+    copy the files here, not just report true: confirmed live, firmware
+    installed before this sharing mechanism existed left Ryubing Canary
+    AppImage's own directory empty despite this function reporting
+    "installed" for it, so Ryujinx Canary itself still complained about
+    missing firmware at launch."""
     entry = EMULATORS.get(name)
     if not entry:
         return None
-    for contents_dir in _ryujinx_family_contents_dirs():
+
+    dirs = _ryujinx_family_contents_dirs()
+    source_contents_dir = None
+    for contents_dir in dirs:
         registered_dir = os.path.join(contents_dir, "registered")
-        if not os.path.isdir(registered_dir):
+        if os.path.isdir(registered_dir) and os.listdir(registered_dir):
+            source_contents_dir = contents_dir
+            break
+    if not source_contents_dir:
+        return None
+
+    for contents_dir in dirs:
+        if contents_dir == source_contents_dir:
             continue
-        count = len(os.listdir(registered_dir))
-        if not count:
-            continue
-        marker_path = _firmware_marker_path(contents_dir)
-        if not os.path.isfile(marker_path):
-            marker_path = _old_firmware_marker_path(contents_dir)
-        if os.path.isfile(marker_path):
-            with open(marker_path) as f:
-                marker = f.read().strip()
-            if marker:
-                return marker
-        return f"{count} titles"
-    return None
+        dest_registered = os.path.join(contents_dir, "registered")
+        if not os.path.isdir(dest_registered):
+            os.makedirs(contents_dir, exist_ok=True)
+            shutil.copytree(os.path.join(source_contents_dir, "registered"), dest_registered)
+            src_marker = _firmware_marker_path(source_contents_dir)
+            if os.path.isfile(src_marker):
+                shutil.copy2(src_marker, _firmware_marker_path(contents_dir))
+
+    registered_dir = os.path.join(source_contents_dir, "registered")
+    count = len(os.listdir(registered_dir))
+    marker_path = _firmware_marker_path(source_contents_dir)
+    if not os.path.isfile(marker_path):
+        marker_path = _old_firmware_marker_path(source_contents_dir)
+    if os.path.isfile(marker_path):
+        with open(marker_path) as f:
+            marker = f.read().strip()
+        if marker:
+            return marker
+    return f"{count} titles"
 
 
 def install_keys(name, keys_path):
