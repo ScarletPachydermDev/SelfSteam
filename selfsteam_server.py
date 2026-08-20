@@ -684,7 +684,7 @@ input[type=file]::file-selector-button {
      this does. */
   header.selfsteam-header { flex-wrap: wrap; padding: 0.8rem 1rem; gap: 0.6rem; }
   .selfsteam-header-left { flex-wrap: wrap; gap: 0.5rem; min-width: 0; flex: 1 1 auto; }
-  .selfsteam-header-title { min-width: 0; overflow: hidden; }
+  .selfsteam-header-title { min-width: 0; overflow: hidden; flex: 1 1 auto; text-align: center; }
   .selfsteam-header-title strong {
     display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 1.05rem;
   }
