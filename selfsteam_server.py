@@ -701,28 +701,35 @@ input[type=file]::file-selector-button {
      same .boxed-list, see _match_list_html/_em_list_rows/_ra_list_rows),
      so this hides only the placeholder skeleton, never real results. */
   .placeholder-row { display: none; }
-  /* The artwork column's own category/row flex-grow chain (see
-     .artwork-category's own comment) needs *some* definite height
-     somewhere upstream to distribute -- on desktop that's .card's own
-     flex:1 inside a viewport-bound .selfsteam-right/.selfsteam-columns.
-     Once columns stack (.selfsteam-left/.middle/.right above all get
-     flex-basis:100%; min-height:auto), that chain has nothing definite
-     left to grow into at any point, so every category/row/cell in it
-     collapsed to zero height -- confirmed live as exactly why artwork
-     stopped rendering on mobile after the flex-grow fix landed. Giving
-     .artwork-card its own explicit height here re-anchors the same
-     already-working downstream chain; nothing about the category/row/
-     cell styles themselves needs to change. */
-  /* overflow-y:auto, not the general .card{overflow-y:visible} mobile
-     rule above -- each category's own min-height:60px floor (see
-     cell_style's own comment) can push the smaller-weight categories'
-     real height past their flex-grow "fair share" of 65vh, and Logo/
-     Icon (the two smallest) sit last, so visible-not-scrollable let
-     their content spill past the card's own bottom edge into whatever
-     follows in the page instead of being reachable at all -- confirmed
-     live as exactly the "looked cropped" report. auto keeps them
-     reachable by scrolling within the card instead. */
-  .artwork-card { height: 65vh; flex: none; overflow-y: auto; }
+  /* The desktop category/row flex-grow chain (see .artwork-category's
+     own comment) needs *some* definite height upstream to distribute --
+     .card's own flex:1 inside a viewport-bound .selfsteam-right no
+     longer provides one once columns stack (flex-basis:100%;
+     min-height:auto), so every category/row/cell in that chain
+     collapsed to zero height. A fixed vh height + internal overflow-y
+     scroll was tried here first, but that fights this project's own
+     established mobile philosophy (see this block's very first comment
+     above: "letting the whole page scroll normally" instead of nested
+     independently-scrolling panels) and still cropped Logo/Icon in
+     practice (confirmed live via screenshot -- min-height:60px per
+     category pushing real content past whatever fixed vh was picked,
+     no matter how generous).
+
+     Simpler and more consistent instead: don't flex-grow at all here.
+     !important overrides the inline flex/height styles those elements
+     carry from the desktop render (category_style/row_style/cell_style
+     in _artwork_picker_html) -- each category just gets its own
+     natural, fixed-per-tile height, the row's real height comes from
+     its tallest child the same way any other block content would, and
+     the whole page scrolls to reach Logo/Icon like every other mobile
+     card already does. selfsteamSizeArtworkCells still runs and still
+     works correctly here -- it reads each row's real clientHeight
+     (now content-driven instead of percentage-of-flex-parent) to set
+     pixel widths, no changes needed there at all. */
+  .artwork-card { height: auto; flex: none; overflow-y: visible; }
+  .artwork-category { flex: none !important; min-height: auto !important; }
+  .artwork-row { flex: none !important; height: auto !important; }
+  .artwork-cell { height: 140px !important; }
 }
 </style></head><body>
 <header class="selfsteam-header">
