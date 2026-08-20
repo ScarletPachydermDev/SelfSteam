@@ -1073,7 +1073,7 @@ EMULATORS = {
         # on X1 (filesystems=home;host:ro), not just read from the
         # manifest text.
     },
-    "Eden": {
+    "Eden (amd64 — Intel/AMD desktop)": {
         "install_type": "binary",
         # Gitea REST API (self-hosted, not GitHub -- Eden's own GitHub
         # mirror is DMCA-blocked by Nintendo as of 2026-02-12, confirmed
@@ -1109,7 +1109,7 @@ EMULATORS = {
         # Ryubing, its other fork) per real user testing, not guessed.
         "rom_exclude_extensions": {".nsp"},
     },
-    "Eden (Legacy)": {
+    "Eden (Legacy amd64 — pre-Ryzen/pre-Haswell CPUs)": {
         "install_type": "binary",
         "release_api": "https://git.eden-emu.dev/api/v1/repos/eden-emu/eden/releases?limit=1",
         # "legacy" target -- pre-Ryzen/pre-Haswell CPUs, per Eden's own
@@ -1125,7 +1125,7 @@ EMULATORS = {
         "keys_tooltip": "Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
         "rom_exclude_extensions": {".nsp"},
     },
-    "Eden (Steam Deck)": {
+    "Eden (Zen 2 — Steam Deck)": {
         "install_type": "binary",
         "release_api": "https://git.eden-emu.dev/api/v1/repos/eden-emu/eden/releases?limit=1",
         # "steamdeck" target -- Zen 2, per Eden's own release page.
@@ -1140,13 +1140,11 @@ EMULATORS = {
         "keys_tooltip": "Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
         "rom_exclude_extensions": {".nsp"},
     },
-    "Eden (Steam Machine/Zen4)": {
+    "Eden (Zen 4 — AMD Z1/Z2, ROG Ally X, Legion Go S, Steam Machine)": {
         "install_type": "binary",
         "release_api": "https://git.eden-emu.dev/api/v1/repos/eden-emu/eden/releases?limit=1",
         # "rog-ally" target in Eden's own release naming -- Zen 4, per
         # its release page ("AMD Z1/Z2, ROG Ally X, Legion Go S").
-        # Renamed here from the upstream "rog-ally" label to
-        # "Steam Machine/Zen4" per the user's own hardware.
         "binary_asset_re": re.compile(r"^Eden-Linux-v[\d.]+-rog-ally-clang-pgo\.AppImage$"),
         "consoles": "Nintendo Switch",
         "needs_bios": False,
