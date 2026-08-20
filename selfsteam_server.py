@@ -396,14 +396,26 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
    matches exactly rather than approximately. */
 .artwork-category { display: flex; flex-direction: column; gap: 0.35rem; }
 .artwork-category h3 { font-size: 0.85rem; font-weight: 700; margin: 0; color: var(--text); }
-.artwork-row { display: flex; gap: 0.7rem; overflow-x: hidden; padding-bottom: 0.05rem; }
+/* overflow-y:visible explicit on both rules below, not left to the
+   default -- a real CSS Overflow spec quirk, confirmed live via actual
+   computed styles: setting overflow-x to anything but visible (hidden
+   here, auto for .has-artwork below) is not allowed to pair with a
+   default/visible overflow-y, so the engine silently coerces
+   overflow-y to auto too. That auto then genuinely clipped-and-
+   scrolled any row whose real content (a label's own min-height:60px
+   floor, see cell_style's own comment, exceeding a smaller category's
+   mobile height) was even slightly taller than the row's own computed
+   height -- confirmed live as exactly the "last 3 vertically
+   scrollable inside their own row" report on mobile. Declaring
+   overflow-y:visible explicitly opts back out of that coercion. */
+.artwork-row { display: flex; gap: 0.7rem; overflow-x: hidden; overflow-y: visible; padding-bottom: 0.05rem; }
 /* Scrollable only once there's real artwork to scroll through -- the
    blank/skeleton state (no search run yet, or nothing found) has
    nothing behind the extra filler tiles (see _SKELETON_TILE_COUNTS'
    own comment on why there are more of them than typically fit), so
    letting that scroll just invited dragging through empty placeholder
    tiles for no reason. */
-.artwork-row.has-artwork { overflow-x: auto; }
+.artwork-row.has-artwork { overflow-x: auto; overflow-y: visible; }
 .artwork-cell { flex: 0 0 auto; }
 .artwork-cell input[type=radio] { display: none; }
 .artwork-cell label {
