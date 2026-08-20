@@ -25,6 +25,8 @@ import re
 import shlex
 import shutil
 import subprocess
+import urllib.error
+import urllib.request
 import xml.etree.ElementTree as ET
 import zipfile
 
@@ -708,6 +710,62 @@ def install_rpcs3_firmware(entry, slot_prefix, file_path):
     )
 
 
+def _xdg_data_dir(*parts):
+    # Eden runs as a plain AppImage on the host, not inside a Flatpak
+    # sandbox -- no ~/.var/app/<id> redirect the way _flatpak_data_dir
+    # gives every other emulator here, just real $XDG_DATA_HOME (falling
+    # back to ~/.local/share per the XDG basedir spec's own default,
+    # same fallback Eden's own GetDataDirectory() uses).
+    base = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    return os.path.join(base, *parts)
+
+
+def _eden_args(romfile):
+    # -f (fullscreen) and -g <path> (launch game at path), both
+    # confirmed real via Eden's own source (src/yuzu/main_window.cpp's
+    # command-line arg loop -- inherited near-verbatim from yuzu, which
+    # this is forked from).
+    return ["-f", "-g", shlex.quote(romfile)]
+
+
+def _eden_keys_installed(entry):
+    keys_dir = _xdg_data_dir("eden", "keys")
+    if not os.path.isdir(keys_dir):
+        return None
+    found = sorted(f for f in os.listdir(keys_dir) if f.endswith(".keys"))
+    return ", ".join(found) if found else None
+
+
+def _eden_install_keys(entry, keys_path):
+    # $XDG_DATA_HOME/eden/keys/ -- confirmed via Eden's own source
+    # (src/common/fs/path_util.cpp's Reinitialize(): on Linux,
+    # eden_path = GetDataDirectory("XDG_DATA_HOME") / EDEN_DIR, and
+    # EdenPath::KeysDir = eden_path / KEYS_DIR, with EDEN_DIR="eden" and
+    # KEYS_DIR="keys" from src/common/fs/fs_paths.h). Deliberately NOT
+    # the same directory Ryubing's own keys live in
+    # (~/.config/Ryujinx/system under its Flatpak sandbox) -- these are
+    # separate Switch-emulator codebases with their own conventions,
+    # confirmed independently rather than assumed identical.
+    #
+    # Same title.keys sibling-pickup as _ryubing_install_keys -- see its
+    # own comment for why.
+    dest_dir = _xdg_data_dir("eden", "keys")
+    os.makedirs(dest_dir, exist_ok=True)
+
+    copied = []
+    dest = os.path.join(dest_dir, os.path.basename(keys_path))
+    shutil.copy2(keys_path, dest)
+    copied.append(dest)
+
+    sibling = os.path.join(os.path.dirname(keys_path), "title.keys")
+    if os.path.basename(keys_path) != "title.keys" and os.path.isfile(sibling):
+        sibling_dest = os.path.join(dest_dir, "title.keys")
+        shutil.copy2(sibling, sibling_dest)
+        copied.append(sibling_dest)
+
+    return copied
+
+
 EMULATORS = {
     "Dolphin": {
         "install_type": "flathub",
@@ -1015,6 +1073,42 @@ EMULATORS = {
         # on X1 (filesystems=home;host:ro), not just read from the
         # manifest text.
     },
+    "Eden": {
+        "install_type": "binary",
+        # Gitea REST API (self-hosted, not GitHub -- Eden's own GitHub
+        # mirror is DMCA-blocked by Nintendo as of 2026-02-12, confirmed
+        # live via `gh api` returning a 451 with that exact takedown
+        # notice). Confirmed reachable directly from X1's own Python
+        # (urllib + a User-Agent header) at the time this was added, not
+        # just from a browser.
+        "release_api": "https://git.eden-emu.dev/api/v1/repos/eden-emu/eden/releases?limit=1",
+        # amd64 (Intel/AMD desktop) + PGO build (~10-30% faster per
+        # Eden's own release notes, "generally recommended for all
+        # users") -- NOT the "legacy" (pre-Ryzen/Haswell), "steamdeck"
+        # (Zen 2), "rog-ally"/Zen4, or "aarch64" variants also published
+        # in every release, and not the bare .zsync delta-update files
+        # sitting alongside each real .AppImage.
+        "binary_asset_re": re.compile(r"^Eden-Linux-v[\d.]+-amd64-clang-pgo\.AppImage$"),
+        "consoles": "Nintendo Switch",
+        "needs_bios": False,
+        "needs_keys": True,
+        # Unlike Ryubing, not confirmed to hard-require a firmware
+        # install to boot at all (yuzu-lineage emulators have
+        # historically run many games keys-only, with system services
+        # stubbed) -- leaving this False rather than asserting either
+        # way without checking Eden's own NAND/firmware directory layout
+        # first (it's a different codebase from Ryujinx's own
+        # bis/system/Contents convention that install_firmware_zip is
+        # built against).
+        "needs_firmware": False,
+        "args": _eden_args,
+        "keys_installed": _eden_keys_installed,
+        "install_keys": _eden_install_keys,
+        "keys_tooltip": "Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
+        # .nsp omitted from the ROM picker -- not supported by Eden (or
+        # Ryubing, its other fork) per real user testing, not guessed.
+        "rom_exclude_extensions": {".nsp"},
+    },
     "openMSX": {
         "install_type": "flathub",
         "app_id": "org.openmsx.openMSX",
@@ -1042,13 +1136,34 @@ def by_install_type(install_type):
     return [name for name, entry in EMULATORS.items() if entry["install_type"] == install_type]
 
 
+def _binary_dir(name):
+    # One folder per binary-installed emulator, kept entirely separate
+    # from anything Flatpak-related -- an AppImage here is just a file
+    # SelfSteam downloaded and chmod +x'd, not a sandboxed app with its
+    # own ~/.var/app/<id> tree.
+    return os.path.join(_xdg_data_dir("selfsteam", "appimages"), name)
+
+
+def _binary_path(name, entry):
+    ext = ".AppImage"
+    return os.path.join(_binary_dir(name), f"{name}{ext}")
+
+
 def installed(name):
     # Callers (see _add_standalone_emulator_shortcut) check this first
     # and only call install() when it's False -- a real Flatpak app,
     # once present, is never reinstalled on a later shortcut for the
-    # same emulator.
+    # same emulator. Binary installs follow the same rule -- once the
+    # AppImage is on disk and executable, later shortcuts for the same
+    # emulator don't re-download it (no update-check here; re-running
+    # install() manually is how you'd force a refresh).
     entry = EMULATORS.get(name)
-    if not entry or entry["install_type"] != "flathub":
+    if not entry:
+        return False
+    if entry["install_type"] == "binary":
+        path = _binary_path(name, entry)
+        return os.path.isfile(path) and os.access(path, os.X_OK)
+    if entry["install_type"] != "flathub":
         return False
     flatpak = host_exec.which("flatpak")
     if not flatpak:
@@ -1082,10 +1197,62 @@ def _ensure_flathub_remote(flatpak):
 _INSTALL_ATTEMPTS = 3
 
 
+def install_binary(name):
+    """Resolves the latest release fresh from the emulator's own release
+    API (same idea as retroarch_cores.py pulling cores from libretro's
+    buildbot -- no fixed download URL, no update-checking logic either,
+    just always fetch whatever's current right now), matches the one
+    asset that's actually meant for this machine via the entry's own
+    "binary_asset_re", downloads it, and chmod +x's it. Raises
+    RuntimeError with the release API's own tag_name if no asset
+    matches, so a naming-scheme change upstream fails loudly instead of
+    silently downloading the wrong architecture's build."""
+    entry = EMULATORS.get(name)
+    if not entry or entry["install_type"] != "binary":
+        raise ValueError(f"{name} is not a binary-install emulator")
+
+    req = urllib.request.Request(entry["release_api"], headers={"User-Agent": "SelfSteam"})
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        releases = json.load(resp)
+    if not releases:
+        raise RuntimeError(f"{name}: release API returned no releases")
+    release = releases[0]
+
+    asset_re = entry["binary_asset_re"]
+    match = next((a for a in release["assets"] if asset_re.match(a["name"])), None)
+    if not match:
+        raise RuntimeError(f"{name} {release.get('tag_name', '?')}: no asset matching {asset_re.pattern!r}")
+
+    dest_dir = _binary_dir(name)
+    os.makedirs(dest_dir, exist_ok=True)
+    dest_path = _binary_path(name, entry)
+    dl_req = urllib.request.Request(match["browser_download_url"], headers={"User-Agent": "SelfSteam"})
+
+    # Same reasoning as flatpak install's own _INSTALL_ATTEMPTS: a large
+    # download failing partway through on a real transient network blip
+    # is common enough (confirmed live: "[Errno 104] Connection reset by
+    # peer" downloading a ~100MB AppImage from Eden's own release CDN,
+    # on an otherwise fine connection, succeeding immediately on retry)
+    # to just retry rather than surface as a one-shot failure.
+    last_error = None
+    for attempt in range(1, _INSTALL_ATTEMPTS + 1):
+        try:
+            with urllib.request.urlopen(dl_req, timeout=300) as resp, open(dest_path, "wb") as f:
+                shutil.copyfileobj(resp, f)
+            os.chmod(dest_path, 0o755)
+            return
+        except (urllib.error.URLError, OSError) as e:
+            last_error = e
+    raise RuntimeError(f"{name}: download failed after {_INSTALL_ATTEMPTS} attempts: {last_error}")
+
+
 def install(name):
     entry = EMULATORS.get(name)
     if not entry:
         raise ValueError(f"No known standalone emulator: {name}")
+    if entry["install_type"] == "binary":
+        install_binary(name)
+        return
     if entry["install_type"] != "flathub":
         raise NotImplementedError(f"install_type {entry['install_type']!r} not implemented yet")
     flatpak = host_exec.which("flatpak")
@@ -1142,7 +1309,14 @@ def grant_permissions(name):
 
 def launch_args(name, romfile):
     entry = EMULATORS.get(name)
-    if not entry or entry["install_type"] != "flathub":
+    if not entry:
+        return None
+    if entry["install_type"] == "binary":
+        path = _binary_path(name, entry)
+        if not os.path.isfile(path):
+            return None
+        return [path, *entry["args"](romfile)]
+    if entry["install_type"] != "flathub":
         return None
     flatpak = host_exec.which("flatpak")
     if not flatpak:

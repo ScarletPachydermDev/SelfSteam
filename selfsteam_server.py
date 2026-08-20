@@ -1834,7 +1834,7 @@ def _emulators_tab_panel_html(state, chosen=None):
     source_toggle = f"""
     <div class="source-toggle" style="margin-bottom:0.6rem">
       {_source_toggle_link("flathub", "Flathub")}
-      {_source_toggle_link("appimage", "AppImage")}
+      {_source_toggle_link("binary", "AppImage")}
     </div>"""
 
     # bios_slots (xemu so far): more than one required BIOS-type file,
