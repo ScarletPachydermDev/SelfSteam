@@ -718,18 +718,23 @@ input[type=file]::file-selector-button {
      Simpler and more consistent instead: don't flex-grow at all here.
      !important overrides the inline flex/height styles those elements
      carry from the desktop render (category_style/row_style/cell_style
-     in _artwork_picker_html) -- each category just gets its own
-     natural, fixed-per-tile height, the row's real height comes from
-     its tallest child the same way any other block content would, and
-     the whole page scrolls to reach Logo/Icon like every other mobile
-     card already does. selfsteamSizeArtworkCells still runs and still
-     works correctly here -- it reads each row's real clientHeight
-     (now content-driven instead of percentage-of-flex-parent) to set
-     pixel widths, no changes needed there at all. */
+     in _artwork_picker_html) -- each category gets its own natural
+     height (via --mobile-cell-height, a per-category CSS custom
+     property set alongside data-artwork-ratio -- proportional to the
+     same base_h weighting used everywhere else, not one flat height
+     for every category, which flattened Vertical Grid down to Icon's
+     own size instead of staying visibly the biggest/most prominent
+     category the way it is in every other state), the row's real
+     height comes from its tallest child the same way any other block
+     content would, and the whole page scrolls to reach Logo/Icon like
+     every other mobile card already does. selfsteamSizeArtworkCells
+     still runs and still works correctly here -- it reads each row's
+     real clientHeight (now content-driven instead of percentage-of-
+     flex-parent) to set pixel widths, no changes needed there at all. */
   .artwork-card { height: auto; flex: none; overflow-y: visible; }
   .artwork-category { flex: none !important; min-height: auto !important; }
   .artwork-row { flex: none !important; height: auto !important; }
-  .artwork-cell { height: 140px !important; }
+  .artwork-cell { height: var(--mobile-cell-height, 140px) !important; }
 }
 </style></head><body>
 <header class="selfsteam-header">
@@ -2477,7 +2482,19 @@ def _ra_loading_artwork_html():
     for basename, title, _fetch, base_w, base_h in ARTWORK_CATEGORIES:
         weight = base_h / _ARTWORK_HEIGHT_WEIGHT_SUM
         category_style = f' style="flex:{weight:.4f} 1 0; min-height:0;"'
-        row_style = f' style="flex:1; min-height:0; height:100%;" data-artwork-ratio="{base_w / base_h:.6f}"'
+        # --mobile-cell-height: mobile's own !important override (see
+        # the @media (max-width: 960px) block's own comment) reads this
+        # per-category instead of one flat height for every category --
+        # confirmed live: a flat height made Vertical Grid (base_h=255,
+        # by far the biggest/most prominent category by design) look no
+        # more prominent than Icon (base_h=100) on mobile, unlike every
+        # other state where its real proportions show through. 0.55 is
+        # just a scale factor keeping it a reasonable on-screen size on
+        # a phone (255 * 0.55 ≈ 140px), not a load-bearing number.
+        row_style = (
+            f' style="flex:1; min-height:0; height:100%; --mobile-cell-height:{base_h * 0.55:.0f}px;" '
+            f'data-artwork-ratio="{base_w / base_h:.6f}"'
+        )
         cell_style = f"height:100%; min-height:60px; aspect-ratio: {base_w} / {base_h};"
         skeletons = "".join(
             f'<div class="artwork-cell artwork-skeleton" style="{cell_style}"></div>'
@@ -2545,7 +2562,19 @@ def _artwork_picker_html(candidates_by_category, prefix=""):
         # actually settles this identically everywhere: once JS sets an
         # explicit pixel width, aspect-ratio no longer has a missing
         # dimension left to derive, so it can no longer disagree.
-        row_style = f' style="flex:1; min-height:0; height:100%;" data-artwork-ratio="{base_w / base_h:.6f}"'
+        # --mobile-cell-height: mobile's own !important override (see
+        # the @media (max-width: 960px) block's own comment) reads this
+        # per-category instead of one flat height for every category --
+        # confirmed live: a flat height made Vertical Grid (base_h=255,
+        # by far the biggest/most prominent category by design) look no
+        # more prominent than Icon (base_h=100) on mobile, unlike every
+        # other state where its real proportions show through. 0.55 is
+        # just a scale factor keeping it a reasonable on-screen size on
+        # a phone (255 * 0.55 ≈ 140px), not a load-bearing number.
+        row_style = (
+            f' style="flex:1; min-height:0; height:100%; --mobile-cell-height:{base_h * 0.55:.0f}px;" '
+            f'data-artwork-ratio="{base_w / base_h:.6f}"'
+        )
         cell_style = f"height:100%; min-height:60px; aspect-ratio: {base_w} / {base_h};"
         # Always the first cell. value="" already flows through
         # do_POST's existing "falsy selection -> skip this category"
@@ -2604,7 +2633,7 @@ def _artwork_picker_html(candidates_by_category, prefix=""):
 
 def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None, match_index=0,
                  candidates_by_category=None, resolved_url=None, chosen=None,
-                 url_edit_appid="", url_edit_name="",
+                 url_edit_appid="", url_edit_name="", url_loading=False,
                  ra_state=None, ra_candidates_by_category=None, ra_chosen=None, ra_loading=False,
                  em_state=None, em_candidates_by_category=None, em_chosen=None, em_loading=False):
     """Single page-builder for every state (home, unresolved input, no
@@ -2776,12 +2805,17 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
 """
         add_button_text = "Save Shortcut" if url_edit_appid else "Create Steam Shortcut"
         add_button = f'<button type="submit" id="selfsteam-add-button" form="{_ADD_FORM_ID}">{add_button_text}</button>'
-    elif ra_awaiting_artwork or em_awaiting_artwork:
+    elif ra_awaiting_artwork or em_awaiting_artwork or url_loading:
         # Everything else (console/rom/bios, or emulator/rom/keys/
         # firmware) is already picked -- just waiting on the SGDB fetch
         # itself (see ra_ready/em_ready's own comment on why this is
         # split out from the base disabled state below), which can
-        # genuinely take a few seconds on a slow connection.
+        # genuinely take a few seconds on a slow connection. url_loading
+        # is the URL tab's own equivalent of ra_awaiting_artwork/
+        # em_awaiting_artwork -- see this function's own url_loading
+        # handling below for why it needed its own two-step meta-refresh
+        # to exist at all (the URL tab previously had no loading
+        # feedback whatsoever, unlike RA/Emulators).
         add_button = (
             '<button type="button" id="selfsteam-add-button" disabled style="opacity:0.45;cursor:not-allowed">'
             'Searching for artwork...<span class="spinner"></span></button>'
@@ -2854,8 +2888,27 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
         em_middle_html = _em_middle_column_html(em_state, [em_chosen] if em_chosen else [], extra_class="middle-panel-emulators")
         em_right_content = _artwork_picker_html(em_candidates_by_category, prefix="em_")
 
-    middle_url = _middle_column_html(query, couch_mode, browser, sgdb_q, matches, match_index, extra_class="middle-panel-url", ra_state=ra_state, em_state=em_state)
-    right_url = f'<div class="card artwork-card right-panel-url">{_artwork_picker_html(candidates_by_category)}</div>'
+    if url_loading:
+        # Same two-step meta-refresh trick as ra_loading/em_loading
+        # above -- the URL tab previously had none of this at all, so a
+        # search just sat there unchanged for however long the real
+        # SGDB round-trip took, easy to mistake for the click not
+        # registering (same problem RA/Emulators already had a fix
+        # for). url_loading_ack marks the follow-up request as the one
+        # that should actually do the real resolve+search work (see the
+        # /search GET handler) -- its own absence is what triggers this
+        # branch in the first place.
+        refresh_url = "/search?" + _state_qs(
+            query, couch_mode, browser, ra_state, em_state,
+            sgdb_q=sgdb_q, url_loading_ack="1", match_index=match_index or None,
+            url_edit_appid=url_edit_appid or None, url_edit_name=url_edit_name or None,
+        )
+        extra_head = f'<meta http-equiv="refresh" content="0;url={html.escape(refresh_url)}">'
+        middle_url = _middle_column_html(query, couch_mode, browser, sgdb_q, [], match_index, extra_class="middle-panel-url", ra_state=ra_state, em_state=em_state)
+        right_url = f'<div class="card artwork-card right-panel-url">{_ra_loading_artwork_html()}</div>'
+    else:
+        middle_url = _middle_column_html(query, couch_mode, browser, sgdb_q, matches, match_index, extra_class="middle-panel-url", ra_state=ra_state, em_state=em_state)
+        right_url = f'<div class="card artwork-card right-panel-url">{_artwork_picker_html(candidates_by_category)}</div>'
     right_ra = f'<div class="card artwork-card right-panel-retroarch" id="selfsteam-ra-right">{ra_right_content}</div>'
     right_em = f'<div class="card artwork-card right-panel-emulators" id="selfsteam-em-right">{em_right_content}</div>'
 
@@ -3546,6 +3599,24 @@ class Handler(BaseHTTPRequestHandler):
             if not query:
                 self._send_html(render_page(
                     browser=browser, ra_state=ra_state, em_state=em_state,
+                    url_edit_appid=url_edit_appid, url_edit_name=url_edit_name,
+                ))
+                return
+
+            # Same fast-instant-response-then-real-work split as ra_loading/
+            # em_loading (see render_page's own url_loading comment) -- the
+            # URL tab previously had none of this, so a search (or picking
+            # a different match, or an SGDB override -- anything that gets
+            # here with a query and reaches this point) just left the
+            # previous page sitting there unchanged for however long the
+            # real SGDB round-trip took. url_loading_ack's absence is what
+            # triggers this; its presence (added by that same loading
+            # render's own meta-refresh) is what lets this fall through to
+            # the real work below on the follow-up request.
+            if not params.get("url_loading_ack"):
+                self._send_html(render_page(
+                    query, couch_mode, browser, sgdb_q, match_index=match_index,
+                    ra_state=ra_state, em_state=em_state, url_loading=True,
                     url_edit_appid=url_edit_appid, url_edit_name=url_edit_name,
                 ))
                 return
