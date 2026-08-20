@@ -190,11 +190,6 @@ PAGE_HEAD = """<!doctype html>
   --text: #1a1a1a;
   --text-dim: #8a8a8a;
   --skeleton: #e4e4e4;
-  /* See _ARTWORK_VH_OVERHEAD_PX's own comment (selfsteam_server.py) --
-     tracks main's own vertical padding (top+bottom), which shrinks
-     further under the @media (max-width: 1400px) breakpoint below, so
-     this gets redeclared there too rather than staying fixed. */
-  --artwork-vh-overhead: 369px;
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; }
@@ -388,8 +383,8 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
 .placeholder-row:nth-child(even) { background: #f3f3f3; }
 /* Tightened chrome (padding/gaps/label size) vs the default .card,
    specifically to reclaim vertical space for the actual artwork --
-   every pixel trimmed here is a pixel --artwork-vh-overhead doesn't
-   have to reserve, i.e. directly bigger tiles. */
+   every pixel trimmed here is a pixel the category rows below get to
+   flex-grow into instead, i.e. directly bigger tiles. */
 /* Extra space here (between category blocks) only ever shows above
    the 2nd-5th categories -- flex gap doesn't add anything before the
    first item, so Vertical Grid stays flush with the card's own top
@@ -649,11 +644,6 @@ input[type=file]::file-selector-button {
   main { padding: 0.75rem; }
   .selfsteam-columns { gap: 0.65rem; }
   .card { padding: 0.65rem; }
-  /* main's own padding shrank further here than at the base :root
-     value above -- redeclared to match, or the artwork column would
-     under-fill itself by the difference (see _ARTWORK_VH_OVERHEAD_PX's
-     own comment). */
-  :root { --artwork-vh-overhead: 353px; }
 }
 @media (max-width: 960px) {
   /* Stacked columns don't work with the bounded-height/internal-scroll
@@ -2305,24 +2295,16 @@ def _ra_middle_column_html(state, matches, extra_class=""):
 
 
 # Sum of gui.py's own category heights (255+121+104+100+100) -- used
-# below to give each category a share of the column's real height
-# proportional to its own natural size, instead of a fixed px scale
-# that leaves the column visibly short of its actual available space
-# on any screen taller than whatever it was tuned against.
+# below to give each category a real flex-grow share of the column's
+# actual height, proportional to its own natural size. Deliberately not
+# a vh-based pixel estimate (tried and reverted twice): any fixed guess
+# at "how much of the viewport isn't available for artwork" inevitably
+# drifts from reality (a padding change elsewhere, a different screen)
+# and leaves visible empty space wherever that estimate came up short.
+# Real flex-grow instead means the categories collectively fill
+# .artwork-card's exact real height, whatever it actually renders to,
+# with no guessing involved at all.
 _ARTWORK_HEIGHT_WEIGHT_SUM = sum(base_h for _b, _t, _f, _w, base_h in ARTWORK_CATEGORIES)
-# Rough fixed overhead per category row (its <h3> label, row gaps, the
-# card's own padding/gaps) subtracted from 100vh before splitting the
-# remainder by weight -- not exact (header height/main padding vary a
-# little), just close enough that all 5 categories land within the
-# column's real height rather than needing to scroll for one of them.
-# Lives as the --artwork-vh-overhead CSS custom property (:root, and
-# redeclared under @media (max-width: 1400px)), not a bare number baked
-# into the calc() below -- it has to track main's own vertical padding,
-# which differs across that same breakpoint; a fixed number here went
-# stale the moment that breakpoint's padding was tightened, reserving
-# more space than actually existed and leaving a visible empty gap
-# under the last category instead of actually filling the column
-# (confirmed live as exactly this after that padding change).
 
 
 # Skeleton tile counts per category before any search -- matches the
@@ -2380,41 +2362,27 @@ def _artwork_picker_html(candidates_by_category, prefix=""):
     # first result never looked selected (the Emulators tab's own
     # always-"no artwork" default, rendered after it, was overriding it).
     sections = []
-    for idx, (basename, title, _fetch, base_w, base_h) in enumerate(ARTWORK_CATEGORIES):
+    for basename, title, _fetch, base_w, base_h in ARTWORK_CATEGORIES:
         candidates = candidates_by_category.get(basename) or []
-        is_last = idx == len(ARTWORK_CATEGORIES) - 1
-        if is_last:
-            # The vh-based estimate below is inherently approximate
-            # (see --artwork-vh-overhead's own comment) -- close enough
-            # for the categories above it, but any leftover slack from
-            # that estimate being slightly off previously showed up as
-            # visible empty space under this last one specifically,
-            # since nothing after it could absorb the difference. Real
-            # flex-grow instead: .artwork-category/.artwork-row both
-            # stretch to consume whatever space is actually left in
-            # .artwork-card (min-height:0 so they can shrink below
-            # their own content size, standard flex-child requirement),
-            # and its cells are 100% of that real, exact height rather
-            # than another vh guess -- reaches the card's real bottom
-            # edge regardless of estimation error anywhere else.
-            category_style = ' style="flex:1 1 0; min-height:0;"'
-            row_style = ' style="flex:1; min-height:0; height:100%;"'
-            cell_style = f"height:100%; min-height:60px; aspect-ratio: {base_w} / {base_h};"
-        else:
-            category_style = ""
-            row_style = ""
-            # Height-driven sizing (not width): each category's row height is
-            # a share of the viewport proportional to its own natural size,
-            # and aspect-ratio derives the width from that -- so the artwork
-            # column actually fills the screen instead of sitting at a fixed
-            # size tuned for one particular window height. Shared between
-            # real cells and empty-state skeleton tiles so the layout doesn't
-            # jump once a search actually returns candidates.
-            weight = base_h / _ARTWORK_HEIGHT_WEIGHT_SUM
-            cell_style = (
-                f"height:calc((100vh - var(--artwork-vh-overhead)) * {weight:.4f}); "
-                f"min-height:60px; aspect-ratio: {base_w} / {base_h};"
-            )
+        # Real flex-grow, not a vh-based estimate -- every category's
+        # own .artwork-category/.artwork-row gets flex-grow proportional
+        # to its natural size (base_h), with min-height:0 so it can
+        # shrink below its own content size (the standard flex-child
+        # requirement for this to work at all). Collectively they always
+        # fill .artwork-card's *real* height exactly, whatever it
+        # actually is, with zero guessing about viewport/header/padding
+        # overhead -- a fixed vh-based calc there was inherently
+        # approximate and left visible empty space under whichever
+        # category happened to sit last once that estimate drifted from
+        # reality (confirmed live, twice: once from a padding change
+        # elsewhere going unaccounted for, and once from only fixing
+        # this for the last category instead of all of them). Cells are
+        # height:100% of their row's own real (flex-determined) height;
+        # aspect-ratio still derives width from that, same as before.
+        weight = base_h / _ARTWORK_HEIGHT_WEIGHT_SUM
+        category_style = f' style="flex:{weight:.4f} 1 0; min-height:0;"'
+        row_style = ' style="flex:1; min-height:0; height:100%;"'
+        cell_style = f"height:100%; min-height:60px; aspect-ratio: {base_w} / {base_h};"
         # Always the first cell. value="" already flows through
         # do_POST's existing "falsy selection -> skip this category"
         # logic untouched, so a shortcut can always be created with no
