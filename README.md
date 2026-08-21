@@ -10,15 +10,14 @@ A headless companion, a small web UI for adding Steam shortcuts (with SteamGridD
 ## Feaures
 
 - [x] Add streaming or any websites as a Steam shortcut
-- [x] Retrieve game or app artwork from vast [SteamGridDB](https://www.steamgriddb.com/) vast community database (you'll need to provide your own API key)
+- [x] Retrieve game or app artwork from [SteamGridDB](https://www.steamgriddb.com/) vast community database (you'll need to provide your own API key)
 - [ ] Install other game launchers and apps
 - [x] Upload retro games roms and SS will take care of looking for artwork and adding Steam shortcut
 - [x] Upload .isos, keys and firmware files from SS to add more modern console games.
 - [x] Add/edit your non Steam shortcuts
-- [x] Web UI running from your Steam Deck / Steam Machine game mode, desktop mode is only needed to install app4
+- [x] Web UI running from your Steam Deck / Steam Machine in game mode, desktop mode is only needed to install app
 - [x] Screen code authentication
 - [x] Install emulators from flathub and appimages from developers source
-- [x] Upload files or browse your PC files from SS web UI 
 - [x] Auto update flatpak
 
 ## To be done
@@ -30,6 +29,7 @@ A headless companion, a small web UI for adding Steam shortcuts (with SteamGridD
 
 ## How to install
 Run on your terminal
+
 `flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo && flatpak remote-add --user --if-not-exists selfsteam https://raw.githubusercontent.com/ScarletPachydermDev/SelfSteam/master/packaging/io.github.ScarletPachydermDev.SelfSteam.flatpakrepo && flatpak install --user selfsteam io.github.ScarletPachydermDev.SelfSteam`
 
 ## Friend projects
@@ -41,6 +41,7 @@ SelfSteam doesn't vendor code from any of these, but real behavior/patterns here
 - **[ChimeraOS/gamescope-session](https://github.com/ChimeraOS/gamescope-session)** (its bundled `gamescope-fg` tool) -- the `STEAM_GAME`/`GAMESCOPECTRL_BASELAYER_APPID` X11 mechanism `gamescope_splash.py` reimplements directly, so this has no runtime dependency on it being installed.
 - **[Jellyfin's own Flatpak](https://github.com/flathub/org.jellyfin.JellyfinServer)** -- confirmed the real, working shape for a background-service Flatpak (a sandbox can't touch `~/.config/systemd/user`/`systemctl` itself, so setup has to happen through an escape hatch or a copy-paste script).
 - **[SteamGridDB/steam-rom-manager](https://github.com/SteamGridDB/steam-rom-manager)** -- Artwork source and `_ra_guess_name_from_filename`'s ROM-filename cleanup is a ported version of its own `fuzzy-matcher.ts`.
+- **[mateussouzaweb/nicedeck](https://github.com/mateussouzaweb/nicedeck)**
 
 ## Donate
 
