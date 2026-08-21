@@ -60,6 +60,17 @@ The sandbox needs a broad `--filesystem=host` (wider than Gridge's own narrower 
 
 The icon (`packaging/io.github.ScarletPachydermDev.SelfSteam.svg`, rasterized to PNG at build time -- `org.gnome.Sdk`'s own `appstreamcli compose` can't rasterize SVG itself, confirmed live) is still a rough placeholder.
 
+## Friend projects
+
+SelfSteam doesn't vendor code from any of these, but real behavior/patterns here were confirmed by actually reading their own source, not guessed -- each one credited in the relevant file's own comments too:
+
+- **[gridge-desktop](https://github.com/ScarletPachydermDev/gridge-desktop)** -- the sibling desktop app; shares the shortcut/artwork backend (`create_webapp.py`) directly, and this project's whole Flatpak packaging setup (manifest layout, `selfsteam.sh`-style launcher wrapper, signed self-hosted repo + GitHub Pages + auto-update workflow) mirrors its own real, working setup.
+- **[ChimeraOS](https://github.com/ChimeraOS/chimera)** -- the pairing-code auth screen's layout (`chimera_app/authenticator.py`) and the confirmed reason Steam needs to be fully stopped before writing `shortcuts.vdf` (its own periodic re-save silently clobbers an in-place edit).
+- **[emerytech/couchside](https://github.com/emerytech/couchside)** -- the same no-accounts, code-on-screen pairing pattern.
+- **[ChimeraOS/gamescope-session](https://github.com/ChimeraOS/gamescope-session)** (its bundled `gamescope-fg` tool) -- the `STEAM_GAME`/`GAMESCOPECTRL_BASELAYER_APPID` X11 mechanism `gamescope_splash.py` reimplements directly, so this has no runtime dependency on it being installed.
+- **[Jellyfin's own Flatpak](https://github.com/flathub/org.jellyfin.JellyfinServer)** -- confirmed the real, working shape for a background-service Flatpak (a sandbox can't touch `~/.config/systemd/user`/`systemctl` itself, so setup has to happen through an escape hatch or a copy-paste script).
+- **[SteamGridDB/steam-rom-manager](https://github.com/SteamGridDB/steam-rom-manager)** -- `_ra_guess_name_from_filename`'s ROM-filename cleanup is a ported version of its own `fuzzy-matcher.ts`.
+
 ## License
 
 [MIT](LICENSE)
