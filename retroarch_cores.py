@@ -21,12 +21,18 @@ import host_exec
 
 RETROARCH_APP_ID = "org.libretro.RetroArch"
 _BUILDBOT_BASE = "https://buildbot.libretro.com/nightly/linux/x86_64/latest"
+# Same official, stable Flathub repo URL as standalone_emulators.py's own
+# FLATHUB_REPO_URL -- duplicated rather than imported, matching this
+# project's existing preference for small self-contained modules over a
+# new inter-module dependency for two lines of code.
+_FLATHUB_REPO_URL = "https://flathub.org/repo/flathub.flatpakrepo"
 
 # Functions:
 #   _cores_dir() -- RetroArch's own real cores directory.
 #   core_path(console) -- the .so file path for a given console/core entry.
 #   core_installed(console) -- whether that core's .so is already on disk.
 #   retroarch_installed() -- whether the RetroArch Flatpak itself is installed.
+#   _ensure_flathub_remote(flatpak) -- adds the Flathub remote if it's missing.
 #   install_retroarch() -- flatpak installs RetroArch.
 #   install_core(console) -- downloads the real prebuilt core .so from libretro's buildbot.
 #   _system_dir() -- RetroArch's own real BIOS/system directory.
@@ -145,8 +151,24 @@ def retroarch_installed():
     return result.returncode == 0
 
 
+def _ensure_flathub_remote(flatpak):
+    # --if-not-exists makes this safe to run every install unconditionally
+    # -- a no-op on the common case (Flathub's already configured), a
+    # real remote-add on a genuinely fresh machine that's never
+    # installed anything from Flathub before. Without this, a machine
+    # that had never touched Flathub and added a RetroArch shortcut
+    # *before* ever using the Emulators tab (the only place this check
+    # used to run, in standalone_emulators.py's own install()) would
+    # fail with "specified remote not found" instead of just working.
+    subprocess.run(
+        host_exec.wrap([flatpak, "remote-add", "--if-not-exists", "--user", "flathub", _FLATHUB_REPO_URL]),
+        check=True,
+    )
+
+
 def install_retroarch():
     flatpak = host_exec.which("flatpak")
+    _ensure_flathub_remote(flatpak)
     subprocess.run(
         host_exec.wrap([flatpak, "install", "--user", "-y", "flathub", RETROARCH_APP_ID]),
         check=True,
