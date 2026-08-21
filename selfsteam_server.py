@@ -1879,13 +1879,15 @@ _EM_STATE_KEYS = [
     "em_install_source", "em_emulator",
     "em_rompath", "em_romfile", "em_romsource",
     "em_biospath", "em_biosfile", "em_biossource", "em_bios_skip",
-    # bios2/bios3: extra BIOS-type file slots beyond the single one above
-    # -- xemu is the first emulator here needing more than one (MCPX
-    # bootrom, Xbox BIOS, EEPROM), see standalone_emulators.XEMU_BIOS_SLOTS.
-    # Reuses the exact same em_<prefix>path/file/source/_skip shape as
-    # every other picker, just with "bios2"/"bios3" as the prefix.
+    # bios2/bios3/bios4: extra BIOS-type file slots beyond the single
+    # one above -- xemu is the first emulator here needing more than
+    # one (MCPX bootrom, Xbox BIOS, hard disk image, EEPROM), see
+    # standalone_emulators.XEMU_BIOS_SLOTS. Reuses the exact same
+    # em_<prefix>path/file/source/_skip shape as every other picker,
+    # just with "bios2"/"bios3"/"bios4" as the prefix.
     "em_bios2path", "em_bios2file", "em_bios2source", "em_bios2_skip",
     "em_bios3path", "em_bios3file", "em_bios3source", "em_bios3_skip",
+    "em_bios4path", "em_bios4file", "em_bios4source", "em_bios4_skip",
     "em_keyspath", "em_keysfile", "em_keyssource", "em_keys_skip",
     "em_firmwarepath", "em_firmwarefile", "em_firmwaresource", "em_firmware_skip",
     "em_resolved", "em_sgdb_q", "em_sgdb_cleared", "em_name_cleared",
@@ -2974,9 +2976,15 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
         em_entry and em_state.get("em_romfile")
         and (
             all(
-                em_state.get(f"em_{prefix}file")
+                # A slot tuple's optional 4th element marks it not
+                # required (defaults True when absent) -- xemu's own
+                # EEPROM slot so far, see XEMU_BIOS_SLOTS' own comment
+                # on why (xemu auto-generates a default one, unlike the
+                # other BIOS-family files it needs).
+                (rest and rest[-1] is False)
+                or em_state.get(f"em_{prefix}file")
                 or (standalone_emulators.bios_slot_installed(em_emulator, prefix) and not em_state.get(f"em_{prefix}_skip"))
-                for prefix, _label, *_rest in em_entry.get("bios_slots")
+                for prefix, _label, *rest in em_entry.get("bios_slots")
             )
             if em_entry.get("bios_slots")
             else (em_state.get("em_biosfile") if em_entry.get("needs_bios") else True)
@@ -4333,6 +4341,12 @@ class Handler(BaseHTTPRequestHandler):
             # grant_permissions' own docstring for the real bug this
             # fixes.
             standalone_emulators.grant_permissions(em_emulator)
+            # No-op for every emulator that doesn't define one (xemu so
+            # far is the only one) -- see configure_renderer's own
+            # docstring. Runs unconditionally, same as grant_permissions
+            # above, so it also reaches an emulator SelfSteam didn't
+            # freshly install this time.
+            standalone_emulators.configure_renderer(em_emulator)
             # Keys/firmware installs are real, verified (not guessed)
             # ports of Ryubing's own ContentManager.InstallKeys/
             # InstallFirmware -- see standalone_emulators.py's own
@@ -4458,7 +4472,7 @@ class Handler(BaseHTTPRequestHandler):
         params = urllib.parse.parse_qs(parsed.query)
         em_state = _em_state_from_params(params)
         slot = (params.get("slot") or [""])[0]
-        if slot not in ("rom", "bios", "bios2", "bios3", "keys", "firmware"):
+        if slot not in ("rom", "bios", "bios2", "bios3", "bios4", "keys", "firmware"):
             self._send_html(render("<p>Invalid upload slot</p>"), status=400)
             return
 

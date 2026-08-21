@@ -45,6 +45,7 @@ import host_exec
 #       the multi-BIOS-file dispatch (xemu, PCSX2, RPCS3, Vita3K).
 #   keys_installed(name) / install_keys(name, path) -- Switch prod.keys/title.keys handling.
 #   firmware_installed(name) / install_firmware_zip(name, path) -- Switch firmware handling.
+#   configure_renderer(name) -- sets an emulator's own renderer preference, if it has one (xemu -> Vulkan).
 #   binary_path(name) -- real AppImage path for a "binary" install_type entry.
 #
 # Per-emulator launch-arg builders (one per catalog entry, e.g. _dolphin_args, _pcsx2_args,
@@ -579,15 +580,26 @@ def _toml_set_in_section(content, section, key, value):
 
 
 # slot prefix (matches the em_<prefix>file/path/source state keys) ->
-# (label, xemu's own real TOML key under [sys.files], confirmed via its
-# own config_spec.yml) -- xemu is the first (and so far only) emulator
-# here with more than one required BIOS-type file, since original Xbox
-# emulation has no HLE fallback the way GameCube/DS/N64 do (confirmed:
-# no "enable HLE"-style toggle exists anywhere in its settings).
+# (label, xemu's own real TOML key under [sys.files], required) --
+# confirmed via xemu's own required-files docs (xemu.app/docs/required-
+# files) and config_spec.yml: MCPX bootrom, flash BIOS, and a hard disk
+# image are all genuinely required (no HLE fallback the way GameCube/
+# DS/N64 have -- no "enable HLE"-style toggle exists anywhere in xemu's
+# settings, and unlike EEPROM below, nothing auto-generates a usable
+# HDD image). EEPROM is the one exception -- xemu's own docs confirm it
+# auto-generates a default if none is configured -- so it's last in
+# this list and marked optional (4th tuple element, defaults True when
+# omitted -- see render_page's own em_prereqs_ready), not gated on the
+# way the first three are. Kept as its own slot regardless of being
+# optional, rather than dropped entirely, since a user migrating an
+# existing profile still needs a way to point at their real EEPROM
+# (serial/MAC/HDD key/region) instead of always getting xemu's freshly
+# generated one.
 XEMU_BIOS_SLOTS = [
     ("bios", "Select MCPX Boot ROM", "bootrom_path"),
     ("bios2", "Select Xbox BIOS", "flashrom_path"),
-    ("bios3", "Select EEPROM", "eeprom_path"),
+    ("bios3", "Select Hard Disk Image", "hdd_path"),
+    ("bios4", "Select EEPROM (optional)", "eeprom_path", False),
 ]
 
 
@@ -607,7 +619,7 @@ def xemu_bios_slot_installed(entry, slot_prefix):
     xemu.toml just points straight at wherever the user's real file
     already lives on disk, same as Dolphin's own ISOPaths referencing
     real host paths rather than copies."""
-    toml_key = next(k for p, _label, k in XEMU_BIOS_SLOTS if p == slot_prefix)
+    toml_key = next(k for p, _label, k, *_r in XEMU_BIOS_SLOTS if p == slot_prefix)
     toml_path = _xemu_toml_path(entry)
     if not os.path.isfile(toml_path):
         return None
@@ -624,7 +636,7 @@ def install_xemu_bios_slot(entry, slot_prefix, file_path):
     installed here via a bare `flatpak install`, never an actual first
     launch, so nothing would ever create one otherwise -- every real
     BIOS write would silently no-op on a fresh install without this."""
-    toml_key = next(k for p, _label, k in XEMU_BIOS_SLOTS if p == slot_prefix)
+    toml_key = next(k for p, _label, k, *_r in XEMU_BIOS_SLOTS if p == slot_prefix)
     toml_path = _xemu_toml_path(entry)
     os.makedirs(os.path.dirname(toml_path), exist_ok=True)
     content = ""
@@ -632,6 +644,27 @@ def install_xemu_bios_slot(entry, slot_prefix, file_path):
         with open(toml_path) as f:
             content = f.read()
     content = _toml_set_in_section(content, "sys.files", toml_key, file_path)
+    with open(toml_path, "w") as f:
+        f.write(content)
+
+
+def _xemu_configure_vulkan(entry):
+    """Sets xemu's own [display] renderer to Vulkan (Machine > Settings
+    > Display > Backend in xemu's own UI, confirmed via its docs) --
+    same xemu.toml this file's BIOS-slot writes already touch, just a
+    different section/key ([display] renderer = "VULKAN" rather than
+    [sys.files]). OpenGL is xemu's own default; Vulkan is applied
+    unconditionally here since it's a real emulator-wide preference
+    (generally the better-performing/more broadly compatible backend on
+    modern GPUs), not something that varies per shortcut/game the way
+    BIOS files do."""
+    toml_path = _xemu_toml_path(entry)
+    os.makedirs(os.path.dirname(toml_path), exist_ok=True)
+    content = ""
+    if os.path.isfile(toml_path):
+        with open(toml_path) as f:
+            content = f.read()
+    content = _toml_set_in_section(content, "display", "renderer", "VULKAN")
     with open(toml_path, "w") as f:
         f.write(content)
 
@@ -1021,19 +1054,27 @@ EMULATORS = {
         "app_id": "app.xemu.xemu",
         "consoles": "Original Xbox",
         # Original Xbox emulation has no HLE fallback -- confirmed via
-        # its own config_spec.yml, [sys.files] requires a real MCPX
-        # bootrom, Xbox BIOS (flashrom), and EEPROM dump, no toggle
-        # anywhere to run without them. Three separate files, not one,
-        # so needs_bios/bios_slots both point at XEMU_BIOS_SLOTS rather
-        # than the single-file bios picker every other emulator here
-        # uses.
+        # xemu's own required-files docs and config_spec.yml, [sys.files]
+        # requires a real MCPX bootrom, Xbox BIOS (flashrom), and a hard
+        # disk image, no toggle anywhere to run without them (EEPROM is
+        # the one exception -- see XEMU_BIOS_SLOTS' own comment). Four
+        # separate files, not one, so needs_bios/bios_slots both point
+        # at XEMU_BIOS_SLOTS rather than the single-file bios picker
+        # every other emulator here uses.
         "needs_bios": True,
         "bios_slots": XEMU_BIOS_SLOTS,
         "bios_slot_installed": xemu_bios_slot_installed,
         "install_bios_slot": install_xemu_bios_slot,
+        # xemu provides its own free, legal, copyright-clean HDD image
+        # (an unsigned dashboard with no official Xbox software on it) --
+        # same "here's where to legally get this" pattern as PS3/Vita's
+        # own bios_slot_links, just linking xemu's own docs instead of
+        # Sony's.
+        "bios_slot_links": {"bios3": ("https://xemu.app/docs/required-files/", "Download from xemu")},
         "needs_keys": False,
         "needs_firmware": False,
         "args": _xemu_args,
+        "configure_renderer": _xemu_configure_vulkan,
         # No grant_permissions needed -- confirmed via its own Flathub
         # manifest, it already ships --filesystem=host:ro.
     },
@@ -1689,6 +1730,17 @@ def install_bios_slot(name, slot_prefix, file_path):
     entry = EMULATORS.get(name)
     handler = entry.get("install_bios_slot") if entry else None
     return handler(entry, slot_prefix, file_path) if handler else None
+
+
+def configure_renderer(name):
+    """Dispatches to the entry's own "configure_renderer" handler, if it
+    has one -- a no-op for every emulator that doesn't (xemu so far is
+    the only one SelfSteam has any reason to set a renderer preference
+    for; see _xemu_configure_vulkan's own docstring)."""
+    entry = EMULATORS.get(name)
+    handler = entry.get("configure_renderer") if entry else None
+    if handler:
+        handler(entry)
 
 
 def keys_installed(name):
