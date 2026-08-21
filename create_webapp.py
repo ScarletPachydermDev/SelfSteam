@@ -34,6 +34,7 @@ import steam_paths
 #   fetch_assets(game_id) -- downloads all 5 artwork categories for an SGDB game id.
 #   download_selected_assets(slug, selections) -- downloads only the user-picked candidates.
 #   register_steam_shortcut(name, url, asset_paths, ...) -- writes the shortcut + copies its artwork.
+#   register_custom_shortcut(name, target, start_dir, launch_options, asset_paths, ...) -- same, for a raw Target/Start In/Launch Options shortcut.
 #   _field(entry, *names) -- reads a shortcuts.vdf entry field trying several key casings.
 #   _extract_launch_url(launch_options) -- pulls a URL-tab shortcut's target URL back out.
 #   _extract_retroarch_info(launch_options) -- pulls (console, romfile) back out of an RA shortcut.
@@ -452,6 +453,58 @@ def register_steam_shortcut(name, url, asset_paths, user_id=None, couch_mode=Fal
     return appid
 
 
+def register_custom_shortcut(name, target, start_dir, launch_options, asset_paths, user_id=None):
+    """Like register_steam_shortcut, but for the Custom tab: writes
+    target/start_dir/launch_options straight into shortcuts.vdf as
+    given, rather than synthesizing them from a URL/browser-wrapper or
+    RetroArch/emulator launch_args. This is the path that lets a
+    foreign shortcut (one the user made in Steam directly, or a
+    pre-rename SelfSteam build's exe path this version's
+    is_gridge_launch_wrapper doesn't recognize) get edited here at all
+    -- see list_gridge_shortcuts' own docstring. allow_overlay=True
+    (Steam's own default, unlike the browser/emulator tabs which force
+    it off for their own kiosk/fullscreen reasons) since this is
+    arbitrary user software with no reason to assume otherwise."""
+    appid = shortcuts_vdf.generate_appid(target, name)
+
+    userdata_dir = steam_paths.find_userdata_dir(user_id)
+    grid_dir = os.path.join(userdata_dir, "config", "grid")
+    os.makedirs(grid_dir, exist_ok=True)
+
+    icon_dest = None
+    for basename, src in asset_paths.items():
+        if basename not in GRID_FILENAMES:
+            continue
+        ext = os.path.splitext(src)[1]
+        dest = os.path.join(grid_dir, GRID_FILENAMES[basename].format(appid=appid, ext=ext))
+        shutil.copy2(src, dest)
+        print(f"  + {os.path.basename(dest)}  <-  {src}")
+        if basename == "icon":
+            icon_dest = dest
+
+    vdf_path = os.path.join(userdata_dir, "config", "shortcuts.vdf")
+    written_appid, stale_appids = shortcuts_vdf.add_shortcut(
+        vdf_path,
+        appname=name,
+        exe=target,
+        start_dir=start_dir,
+        icon=icon_dest or "",
+        launch_options=launch_options,
+        allow_overlay=True,
+    )
+    assert written_appid == appid
+
+    for stale_appid in stale_appids:
+        for f in os.listdir(grid_dir):
+            if f.startswith(str(stale_appid)):
+                os.remove(os.path.join(grid_dir, f))
+                print(f"  - removed stale {f}")
+
+    print(f"\nAdded/updated Steam shortcut '{name}' (appid {appid}) in {vdf_path}")
+    print("Restart Steam (fully quit, not just close the window) to see it.")
+    return appid
+
+
 def _field(entry, *names):
     """Reads a shortcuts.vdf entry field trying several key casings --
     Steam rewrites the whole file with its own casing (confirmed:
@@ -666,6 +719,12 @@ def list_gridge_shortcuts():
                 "em_romfile": em_romfile,
                 "user_id": uid,
                 "managed": is_gridge_launch_wrapper(exe),
+                # Raw fields, used to pre-fill the Custom tab's edit form
+                # for anything that isn't a recognized URL/RetroArch/
+                # Emulators shortcut -- see _poster_card_html's edit_href.
+                "exe": exe,
+                "start_dir": _field(entry, "StartDir", "startdir") or "",
+                "launch_options": launch_options,
             })
     results.sort(key=lambda r: r["name"].lower())
     return results

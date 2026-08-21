@@ -522,12 +522,14 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
 .tab-bar a[href="#tab-url"] { background: #fff; color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
 #tab-apps:target ~ .selfsteam-columns .tab-bar a[href="#tab-url"],
 #tab-retroarch:target ~ .selfsteam-columns .tab-bar a[href="#tab-url"],
-#tab-emulators:target ~ .selfsteam-columns .tab-bar a[href="#tab-url"] {
+#tab-emulators:target ~ .selfsteam-columns .tab-bar a[href="#tab-url"],
+#tab-custom:target ~ .selfsteam-columns .tab-bar a[href="#tab-url"] {
   background: transparent; color: var(--text-dim); box-shadow: none;
 }
 #tab-apps:target ~ .selfsteam-columns .tab-bar a[href="#tab-apps"],
 #tab-retroarch:target ~ .selfsteam-columns .tab-bar a[href="#tab-retroarch"],
-#tab-emulators:target ~ .selfsteam-columns .tab-bar a[href="#tab-emulators"] {
+#tab-emulators:target ~ .selfsteam-columns .tab-bar a[href="#tab-emulators"],
+#tab-custom:target ~ .selfsteam-columns .tab-bar a[href="#tab-custom"] {
   background: #fff; color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,0.12);
 }
 /* flex:1 on both so whichever tab is active can stretch to fill the
@@ -558,16 +560,19 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
 .tab-panel-url { display: flex; }
 #tab-apps:target ~ .selfsteam-columns .tab-panels .tab-panel-url,
 #tab-retroarch:target ~ .selfsteam-columns .tab-panels .tab-panel-url,
-#tab-emulators:target ~ .selfsteam-columns .tab-panels .tab-panel-url { display: none; }
+#tab-emulators:target ~ .selfsteam-columns .tab-panels .tab-panel-url,
+#tab-custom:target ~ .selfsteam-columns .tab-panels .tab-panel-url { display: none; }
 #tab-apps:target ~ .selfsteam-columns .tab-panels .tab-panel-apps,
 #tab-retroarch:target ~ .selfsteam-columns .tab-panels .tab-panel-retroarch,
-#tab-emulators:target ~ .selfsteam-columns .tab-panels .tab-panel-emulators { display: flex; }
+#tab-emulators:target ~ .selfsteam-columns .tab-panels .tab-panel-emulators,
+#tab-custom:target ~ .selfsteam-columns .tab-panels .tab-panel-custom { display: flex; }
 /* Middle/right columns: URL's own content is the default (also what
    Apps falls back to showing, same as before RetroArch/Emulators had
    any content of their own) -- only switches away from it when that
    specific tab is the targeted one. */
 .middle-panel-retroarch, .right-panel-retroarch,
-.middle-panel-emulators, .right-panel-emulators { display: none; }
+.middle-panel-emulators, .right-panel-emulators,
+.middle-panel-custom, .right-panel-custom { display: none; }
 #tab-retroarch:target ~ .selfsteam-columns .middle-panel-url,
 #tab-retroarch:target ~ .selfsteam-columns .right-panel-url { display: none; }
 #tab-retroarch:target ~ .selfsteam-columns .middle-panel-retroarch,
@@ -576,6 +581,10 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
 #tab-emulators:target ~ .selfsteam-columns .right-panel-url { display: none; }
 #tab-emulators:target ~ .selfsteam-columns .middle-panel-emulators,
 #tab-emulators:target ~ .selfsteam-columns .right-panel-emulators { display: flex; }
+#tab-custom:target ~ .selfsteam-columns .middle-panel-url,
+#tab-custom:target ~ .selfsteam-columns .right-panel-url { display: none; }
+#tab-custom:target ~ .selfsteam-columns .middle-panel-custom,
+#tab-custom:target ~ .selfsteam-columns .right-panel-custom { display: flex; }
 .coming-soon { color: var(--text-dim); font-size: 0.85rem; padding: 1rem 0; text-align: center; }
 /* RetroArch tab: BIOS/ROM source toggles + embedded server file picker.
    Plain links, not a CSS-radio-hack -- that trick is client-side only
@@ -1225,22 +1234,24 @@ def render(body, page_title="Add Steam Shortcut", show_back=True, extra_head="")
     return (head + body + tail).encode()
 
 
-def _hidden_state_fields(query, couch_mode, browser, ra_state=None, em_state=None):
+def _hidden_state_fields(query, couch_mode, browser, ra_state=None, em_state=None, cu_state=None):
     fields = f'<input type="hidden" name="q" value="{html.escape(query)}">'
     if couch_mode:
         fields += '<input type="hidden" name="couch_mode" value="1">'
     if browser:
         fields += f'<input type="hidden" name="browser" value="{html.escape(browser)}">'
-    # Carries any in-progress RetroArch/Emulators pick across a URL-tab-
-    # only navigation like a search submit -- without this, every normal
-    # URL tab action (typing a URL and hitting Search, picking a
-    # different SGDB match, the SGDB override search) silently wiped
-    # whatever was chosen on another tab, since /search never knew ra_*/
-    # em_* existed. Confirmed live (for ra_*) as the real root cause of
-    # "SGDB search field gone" reports that survived an earlier Clear-
-    # button-only fix -- em_* gets the same treatment from the start.
+    # Carries any in-progress RetroArch/Emulators/Custom pick across a
+    # URL-tab-only navigation like a search submit -- without this,
+    # every normal URL tab action (typing a URL and hitting Search,
+    # picking a different SGDB match, the SGDB override search) silently
+    # wiped whatever was chosen on another tab, since /search never knew
+    # ra_*/em_*/cu_* existed. Confirmed live (for ra_*) as the real root
+    # cause of "SGDB search field gone" reports that survived an earlier
+    # Clear-button-only fix -- em_*/cu_* get the same treatment from the
+    # start.
     fields += _ra_hidden_fields(ra_state)
     fields += _ra_hidden_fields(em_state)
+    fields += _ra_hidden_fields(cu_state)
     return fields
 
 
@@ -1256,7 +1267,7 @@ def _ra_hidden_fields(state):
     )
 
 
-def _state_qs(query, couch_mode, browser, ra_state=None, em_state=None, **extra):
+def _state_qs(query, couch_mode, browser, ra_state=None, em_state=None, cu_state=None, **extra):
     qs = f"q={urllib.parse.quote(query)}"
     if couch_mode:
         qs += "&couch_mode=1"
@@ -1266,8 +1277,8 @@ def _state_qs(query, couch_mode, browser, ra_state=None, em_state=None, **extra)
         if value:
             qs += f"&{key}={urllib.parse.quote(str(value))}"
     # Same reasoning as _hidden_state_fields -- links built from this
-    # (Clear, match rows, name-reset) must not drop RetroArch/Emulators
-    # state either.
+    # (Clear, match rows, name-reset) must not drop RetroArch/Emulators/
+    # Custom state either.
     if ra_state:
         ra_qs = _ra_qs(ra_state)
         if ra_qs:
@@ -1276,6 +1287,10 @@ def _state_qs(query, couch_mode, browser, ra_state=None, em_state=None, **extra)
         em_qs = _em_qs(em_state)
         if em_qs:
             qs += f"&{em_qs}"
+    if cu_state:
+        cu_qs = _cu_qs(cu_state)
+        if cu_qs:
+            qs += f"&{cu_qs}"
     return qs
 
 
@@ -2325,7 +2340,166 @@ def _em_middle_column_html(state, matches, extra_class=""):
 """
 
 
-_FORM_TABS = [("tab-url", "URL"), ("tab-apps", "Apps"), ("tab-retroarch", "RetroArch"), ("tab-emulators", "Emulators")]
+# Custom tab: the edit path for any non-Steam shortcut list_gridge_
+# shortcuts() surfaces that isn't a recognized URL/RetroArch/Emulators
+# entry -- a shortcut the user made in Steam directly, or a pre-rename
+# SelfSteam build's exe path this version doesn't happen to recognize
+# (see create_webapp.list_gridge_shortcuts' own docstring). Same
+# state-threaded-on-the-query-string / SGDB-search-by-name / artwork-
+# picker pattern as the RetroArch/Emulators tabs, just with three plain
+# text fields (Target/Start In/Launch Options) standing in for their
+# console-select + file-browser pickers -- there's no ROM file to
+# derive a search term from, so cu_target's own basename is guessed
+# from the same way a ROM's filename already is (_ra_guess_name_from_
+# filename is generic path-basename cleanup, not actually RA-specific).
+_CU_STATE_KEYS = [
+    "cu_target", "cu_start_dir", "cu_launch_options",
+    "cu_resolved", "cu_sgdb_q", "cu_sgdb_cleared",
+    # Same edit-in-place contract as ra_edit_appid/ra_edit_name -- see
+    # _RA_STATE_KEYS' own comment.
+    "cu_edit_appid", "cu_edit_name",
+]
+
+
+def _cu_state_from_params(params):
+    return {key: (params.get(key) or [""])[0] for key in _CU_STATE_KEYS}
+
+
+def _cu_qs(state, **overrides):
+    merged = dict(state)
+    merged.update(overrides)
+    return "&".join(f"{k}={urllib.parse.quote(str(merged[k]))}" for k in _CU_STATE_KEYS if merged.get(k))
+
+
+def _cu_url(path, state, **overrides):
+    return f"{path}?{_cu_qs(state, **overrides)}#tab-custom"
+
+
+def _cu_display_term(state, chosen=None):
+    # Same override/cleared/resolved-match/guessed-from-path fallback
+    # chain as _ra_display_term -- see its own comment for the reasoning,
+    # "path" here being cu_target instead of a ROM's romfile.
+    if state.get("cu_sgdb_q"):
+        return state["cu_sgdb_q"].lower()
+    if state.get("cu_sgdb_cleared"):
+        return ""
+    if chosen and chosen.get("name"):
+        return chosen["name"].lower()
+    target = state.get("cu_target")
+    return _ra_guess_name_from_filename(target).lower() if target else ""
+
+
+def _cu_sgdb_search_bar_html(state, chosen=None):
+    display_term = _cu_display_term(state, chosen)
+    clear_href = _cu_url("/new", state, cu_sgdb_q="", cu_resolved="", cu_sgdb_cleared="1")
+    hidden = _ra_hidden_fields({k: v for k, v in state.items() if k not in ("cu_sgdb_q", "cu_resolved")})
+    # Disabled until a Target is actually set -- same reasoning as RA/EM's
+    # own romfile-gated search box (nothing to guess a name from yet).
+    disabled = "" if state.get("cu_target") else " disabled"
+    return f"""
+<form action="/new#tab-custom" method="get">
+  {hidden}
+  <div class="search-field-row">
+    <div class="field-with-clear">
+      <input type="text" name="cu_sgdb_q" value="{html.escape(display_term)}" placeholder="SGDB search"{disabled}>
+      <a href="{clear_href}" class="field-clear-btn" title="Clear">&#10005;</a>
+    </div>
+    <button type="submit" class="search-submit-btn" title="Search"{disabled}>{_SEARCH_ICON_SVG}</button>
+  </div>
+</form>
+"""
+
+
+def _cu_middle_column_html(state, matches, extra_class=""):
+    if not matches:
+        list_html = _placeholder_matches_html()
+    else:
+        href = _cu_url("/new", state)
+        rows = []
+        for i, m in enumerate(matches):
+            cls = " selected" if i == 0 else ""
+            rows.append(f'<a class="{cls.strip()}" href="{href}">{html.escape(m["name"])}</a>')
+        list_html = f'<div class="boxed-list">{"".join(rows)}</div>'
+    return f"""
+<div class="card {extra_class}" id="selfsteam-cu-middle">
+  {_cu_sgdb_search_bar_html(state, matches[0] if matches else None)}
+  <div class="field-group" style="flex:1;min-height:0">
+    <h2>SGDB matches</h2>
+    {list_html}
+  </div>
+</div>
+"""
+
+
+def _custom_tab_panel_html(state, chosen=None):
+    # Target/Start In/Launch Options: shortcuts.vdf's own three raw
+    # fields verbatim, not synthesized the way the other tabs' exe/
+    # StartDir/LaunchOptions are -- this tab exists specifically so a
+    # shortcut this tool didn't create (or doesn't recognize the exe
+    # path of) can still be edited here, with its actual params intact.
+    # One GET form (not auto-submitted like RA's console <select>,
+    # there's no single-click equivalent for three free-text fields) --
+    # the target field is required, submitting re-renders this same
+    # page with cu_target/cu_start_dir/cu_launch_options on the query
+    # string, which is what actually kicks off the SGDB search below
+    # (see the /new handler's cu_target-gated branch). cu_resolved is
+    # deliberately NOT carried through this form -- this submit IS the
+    # Custom tab's own "pick again" action (there's no separate file-
+    # picker click to hook a clear onto, unlike _ra_list_rows/
+    # _em_list_rows clearing ra_resolved/em_resolved on every new ROM
+    # pick), so an edited Target must always re-trigger a fresh SGDB
+    # search rather than silently keeping whatever artwork the previous
+    # Target had resolved to.
+    hidden_fields = "".join(
+        f'<input type="hidden" name="{k}" value="{html.escape(state.get(k, ""))}">'
+        for k in _CU_STATE_KEYS if k not in ("cu_target", "cu_start_dir", "cu_launch_options", "cu_resolved")
+    )
+
+    # Own Name field, own input name (cu_match_name) -- same reasoning
+    # as ra_match_name/em_match_name (all three tabs' Name fields exist
+    # in the DOM at once, only one visible via CSS). Owned by the Add
+    # form via form="..." so its live-typed value is what's submitted,
+    # same as every other tab's Name field.
+    target = state.get("cu_target", "")
+    name_default = chosen["name"] if chosen else (_ra_guess_name_from_filename(target) if target else "")
+    name_field = f"""
+  <div class="field-group">
+    <label class="field-label" for="cu-name-field">Name</label>
+    <div class="field-with-clear">
+      <img class="name-field-icon" src="/vendor/name-field-wand.webp" alt="">
+      <input type="text" name="cu_match_name" id="cu-name-field" form="{_ADD_FORM_ID}"
+             value="{html.escape(name_default)}" placeholder="Shortcut name">
+    </div>
+  </div>"""
+
+    return f"""
+  <form method="get" action="/new#tab-custom" style="display:flex;flex-direction:column;gap:0.9rem">
+    {hidden_fields}
+    <div class="field-group">
+      <label class="field-label" for="cu-target-field">Target <span class="required-asterisk">*</span></label>
+      <input type="text" name="cu_target" id="cu-target-field" value="{html.escape(target)}"
+             placeholder="/path/to/executable" required>
+    </div>
+    <div class="field-group">
+      <label class="field-label" for="cu-startdir-field">Start In</label>
+      <input type="text" name="cu_start_dir" id="cu-startdir-field" value="{html.escape(state.get('cu_start_dir', ''))}"
+             placeholder="/path/to/">
+    </div>
+    <div class="field-group">
+      <label class="field-label" for="cu-launchoptions-field">Launch options</label>
+      <input type="text" name="cu_launch_options" id="cu-launchoptions-field" value="{html.escape(state.get('cu_launch_options', ''))}"
+             placeholder="(optional)">
+    </div>
+    <button type="submit" class="search-submit-btn" style="align-self:flex-start;padding:0.5rem 1rem">Find Artwork</button>
+  </form>
+  <div class="selfsteam-spacer"></div>
+  {name_field}"""
+
+
+_FORM_TABS = [
+    ("tab-url", "URL"), ("tab-apps", "Apps"), ("tab-retroarch", "RetroArch"),
+    ("tab-emulators", "Emulators"), ("tab-custom", "Custom"),
+]
 
 
 def _tab_bar_targets_html():
@@ -2725,7 +2899,8 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
                  candidates_by_category=None, resolved_url=None, chosen=None,
                  url_edit_appid="", url_edit_name="", url_loading=False,
                  ra_state=None, ra_candidates_by_category=None, ra_chosen=None, ra_loading=False,
-                 em_state=None, em_candidates_by_category=None, em_chosen=None, em_loading=False):
+                 em_state=None, em_candidates_by_category=None, em_chosen=None, em_loading=False,
+                 cu_state=None, cu_candidates_by_category=None, cu_chosen=None, cu_loading=False):
     """Single page-builder for every state (home, unresolved input, no
     matches, a real workspace) -- all three columns are always present
     and always fully populated (placeholders when empty), rather than
@@ -2745,6 +2920,8 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
     ra_candidates_by_category = ra_candidates_by_category or {}
     em_state = em_state or {}
     em_candidates_by_category = em_candidates_by_category or {}
+    cu_state = cu_state or {}
+    cu_candidates_by_category = cu_candidates_by_category or {}
 
     ra_console = ra_state.get("ra_console", "")
     ra_needs_bios = ra_console in retroarch_cores.CONSOLES_NEEDING_BIOS
@@ -2808,6 +2985,13 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
     )
     em_ready = em_prereqs_ready and bool(em_state.get("em_resolved"))
     em_awaiting_artwork = em_prereqs_ready and not em_state.get("em_resolved")
+
+    # Custom tab: only a Target is actually required (Start In/Launch
+    # Options are free-form and may legitimately be blank), same
+    # prereqs/resolved split as ra_ready/em_ready above.
+    cu_prereqs_ready = bool(cu_state.get("cu_target"))
+    cu_ready = cu_prereqs_ready and bool(cu_state.get("cu_resolved"))
+    cu_awaiting_artwork = cu_prereqs_ready and not cu_state.get("cu_resolved")
 
     add_form = ""
     # Always present and pinned to the bottom, per the design handoff --
@@ -2876,6 +3060,19 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
 """
         add_button_text = "Save Shortcut" if em_edit_appid else "Create Steam Shortcut"
         add_button = f'<button type="submit" id="selfsteam-add-button" form="{_ADD_FORM_ID}">{add_button_text}</button>'
+    elif cu_ready:
+        cu_edit_appid = cu_state.get("cu_edit_appid", "")
+        add_form = f"""
+<form id="{_ADD_FORM_ID}" action="/add" method="post" onsubmit="selfsteamShowCreating(this)">
+  <input type="hidden" name="cu_target" value="{html.escape(cu_state.get('cu_target', ''))}">
+  <input type="hidden" name="cu_start_dir" value="{html.escape(cu_state.get('cu_start_dir', ''))}">
+  <input type="hidden" name="cu_launch_options" value="{html.escape(cu_state.get('cu_launch_options', ''))}">
+  <input type="hidden" name="cu_edit_appid" value="{html.escape(cu_edit_appid)}">
+  <input type="hidden" name="cu_edit_name" value="{html.escape(cu_state.get('cu_edit_name', ''))}">
+</form>
+"""
+        add_button_text = "Save Shortcut" if cu_edit_appid else "Create Steam Shortcut"
+        add_button = f'<button type="submit" id="selfsteam-add-button" form="{_ADD_FORM_ID}">{add_button_text}</button>'
     elif chosen is not None:
         couch_field = '<input type="hidden" name="couch_mode" value="1">' if couch_mode else ""
         # The Name field itself (see _url_tab_panel_html) is what
@@ -2895,7 +3092,7 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
 """
         add_button_text = "Save Shortcut" if url_edit_appid else "Create Steam Shortcut"
         add_button = f'<button type="submit" id="selfsteam-add-button" form="{_ADD_FORM_ID}">{add_button_text}</button>'
-    elif ra_awaiting_artwork or em_awaiting_artwork or url_loading:
+    elif ra_awaiting_artwork or em_awaiting_artwork or cu_awaiting_artwork or url_loading:
         # Everything else (console/rom/bios, or emulator/rom/keys/
         # firmware) is already picked -- just waiting on the SGDB fetch
         # itself (see ra_ready/em_ready's own comment on why this is
@@ -2927,6 +3124,7 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
       <form action="/search" method="get" style="display:flex;flex-direction:column;gap:0.9rem;flex:1;min-height:0">
         {_ra_hidden_fields(ra_state)}
         {_ra_hidden_fields(em_state)}
+        {_ra_hidden_fields(cu_state)}
         {_url_tab_panel_html(query, couch_mode, browser, chosen, name_reset_href, ra_state, em_state)}
       </form>
     </div>
@@ -2936,6 +3134,9 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
     </div>
     <div class="tab-panel tab-panel-emulators" id="selfsteam-em-tab-panel">
       {_emulators_tab_panel_html(em_state, em_chosen)}
+    </div>
+    <div class="tab-panel tab-panel-custom" id="selfsteam-cu-tab-panel">
+      {_custom_tab_panel_html(cu_state, cu_chosen)}
     </div>
   </div>
   {add_button}
@@ -3002,6 +3203,16 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
     right_ra = f'<div class="card artwork-card right-panel-retroarch" id="selfsteam-ra-right">{ra_right_content}</div>'
     right_em = f'<div class="card artwork-card right-panel-emulators" id="selfsteam-em-right">{em_right_content}</div>'
 
+    if cu_loading:
+        cu_refresh_url = _cu_url("/new", cu_state, cu_resolved="1")
+        extra_head = f'<meta http-equiv="refresh" content="0;url={html.escape(cu_refresh_url)}">'
+        cu_middle_html = _cu_middle_column_html(cu_state, [], extra_class="middle-panel-custom")
+        cu_right_content = _ra_loading_artwork_html()
+    else:
+        cu_middle_html = _cu_middle_column_html(cu_state, [cu_chosen] if cu_chosen else [], extra_class="middle-panel-custom")
+        cu_right_content = _artwork_picker_html(cu_candidates_by_category, prefix="cu_")
+    right_cu = f'<div class="card artwork-card right-panel-custom" id="selfsteam-cu-right">{cu_right_content}</div>'
+
     # id="selfsteam-add-form-slot" is a stable AJAX-swap target even when
     # add_form itself is empty (no id of its own to grab in that case) --
     # see selfsteamTabFetch/SELFSTEAM_RA_SWAP_IDS/SELFSTEAM_EM_SWAP_IDS in
@@ -3012,8 +3223,8 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
 {_tab_bar_targets_html()}
 <div class="selfsteam-columns">
   <div class="selfsteam-left">{left}</div>
-  <div class="selfsteam-middle">{middle_url}{ra_middle_html}{em_middle_html}</div>
-  <div class="selfsteam-right">{right_url}{right_ra}{right_em}</div>
+  <div class="selfsteam-middle">{middle_url}{ra_middle_html}{em_middle_html}{cu_middle_html}</div>
+  <div class="selfsteam-right">{right_url}{right_ra}{right_em}{right_cu}</div>
 </div>
 """, extra_head=extra_head)
 
@@ -3095,6 +3306,10 @@ def _run_commit_in_background(items, label):
                 romfile = item.get("romfile")
                 if romfile and os.path.isfile(romfile):
                     os.remove(romfile)
+            elif item.get("type") == "add_custom":
+                create_webapp.register_custom_shortcut(
+                    item["name"], item["target"], item["start_dir"], item["launch_options"], item["asset_paths"],
+                )
             else:
                 create_webapp.register_steam_shortcut(
                     item["name"], item["url"], item["asset_paths"],
@@ -3316,11 +3531,25 @@ def _poster_card_html(shortcut, pending_removal_appids):
             "em_romfile": romfile_rel,
             "em_edit_appid": str(appid), "em_edit_name": name,
         })
-    else:
+    elif shortcut.get("managed"):
         edit_href = (
             f"/search?q={urllib.parse.quote(shortcut['url'] or name)}"
             f"&url_edit_appid={urllib.parse.quote(str(appid))}&url_edit_name={urllib.parse.quote(name)}"
         )
+    else:
+        # Not created by this tool (or not recognized as such) and not
+        # a RetroArch/Emulators shortcut either -- there's no tab that
+        # knows how this shortcut's own exe/LaunchOptions were built,
+        # so it edits via the Custom tab instead, with its actual raw
+        # Target/Start In/Launch Options carried over as-is (see
+        # create_webapp.list_gridge_shortcuts' own docstring on why
+        # these shortcuts are listed here at all).
+        edit_href = _cu_url("/new", {
+            "cu_target": shortcut.get("exe") or "",
+            "cu_start_dir": shortcut.get("start_dir") or "",
+            "cu_launch_options": shortcut.get("launch_options") or "",
+            "cu_edit_appid": str(appid), "cu_edit_name": name,
+        })
     # A RetroArch/Emulators-tab shortcut's ROM might be a local pick
     # (referenced in place, wherever it already lives -- see the local
     # file browser) rather than something SelfSteam uploaded itself, so
@@ -3586,23 +3815,28 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/new":
             ra_state = _ra_state_from_params(params)
             em_state = _em_state_from_params(params)
+            cu_state = _cu_state_from_params(params)
             romfile = ra_state.get("ra_romfile")
             em_romfile = em_state.get("em_romfile")
+            cu_target = cu_state.get("cu_target")
             # A freshly-picked ROM (ra_resolved/em_resolved not yet set
             # for it -- see _ra_list_rows/_em_list_rows, which clear it
             # on every new pick) gets the fast loading response first:
             # the real SGDB search can take a few seconds, and skipping
             # straight to it left the previous page sitting there
             # unchanged the whole time, easy to mistake for the click
-            # not registering. Only one of ra_*/em_* is ever the one
-            # actually driving a given request (each tab's own links
-            # only ever set its own romfile), so checking ra's first and
-            # falling through to em's never actually races.
+            # not registering. Only one of ra_*/em_*/cu_* is ever the one
+            # actually driving a given request (each tab's own links/
+            # forms only ever set its own romfile/target), so checking
+            # them in order never actually races.
             if romfile and not ra_state.get("ra_resolved"):
-                self._send_html(render_page(ra_state=ra_state, ra_loading=True, em_state=em_state))
+                self._send_html(render_page(ra_state=ra_state, ra_loading=True, em_state=em_state, cu_state=cu_state))
                 return
             if em_romfile and not em_state.get("em_resolved"):
-                self._send_html(render_page(ra_state=ra_state, em_state=em_state, em_loading=True))
+                self._send_html(render_page(ra_state=ra_state, em_state=em_state, em_loading=True, cu_state=cu_state))
+                return
+            if cu_target and not cu_state.get("cu_resolved"):
+                self._send_html(render_page(ra_state=ra_state, em_state=em_state, cu_state=cu_state, cu_loading=True))
                 return
             ra_chosen = None
             ra_candidates = {}
@@ -3628,9 +3862,19 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 em_chosen = em_matches[0]
                 em_candidates = _fetch_candidates(em_chosen["id"])
+            cu_chosen = None
+            cu_candidates = {}
+            if cu_target:
+                cu_guessed = _ra_guess_name_from_filename(cu_target)
+                cu_matches = _resolve_matches(
+                    cu_guessed, service_resolver.Resolved(name=cu_guessed), cu_state.get("cu_sgdb_q"),
+                )
+                cu_chosen = cu_matches[0]
+                cu_candidates = _fetch_candidates(cu_chosen["id"])
             self._send_html(render_page(
                 ra_state=ra_state, ra_candidates_by_category=ra_candidates, ra_chosen=ra_chosen,
                 em_state=em_state, em_candidates_by_category=em_candidates, em_chosen=em_chosen,
+                cu_state=cu_state, cu_candidates_by_category=cu_candidates, cu_chosen=cu_chosen,
             ))
             return
 
@@ -3679,6 +3923,7 @@ class Handler(BaseHTTPRequestHandler):
             # /new#tab-retroarch was reached again).
             ra_state = _ra_state_from_params(params)
             em_state = _em_state_from_params(params)
+            cu_state = _cu_state_from_params(params)
             # Carried through the same way as ra_state/em_state above --
             # set only when this /search came from the gallery's own
             # Edit link (see edit_href's own comment), and read back by
@@ -3688,7 +3933,7 @@ class Handler(BaseHTTPRequestHandler):
             url_edit_name = (params.get("url_edit_name") or [""])[0]
             if not query:
                 self._send_html(render_page(
-                    browser=browser, ra_state=ra_state, em_state=em_state,
+                    browser=browser, ra_state=ra_state, em_state=em_state, cu_state=cu_state,
                     url_edit_appid=url_edit_appid, url_edit_name=url_edit_name,
                 ))
                 return
@@ -3706,7 +3951,7 @@ class Handler(BaseHTTPRequestHandler):
             if not params.get("url_loading_ack"):
                 self._send_html(render_page(
                     query, couch_mode, browser, sgdb_q, match_index=match_index,
-                    ra_state=ra_state, em_state=em_state, url_loading=True,
+                    ra_state=ra_state, em_state=em_state, cu_state=cu_state, url_loading=True,
                     url_edit_appid=url_edit_appid, url_edit_name=url_edit_name,
                 ))
                 return
@@ -3722,7 +3967,7 @@ class Handler(BaseHTTPRequestHandler):
             resolved = service_resolver.resolve(query)
             if not resolved.url:
                 self._send_html(render_page(
-                    query, couch_mode, browser, ra_state=ra_state, em_state=em_state,
+                    query, couch_mode, browser, ra_state=ra_state, em_state=em_state, cu_state=cu_state,
                     url_edit_appid=url_edit_appid, url_edit_name=url_edit_name,
                 ))
                 return
@@ -3737,7 +3982,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_html(render_page(
                 query, couch_mode, browser, sgdb_q, matches, match_index,
                 candidates, resolved.url, chosen=matches[match_index],
-                ra_state=ra_state, em_state=em_state,
+                ra_state=ra_state, em_state=em_state, cu_state=cu_state,
                 url_edit_appid=url_edit_appid, url_edit_name=url_edit_name,
             ))
             return
@@ -3898,6 +4143,11 @@ class Handler(BaseHTTPRequestHandler):
             self._add_standalone_emulator_shortcut(params, em_emulator, em_romfile)
             return
 
+        cu_target = (params.get("cu_target") or [""])[0]
+        if cu_target:
+            self._add_custom_shortcut(params, cu_target)
+            return
+
         query = (params.get("query") or [""])[0]
         couch_mode = bool(params.get("couch_mode"))
         # match_name comes straight from the Name field's own live value
@@ -3934,6 +4184,38 @@ class Handler(BaseHTTPRequestHandler):
             _queue_edit_rename_cleanup(params, "url", match_name)
             pending_queue.add(match_name, url, couch_mode, asset_paths, browser_app_id=browser or None)
             self._redirect("/new#tab-url")
+        except Exception as e:  # noqa: BLE001 -- surfaced to the user, not swallowed
+            self._send_html(render_done(match_name, ok=False, error=e))
+
+    def _add_custom_shortcut(self, params, cu_target):
+        # cu_match_name comes straight from the Custom tab's own Name
+        # field live value -- same reasoning as match_name/ra_match_name/
+        # em_match_name, a separate field so none of the (only one
+        # visible at a time, but all real DOM inputs) Name fields
+        # collide as several values for one field on the shared Add
+        # form.
+        cu_start_dir = (params.get("cu_start_dir") or [""])[0]
+        cu_launch_options = (params.get("cu_launch_options") or [""])[0]
+        match_name = (params.get("cu_match_name") or [""])[0] or _ra_guess_name_from_filename(cu_target) or cu_target
+
+        try:
+            # No file/BIOS/core install step -- unlike RetroArch/
+            # Emulators, a Custom shortcut's Target is whatever the user
+            # typed, used exactly as given (this tab exists specifically
+            # so a shortcut this tool didn't create can be edited here
+            # with its real params intact, not re-synthesized).
+            slug = create_webapp.slugify(match_name)
+            selections = {}
+            for basename, _title, _fetch, _w, _h in ARTWORK_CATEGORIES:
+                # artwork_cu_{basename}, not artwork_{basename} -- see
+                # _add_retroarch_shortcut's own comment on why every tab's
+                # picker needs its own prefixed field name.
+                selection_url = (params.get(f"artwork_cu_{basename}") or [None])[0]
+                selections[basename] = {"url": selection_url} if selection_url else None
+            asset_paths = create_webapp.download_selected_assets(slug, selections)
+            _queue_edit_rename_cleanup(params, "cu", match_name)
+            pending_queue.add_custom(match_name, cu_target, cu_start_dir, cu_launch_options, asset_paths)
+            self._redirect("/new#tab-custom")
         except Exception as e:  # noqa: BLE001 -- surfaced to the user, not swallowed
             self._send_html(render_done(match_name, ok=False, error=e))
 
@@ -4245,7 +4527,7 @@ class Handler(BaseHTTPRequestHandler):
         if not items:
             self._redirect("/")
             return
-        added = sum(1 for i in items if i.get("type", "add") == "add")
+        added = sum(1 for i in items if i.get("type", "add") in ("add", "add_custom"))
         removed = sum(1 for i in items if i.get("type") == "remove")
         parts = []
         if added:

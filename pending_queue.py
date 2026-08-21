@@ -24,6 +24,7 @@ _lock = threading.Lock()
 # Functions:
 #   _load() / _save(items) -- read/write the whole queue file.
 #   add(name, url, couch_mode, asset_paths, ...) -- queues a shortcut to add.
+#   add_custom(name, target, start_dir, launch_options, asset_paths) -- queues a Custom-tab shortcut to add.
 #   add_removal(appid, name, romfile=None) -- queues a shortcut to remove.
 #   all_items() -- every queued item.
 #   count() -- number of queued items.
@@ -55,6 +56,25 @@ def add(name, url, couch_mode, asset_paths, browser_app_id=None, launch_args=Non
             "asset_paths": asset_paths,
             "browser_app_id": browser_app_id,
             "launch_args": launch_args,
+            "queued_at": time.time(),
+        })
+        _save(items)
+
+
+def add_custom(name, target, start_dir, launch_options, asset_paths):
+    # Separate item type from "add" (URL/RetroArch/Emulators) since it
+    # commits through create_webapp.register_custom_shortcut instead --
+    # that one writes target/start_dir/launch_options verbatim rather
+    # than synthesizing them from a url/browser_app_id/launch_args.
+    with _lock:
+        items = _load()
+        items.append({
+            "type": "add_custom",
+            "name": name,
+            "target": target,
+            "start_dir": start_dir,
+            "launch_options": launch_options,
+            "asset_paths": asset_paths,
             "queued_at": time.time(),
         })
         _save(items)
