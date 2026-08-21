@@ -39,39 +39,6 @@ python3 selfsteam_server.py
 
 Needs a SteamGridDB API key, either in `STEAMGRIDDB_API_KEY` or via SelfSteam's own config file (`$XDG_CONFIG_HOME/selfsteam/config.json`) -- or Gridge's GUI-written one directly (`$XDG_CONFIG_HOME/gridge/config.json`), which `config.py` migrates automatically on first run if the SelfSteam one doesn't exist yet.
 
-## Code overview
-
-| File | Purpose |
-|---|---|
-| `selfsteam_server.py` | The whole app -- headless web UI (HTTP server + HTML/CSS/JS) for adding Steam shortcuts from another device on the network. Everything else supports this. |
-| `create_webapp.py` | Core shortcut-creation logic: SGDB search, artwork download, writing the actual `shortcuts.vdf` entry + grid images. |
-| `shortcuts_vdf.py` | Low-level reader/writer for Steam's binary `shortcuts.vdf` format itself. |
-| `retroarch_cores.py` | RetroArch's console/core catalog -- install RetroArch + a specific core, build launch args, track BIOS requirements. |
-| `standalone_emulators.py` | The non-RetroArch emulator catalog (PCSX2, RPCS3, Eden, etc.) -- install (Flathub or AppImage), launch args, keys/firmware/BIOS handling. |
-| `streaming_services.py` | Lookup table mapping a bare name (e.g. "Netflix") to its real URL + SGDB search term. |
-| `service_resolver.py` | Turns free-text search input into a resolved URL, using `streaming_services.py` or raw URL parsing. |
-| `sgdb_client.py` | Minimal SteamGridDB API client (stdlib only) -- searches games, fetches artwork candidates. |
-| `pending_queue.py` | The "staged changes" queue -- shortcuts to add/remove, held until the next "Save changes and restart Steam" commit. |
-| `maintenance.py` | Orchestrates one full Steam maintenance window: stop Steam, show a splash, run the actual write, restart Steam. |
-| `steamos_session.py` | Gamescope/SteamOS-aware version of "stop/start Steam" (masks `steam-launcher.service` instead of a plain kill, since systemd would just relaunch it). |
-| `steam_restart.py` | Plain-desktop kill/wait/relaunch of Steam, with the correct Flatpak-vs-native launch path. |
-| `steam_paths.py` | Locates Steam's real userdata directory across native and Flatpak installs. |
-| `auth.py` | The pairing-code auth scheme itself -- code generation, session/remember-device tokens, no passwords. |
-| `auth_display.py` | Shows/dismisses the on-screen pairing code window on demand. |
-| `auth_screen.py` | The actual fullscreen GTK window that displays the pairing code. |
-| `config.py` | Persistent app settings (SGDB API key, etc.) as JSON. |
-| `host_exec.py` | Escapes SelfSteam's own Flatpak sandbox to run commands / locate binaries on the real host. |
-| `multipart_upload.py` | Minimal streaming `multipart/form-data` parser for file uploads (ROMs, BIOS, keys) -- avoids buffering huge files in memory. |
-| `browser_picker.py` | Detects which Flatpak web browsers are installed, for the "which browser opens this URL shortcut" dropdown. |
-| `browser_launcher.py` | Builds the kiosk-mode launch command for non-Edge browsers. |
-| `edge_launcher.py` | Same, specifically for detecting/launching Microsoft Edge. |
-| `gamescope_splash.py` | Foregrounds a window inside gamescope's compositor via its own X11 control protocol. |
-| `splash.py` | The standalone "please wait" fullscreen window shown while Steam is down mid-maintenance. |
-| `sync_gamescope_resolution.py` | Sizes a shortcut's nested Xwayland display to match gamescope's real resolution. |
-| `window_titles.py` | Shared window-title constants used by the launcher and the foregrounding logic to find each other's windows. |
-
-Rough shape: `selfsteam_server.py` is the app; `create_webapp.py`/`shortcuts_vdf.py`/`retroarch_cores.py`/`standalone_emulators.py` do the actual shortcut work; the `auth_*` files handle pairing; the `steam_*`/`maintenance.py`/`steamos_session.py` group handles the Steam-restart dance; and the rest are small focused utilities each solving one specific platform quirk.
-
 ## License
 
 [MIT](LICENSE)
