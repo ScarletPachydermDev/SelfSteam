@@ -81,7 +81,7 @@ class AuthScreen(Gtk.ApplicationWindow):
         overlay = Gtk.Overlay()
 
         center_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, valign=Gtk.Align.CENTER, halign=Gtk.Align.CENTER)
-        title = Gtk.Label(label="Code for web interface")
+        title = Gtk.Label(label="SelfSteam authentication code")
         title.add_css_class("selfsteam-auth-title")
         code_label = Gtk.Label(label=code)
         code_label.add_css_class("selfsteam-auth-code")

@@ -40,6 +40,19 @@ if [ ! -f "$CONFIG_FILE" ]; then
         read -r api_key < /dev/tty
         printf '{"sgdb_api_key": "%s"}\n' "$api_key" > "$CONFIG_FILE"
     fi
+    # One-time marker -- see config.py's own get_pending_first_show/
+    # set_pending_first_show for why this only happens here, on a
+    # genuinely fresh install (this branch only runs when CONFIG_FILE
+    # didn't already exist), not on a later re-run of this same script
+    # (e.g. to pick up a code update, per this script's own README).
+    python3 -c "
+import json
+with open('$CONFIG_FILE') as f:
+    data = json.load(f)
+data['pending_first_show'] = True
+with open('$CONFIG_FILE', 'w') as f:
+    json.dump(data, f, indent=2)
+"
 else
     echo "Using existing config at $CONFIG_FILE"
 fi

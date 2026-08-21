@@ -85,3 +85,20 @@ def get_last_browser():
 
 def set_last_browser(app_id):
     save(server_last_browser=app_id)
+
+
+def get_pending_first_show():
+    # Set once by the installer (install.sh, or a Flatpak's own first-run
+    # setup later) right after it finishes setting up the persistent
+    # background service. Lets the server show the pairing screen exactly
+    # once on its own -- the first time it notices a real Game Mode/
+    # gamescope session after a fresh install -- without ever doing so
+    # again on a later reboot. Defaults to False for an existing config
+    # that predates this flag, not True -- an upgrade shouldn't suddenly
+    # start popping the auth screen unprompted for someone who's been
+    # running this for a while already.
+    return bool(load().get("pending_first_show"))
+
+
+def set_pending_first_show(value):
+    save(pending_first_show=bool(value))

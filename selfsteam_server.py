@@ -40,6 +40,7 @@ import re
 import socket
 import threading
 import tempfile
+import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -56,6 +57,7 @@ import standalone_emulators
 import service_resolver
 import sgdb_client as sgdb
 import steam_paths
+import steamos_session
 
 # Functions, grouped:
 #
@@ -4260,7 +4262,34 @@ class Handler(BaseHTTPRequestHandler):
         print(f"[selfsteam-server] {self.address_string()} - {fmt % args}")
 
 
+_FIRST_SHOW_POLL_INTERVAL = 10
+
+
+def _watch_for_first_gamescope_entry():
+    """Shows the pairing screen exactly once on its own -- the first time
+    this process notices a real Game Mode/gamescope session while
+    config.py's own pending_first_show marker is still set (installer-set
+    once, on a genuinely fresh install only -- see its own docstring).
+    Polling, not a one-shot startup check, on purpose: covers both real
+    session shapes without needing to know which one applies -- a fresh
+    install finished in Desktop Mode, with this service either restarting
+    once Game Mode is entered (a single startup check would catch that)
+    or staying alive continuously across the switch with no restart at
+    all (only a poll loop catches that one). Every other page load's own
+    auth prompt (do_GET/do_POST's auth_display.ensure_shown() calls)
+    stays untouched and keeps working purely on-demand regardless."""
+    if not config.get_pending_first_show():
+        return
+    while config.get_pending_first_show():
+        if steamos_session.is_gamescope_session():
+            auth_display.ensure_shown()
+            config.set_pending_first_show(False)
+            return
+        time.sleep(_FIRST_SHOW_POLL_INTERVAL)
+
+
 def main():
+    threading.Thread(target=_watch_for_first_gamescope_entry, daemon=True).start()
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     print(f"SelfSteam listening on http://0.0.0.0:{PORT}/")
     server.serve_forever()
