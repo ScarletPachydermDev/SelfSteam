@@ -1075,8 +1075,17 @@ EMULATORS = {
         "needs_firmware": False,
         "args": _xemu_args,
         "configure_renderer": _xemu_configure_vulkan,
-        # No grant_permissions needed -- confirmed via its own Flathub
-        # manifest, it already ships --filesystem=host:ro.
+        # xemu's own Flathub manifest ships --filesystem=host:ro, which
+        # is fine for the ROM/bootrom/flashrom/eeprom files (xemu only
+        # ever reads those) but NOT for the hard disk image -- xemu
+        # writes real save/partition data to it at runtime. Confirmed
+        # live (2026-08-21): a real game failed with xemu's own
+        # "could not open [...] read only filesystem" error against the
+        # qcow2 HDD image with only host:ro granted; upgrading to a real
+        # read-write --filesystem=host (verified live: a direct write-
+        # mode open of the same qcow2 file from inside xemu's own
+        # sandbox succeeds after this) fixes it.
+        "grant_permissions": ["--filesystem=host"],
     },
     "PCSX2": {
         "install_type": "flathub",

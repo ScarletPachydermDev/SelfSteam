@@ -1465,16 +1465,15 @@ def _ra_resolve_relpath(raw):
 # they land here; there's no reason for SelfSteam's own upload landing
 # spot to move just because browsing itself got wider.
 #
-# "gridge", not "selfsteam" -- deliberately NOT renamed alongside the
-# rest of this app's SelfSteam rebrand. Shortcuts already created before
-# that rename have this exact absolute path baked into their own
-# LaunchOptions (the ROM/BIOS/keys/firmware path RetroArch or the
-# emulator was told to load); moving the directory a real file already
-# lives under would break every one of them the moment Steam next tried
-# to launch it. New uploads keep landing here too, alongside old ones --
-# there's no separate "new" location to migrate to without the same
-# problem recurring on the next rename.
-_RA_UPLOAD_DIR = os.path.join(_HOME_DIR, ".local", "share", "gridge", "uploads")
+# "selfsteam", not the old "gridge" -- renamed per explicit user choice
+# (2026-08-21), accepting the tradeoff a past version of this comment
+# was avoiding: existing shortcuts created before this change keep the
+# old ~/.local/share/gridge/uploads/... absolute path baked into their
+# own LaunchOptions (the ROM/BIOS/keys/firmware path RetroArch or the
+# emulator was told to load) and keep working fine as-is (nothing here
+# moves or deletes those files), but new uploads now land in a
+# separate ~/.local/share/selfsteam/uploads/ instead of alongside them.
+_RA_UPLOAD_DIR = os.path.join(_HOME_DIR, ".local", "share", "selfsteam", "uploads")
 
 
 def _ra_state_from_params(params):
@@ -2298,7 +2297,11 @@ def _em_sgdb_search_bar_html(state, chosen=None):
     # ROM's own guessed name -- see _em_list_rows's own fix for the
     # other half of this). A disabled input isn't included in its own
     # form submission at all, so it can't leave a stale value behind.
-    disabled = "" if state.get("em_romfile") else " disabled"
+    # Also disabled with no SGDB key configured at all -- there's
+    # nothing a search here could actually return in that case (see
+    # _em_middle_column_html's own matching guard), so an interactive-
+    # looking box that can't do anything read as a real bug.
+    disabled = "" if (state.get("em_romfile") and sgdb.has_api_key()) else " disabled"
     return f"""
 <form action="/new#tab-emulators" method="get">
   {hidden}
@@ -2314,6 +2317,14 @@ def _em_sgdb_search_bar_html(state, chosen=None):
 
 
 def _em_middle_column_html(state, matches, extra_class=""):
+    # No SGDB key -- _resolve_matches's own no-key fallback still
+    # returns a truthy synthetic single "match" (so Create/Save stays
+    # usable, see render_page's own em_ready), but showing that as if
+    # it were a real SGDB result read as this column being falsely
+    # "enabled" with nothing actually behind it. Forced back to the
+    # same placeholder/disabled look as before a ROM is even picked.
+    if not sgdb.has_api_key():
+        matches = []
     if not matches:
         list_html = _placeholder_matches_html()
     else:
@@ -2390,21 +2401,27 @@ def _cu_sgdb_search_bar_html(state, chosen=None):
     display_term = _cu_display_term(state, chosen)
     clear_href = _cu_url("/custom", state, cu_sgdb_q="", cu_resolved="", cu_sgdb_cleared="1")
     hidden = _ra_hidden_fields({k: v for k, v in state.items() if k not in ("cu_sgdb_q", "cu_resolved")})
+    # No SGDB key -- same reasoning as _em_sgdb_search_bar_html's own
+    # disabled condition.
+    disabled = "" if sgdb.has_api_key() else " disabled"
     return f"""
 <form action="/custom" method="get">
   {hidden}
   <div class="search-field-row">
     <div class="field-with-clear">
-      <input type="text" name="cu_sgdb_q" value="{html.escape(display_term)}" placeholder="SGDB search">
+      <input type="text" name="cu_sgdb_q" value="{html.escape(display_term)}" placeholder="SGDB search"{disabled}>
       <a href="{clear_href}" class="field-clear-btn" title="Clear">&#10005;</a>
     </div>
-    <button type="submit" class="search-submit-btn" title="Search">{_SEARCH_ICON_SVG}</button>
+    <button type="submit" class="search-submit-btn" title="Search"{disabled}>{_SEARCH_ICON_SVG}</button>
   </div>
 </form>
 """
 
 
 def _cu_middle_column_html(state, matches):
+    # Same no-key placeholder guard as _em_middle_column_html's own.
+    if not sgdb.has_api_key():
+        matches = []
     if not matches:
         list_html = _placeholder_matches_html()
     else:
@@ -2593,7 +2610,7 @@ def _sgdb_search_bar_html(query, couch_mode, browser, sgdb_q, ra_state=None, em_
     # same trap. has_matches (there's always at least one synthetic
     # match once resolution succeeds, see _resolve_matches) is this
     # tab's own version of "romfile picked."
-    disabled = "" if has_matches else " disabled"
+    disabled = "" if (has_matches and sgdb.has_api_key()) else " disabled"
     return f"""
 <form action="/search" method="get">
   {_hidden_state_fields(query, couch_mode, browser, ra_state, em_state)}
@@ -2628,6 +2645,9 @@ def _match_list_html(query, couch_mode, browser, sgdb_q, matches, match_index, r
 
 
 def _middle_column_html(query, couch_mode, browser, sgdb_q, matches, match_index, extra_class="", ra_state=None, em_state=None):
+    # Same no-key placeholder guard as _em_middle_column_html's own.
+    if not sgdb.has_api_key():
+        matches = []
     list_html = _match_list_html(query, couch_mode, browser, sgdb_q, matches, match_index, ra_state, em_state) if matches else _placeholder_matches_html()
     return f"""
 <div class="card {extra_class}">
@@ -2668,9 +2688,10 @@ def _ra_sgdb_search_bar_html(state, chosen=None):
     # the reasoning.
     clear_href = _ra_url("/new", state, ra_sgdb_q="", ra_resolved="", ra_sgdb_cleared="1")
     hidden = _ra_hidden_fields({k: v for k, v in state.items() if k not in ("ra_sgdb_q", "ra_resolved")})
-    # Disabled until a ROM exists -- see _em_sgdb_search_bar_html's own
-    # comment on this exact same fix for the reasoning.
-    disabled = "" if state.get("ra_romfile") else " disabled"
+    # Disabled until a ROM exists, or with no SGDB key at all -- see
+    # _em_sgdb_search_bar_html's own comment on this exact same fix for
+    # the reasoning.
+    disabled = "" if (state.get("ra_romfile") and sgdb.has_api_key()) else " disabled"
     return f"""
 <form action="/new#tab-retroarch" method="get">
   {hidden}
@@ -2691,6 +2712,9 @@ def _ra_middle_column_html(state, matches, extra_class=""):
     # they pick up the same .boxed-list/a.selected styling without new
     # CSS just for this. The editable Name field is still the real way
     # to correct a bad guess beyond re-searching SGDB outright.
+    # Same no-key placeholder guard as _em_middle_column_html's own.
+    if not sgdb.has_api_key():
+        matches = []
     if not matches:
         list_html = _placeholder_matches_html()
     else:
