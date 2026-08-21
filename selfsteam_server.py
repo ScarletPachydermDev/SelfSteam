@@ -836,7 +836,7 @@ input[type=file]::file-selector-button {
     <!--QUEUE_ACTIONS-->
   </div>
   <div class="selfsteam-header-actions">
-    <button class="icon-btn-round" type="button" title="Favorite" style="color:#e0568c"><!--HEART_ICON--></button>
+    <a class="icon-btn-round" href="https://github.com/ScarletPachydermDev/SelfSteam/tree/master#donate" target="_blank" rel="noopener" title="Support this project" style="color:#e0568c"><!--HEART_ICON--></a>
     <!--SGDB_KEY_BADGE-->
     <button id="selfsteam-dark-toggle" class="icon-btn-round" type="button" title="Toggle dark mode"><!--DARK_ICON--></button>
   </div>
