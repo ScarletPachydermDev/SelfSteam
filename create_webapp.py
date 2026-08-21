@@ -569,42 +569,53 @@ def _extract_retroarch_info(launch_options):
     return None, None
 
 
+# Entries whose own args() (standalone_emulators.py) puts the romfile
+# first, ahead of its flags, rather than last like every other entry --
+# see _extract_standalone_emulator_info's own comment.
+_ROMFILE_FIRST_EMULATORS = {"Supermodel", "Xenia Canary (AppImage)"}
+
+
 def _extract_standalone_emulator_info(launch_options):
     """Pulls (emulator_name, romfile) back out of a standalone-emulator
     shortcut's own LaunchOptions (see standalone_emulators.launch_args)
     so the Emulators tab's own Edit link can jump straight back into it,
     same contract as _extract_retroarch_info above. The romfile is
-    assumed to be the argv's own last token either way -- true for every
-    entry's args() function so far (each one appends the romfile last,
-    same as Dolphin's own -e <romfile>), not something enforced
-    generically the way RetroArch's -L <core> <romfile> pattern is.
-    Returns (None, None) for anything else.
+    assumed to be the argv's own last token, EXCEPT for the couple of
+    entries in _ROMFILE_FIRST_EMULATORS whose own args() puts it first
+    instead (Supermodel, Xenia Canary -- both confirmed via their own
+    CLI docs to need the positional romfile before their flags, unlike
+    every other entry here). Returns (None, None) for anything else.
 
     Two install_type shapes to reverse: a flathub entry's own
-    "flatpak run <app_id> ..." (argv[2] is the app id, reverse-mapped to
-    its emulator name via standalone_emulators.EMULATORS), and a binary
-    (AppImage) entry's own "<real AppImage path> ..." -- no "flatpak
-    run" prefix at all, so argv[0] is compared directly against each
-    binary-install entry's own resolved path instead. Confirmed live as
-    a real gap: before this, every AppImage-installed shortcut's own
-    Edit link silently fell through to the URL tab instead of actually
-    restoring it, since this returned (None, None) for a launch_options
-    shape it never recognized."""
+    "<flatpak> run <app_id> ..." (argv[2] is the app id, reverse-mapped
+    to its emulator name via standalone_emulators.EMULATORS), and a
+    binary (AppImage) entry's own "<real AppImage path> ..." -- no
+    "flatpak run" prefix at all, so argv[0] is compared directly against
+    each binary-install entry's own resolved path instead. <flatpak>
+    itself is host_exec.which("flatpak")'s own resolved absolute path
+    (e.g. "/usr/bin/flatpak"), never the bare "flatpak" launch_args()
+    actually writes it as -- matched by basename here, not by an exact
+    literal comparison. Confirmed live as a real gap: before this fix,
+    every flathub-installed shortcut's own Edit link silently fell
+    through to the URL tab instead of actually restoring it, since the
+    exact-string check never matched the real, absolute-path value."""
     try:
         tokens = shlex.split(launch_options)
     except ValueError:
         return None, None
     if not tokens:
         return None, None
-    if tokens[0] == "flatpak" and len(tokens) >= 3 and tokens[1] == "run":
+    if os.path.basename(tokens[0]) == "flatpak" and len(tokens) >= 3 and tokens[1] == "run":
         app_id = tokens[2]
         for name, entry in standalone_emulators.EMULATORS.items():
             if entry.get("app_id") == app_id:
-                return name, tokens[-1]
+                romfile = tokens[3] if name in _ROMFILE_FIRST_EMULATORS else tokens[-1]
+                return name, romfile
         return None, None
     for name, entry in standalone_emulators.EMULATORS.items():
         if entry.get("install_type") == "binary" and standalone_emulators.binary_path(name) == tokens[0]:
-            return name, tokens[-1]
+            romfile = tokens[1] if name in _ROMFILE_FIRST_EMULATORS else tokens[-1]
+            return name, romfile
     return None, None
 
 

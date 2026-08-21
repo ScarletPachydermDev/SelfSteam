@@ -27,12 +27,20 @@ finish-args:
   # wider: browsing/reading a user's own ROM library from anywhere on
   # disk (see selfsteam_server.py's own _RA_ROOT = "/" comment on why
   # that picker is deliberately rooted at the real filesystem root, not
-  # just home), writing shortcuts.vdf and grid artwork into Steam's own
-  # directory (native or Flatpak), and writing keys/BIOS/firmware files
-  # into *other* Flatpak apps' own ~/.var/app/<id>/ directories (every
-  # standalone_emulators.py install helper does this). None of that is
-  # reachable through a narrower --filesystem grant.
+  # just home), and writing shortcuts.vdf and grid artwork into Steam's
+  # own directory (native or Flatpak).
   - --filesystem=host
+  # --filesystem=host does NOT cover this, despite an earlier version of
+  # this comment claiming it did -- confirmed live (2026-08-21) that
+  # Flatpak specifically excludes *other* apps' ~/.var/app/<id>/
+  # directories from a broad host/home grant; only the calling app's own
+  # ~/.var/app/<own-id>/ is ever visible without this. Every
+  # standalone_emulators.py install helper (BIOS/keys/firmware) writes
+  # into some *other* Flatpak-installed emulator's own ~/.var/app/<id>/
+  # config -- without this, those writes silently no-op (create+write
+  # succeeds against a phantom/unmounted path, nothing persists), which
+  # is exactly what made xemu's 3 BIOS files look "picked but ignored."
+  - --filesystem=~/.var/app
 
 modules:
   - name: selfsteam
