@@ -11,6 +11,7 @@ all (Steam gone, old registration stale) and produced a real frozen/
 color-shifted screen, since gamescope has no fallback and assumes
 Steam is always the base "shell" layer.
 """
+import os
 import re
 import subprocess
 import time
@@ -89,8 +90,19 @@ def launch_foregrounded(argv, window_title, display=":0"):
     live as a real bug: wrapping this too made the auth screen silently
     fail with "No such file or directory" on every gamescope-session
     Flatpak install, since flatpak-spawn --host was trying to run a
-    sandbox-only path directly on the host."""
-    proc = subprocess.Popen(argv, start_new_session=True)
+    sandbox-only path directly on the host.
+
+    Running argv directly like this also means it no longer inherits
+    the host's DISPLAY/XAUTHORITY the way flatpak-spawn --host used
+    to provide -- confirmed live (2026-08-21) the sandboxed process
+    has none of DISPLAY, WAYLAND_DISPLAY or XAUTHORITY set at all, so
+    Gdk.Display.get_default() came back None and the launched GTK app
+    crashed in its own startup before ever mapping a window. DISPLAY
+    is set explicitly below from this function's own `display` param
+    (the same value already used for the xprop/xwininfo calls) so the
+    launched process can actually open a display."""
+    env = {**os.environ, "DISPLAY": display}
+    proc = subprocess.Popen(argv, start_new_session=True, env=env)
     win_id = _find_window_by_title(display, window_title)
     if win_id is None:
         return proc, None

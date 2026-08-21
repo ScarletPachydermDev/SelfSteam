@@ -66,7 +66,7 @@ def ensure_shown():
                 args, window_titles.AUTH_SCREEN_TITLE
             )
         else:
-            _proc = subprocess.Popen(args)
+            _proc = subprocess.Popen(args, env={**os.environ, "DISPLAY": os.environ.get("DISPLAY", ":0")})
             _baselayer_prior = None
         _shown_code = code
     threading.Timer(auth.CODE_TTL, dismiss).start()
