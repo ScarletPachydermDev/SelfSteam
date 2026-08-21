@@ -13,6 +13,14 @@ TYPE_STRING = 0x01
 TYPE_INT32 = 0x02
 TYPE_MAP_END = 0x08
 
+# Functions:
+#   generate_appid(exe, appname) -- Steam's own deterministic non-Steam-shortcut app ID.
+#   _read_cstring(data, i) / _parse_map(data, i) -- low-level binary-VDF parsing.
+#   parse(data) -- bytes -> the shortcuts dict.
+#   _write_cstring(s) / serialize(root) -- the shortcuts dict -> bytes.
+#   load(path) / save(path, root) -- read/write shortcuts.vdf from/to disk.
+#   add_shortcut(vdf_path, ...) -- add or update (by appname) a non-Steam shortcut entry.
+
 
 def generate_appid(exe, appname):
     """Steam's non-Steam-shortcut app ID: CRC32 of the quoted exe path

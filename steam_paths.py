@@ -5,6 +5,10 @@ NATIVE_ROOTS = ["~/.local/share/Steam", "~/.steam/steam"]
 FLATPAK_ROOT = "~/.var/app/com.valvesoftware.Steam/.local/share/Steam"
 
 
+# Functions:
+#   class SteamNotFoundError -- raised when no Steam install/userdata dir can be found.
+#   find_steam_root() -- the first Steam install root that has a userdata dir.
+#   find_userdata_dir(user_id=None) -- <steam_root>/userdata/<user_id>.
 class SteamNotFoundError(RuntimeError):
     pass
 

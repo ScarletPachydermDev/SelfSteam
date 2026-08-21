@@ -16,6 +16,14 @@ from urllib.parse import urlparse
 
 import streaming_services
 
+# Functions:
+#   class Resolved -- (url, name, sgdb_id, warning) result of resolving one search input.
+#   _looks_like_url(text) -- True if text parses as something URL-shaped.
+#   _match_streaming_service(text) -- looks text up in streaming_services' own table.
+#   guess_name_from_url(url) -- a best-effort display name derived from a bare URL.
+#   resolve(query) -- the main entrypoint: query -> a Resolved.
+#   is_plain_youtube(url) -- True only for the main youtube.com site.
+
 
 class Resolved:
     def __init__(self, url=None, name=None, sgdb_id=None, warning=None):

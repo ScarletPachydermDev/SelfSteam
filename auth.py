@@ -14,6 +14,17 @@ import time
 
 import config
 
+# Functions:
+#   _hash_token(token) -- SHA-256 hash of a token, for storing/comparing without keeping the raw value.
+#   _load_remembered() / _save_remembered(devices) -- read/write the remembered-device token store.
+#   remember_device() -- issues a new long-lived device token and persists its hash.
+#   is_remembered(token) -- True if token is a valid, unexpired remembered-device token.
+#   forget_all_devices() -- revokes every remembered device at once.
+#   _generate_code() -- picks a fresh random pairing code.
+#   current_code() -- the active code, generating a fresh one if there isn't one or it expired.
+#   try_login(submitted) -- checks submitted against the active code; invalidates it on success.
+#   is_authenticated(token) -- True if token matches a live session.
+
 # Same alphabet ChimeraOS excludes: characters that look alike on a TV
 # from across the room (O/0, I/1, S/5, J looks like lowercase l).
 _ALPHABET = "".join(c for c in string.ascii_uppercase + string.digits if c not in "OI0S5J")

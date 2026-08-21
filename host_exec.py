@@ -13,6 +13,10 @@ import subprocess
 
 IN_FLATPAK = os.path.exists("/.flatpak-info")
 
+# Functions:
+#   wrap(argv) -- prefixes argv with flatpak-spawn --host if sandboxed, unchanged otherwise.
+#   which(name) -- shutil.which() that can see host binaries even when sandboxed.
+
 
 def wrap(argv):
     """Prefix argv with flatpak-spawn --host if sandboxed, unchanged

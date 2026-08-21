@@ -22,6 +22,22 @@ HORIZONTAL_DIMENSIONS = "460x215,920x430"
 
 _ENV_FILE = os.path.join(os.path.dirname(__file__), ".env")
 
+# Functions:
+#   class SGDBError -- raised for a failed SGDB API call.
+#   _load_dotenv() -- reads STEAMGRIDDB_API_KEY from a local .env for dev use.
+#   _api_key() -- the real API key (config.py, then .env fallback).
+#   has_api_key() -- whether a key is configured at all.
+#   verify_api_key(key) -- True/False for whether key is actually accepted by SGDB's API.
+#   _get(path, params) -- one authenticated GET against the SGDB API.
+#   clean_sgdb_name(name) -- strips SGDB's own category-tag suffix in trailing parentheses.
+#   search(query) -- [{id, name, verified}, ...] candidate matches for a query.
+#   get_game(game_id) -- fetch a single game entry directly by its known SGDB id.
+#   get_vertical_grid/get_horizontal_grid/get_hero/get_logo/get_icon(game_id) -- raw candidate lists.
+#   get_vertical_grid_candidates/get_horizontal_grid_candidates/get_hero_candidates/
+#       get_logo_candidates/get_icon_candidates(game_id) -- the same, shaped for the picker UI.
+#   extract_largest_png_from_ico(data) -- pulls the largest embedded PNG frame out of an .ico.
+#   download(url, dest_path) -- fetches url to dest_path, with one retry on a transient failure.
+
 
 class SGDBError(RuntimeError):
     pass

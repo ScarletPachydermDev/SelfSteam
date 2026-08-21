@@ -12,6 +12,11 @@ import re
 
 _CHUNK_SIZE = 65536
 
+# Functions:
+#   _parse_boundary(content_type) -- the multipart boundary bytes from a Content-Type header.
+#   _parse_filename(content_disposition) -- the uploaded filename from a Content-Disposition header.
+#   save_uploaded_file(rfile, content_type, length, dest_dir) -- streams one uploaded file to disk.
+
 
 def _parse_boundary(content_type):
     match = re.search(r'boundary="?([^";]+)"?', content_type or "")

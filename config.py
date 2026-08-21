@@ -24,6 +24,11 @@ _OLD_CONFIG_DIRS = [
 ]
 
 
+# Functions:
+#   _migrate_old_config() -- copies an old gridge/steam-webapp-creator config dir forward once.
+#   load() / save(**updates) -- read/merge-write the whole config.json.
+#   get_sgdb_api_key() / set_sgdb_api_key(key) / clear_sgdb_api_key() -- the SGDB key setting.
+#   get_last_browser() / set_last_browser(app_id) -- the last-used browser setting.
 def _migrate_old_config():
     if os.path.exists(CONFIG_DIR):
         return

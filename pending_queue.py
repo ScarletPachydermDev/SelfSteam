@@ -21,6 +21,15 @@ import config
 _QUEUE_FILE = os.path.join(config.CONFIG_DIR, "pending_queue.json")
 _lock = threading.Lock()
 
+# Functions:
+#   _load() / _save(items) -- read/write the whole queue file.
+#   add(name, url, couch_mode, asset_paths, ...) -- queues a shortcut to add.
+#   add_removal(appid, name, romfile=None) -- queues a shortcut to remove.
+#   all_items() -- every queued item.
+#   count() -- number of queued items.
+#   remove(index) -- drops one queued item by position.
+#   clear() -- empties the queue (after a successful commit).
+
 
 def _load():
     if not os.path.exists(_QUEUE_FILE):

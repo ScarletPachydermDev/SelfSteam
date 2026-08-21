@@ -57,6 +57,58 @@ import service_resolver
 import sgdb_client as sgdb
 import steam_paths
 
+# Functions, grouped:
+#
+# Page chrome (header, badges, warnings):
+#   _info_tooltip_icon_html/_sgdb_key_badge_html/_hostname/_steam_warning_html/
+#     _queue_actions_html -- small HTML fragments shared across every page.
+#   render(body, ...) -- wraps a body fragment in the full page shell (header, styles, scripts).
+#
+# Shared state/URL-building helpers (one flavor per tab: bare/ra_/em_):
+#   _hidden_state_fields/_ra_hidden_fields -- hidden <input>s carrying a tab's own state forward.
+#   _state_qs/_ra_qs/_em_qs -- state dict -> query string.
+#   _ra_url/_em_url -- state dict -> a full /new URL for that tab.
+#   _ra_state_from_params/_em_state_from_params -- request params -> a tab's own state dict.
+#   _default_browser/_browser_select_html -- the browser-picker dropdown.
+#
+# URL tab:
+#   _url_tab_panel_html -- the tab's own left-column form.
+#   _display_name/_sgdb_search_bar_html -- the SGDB override search box.
+#   _match_list_html/_placeholder_matches_html/_middle_column_html -- the matches list/skeleton.
+#   _resolve_matches/_fetch_candidates -- real SGDB search + artwork-candidate fetch.
+#
+# RetroArch tab (ra_ prefix):
+#   _ra_resolve_relpath/_ra_safe_join -- local file-picker path resolution/sandboxing.
+#   _ra_breadcrumbs_html/_ra_list_rows/_ra_picker_section -- the local file browser itself.
+#   _ra_guess_name_from_filename -- cleans a ROM filename into a real game title (ported from
+#       steam-rom-manager's own fuzzy-matcher.ts).
+#   _retroarch_tab_panel_html -- the tab's own left-column form.
+#   _ra_display_term/_ra_sgdb_search_bar_html/_ra_middle_column_html -- same as the URL tab's own.
+#   _ra_loading_artwork_html -- the "searching..." skeleton shown mid-lookup.
+#
+# Emulators tab (em_ prefix) -- same shape as RetroArch's own:
+#   _em_breadcrumbs_html/_em_list_rows/_em_picker_section
+#   _emulators_tab_panel_html
+#   _em_display_term/_em_sgdb_search_bar_html/_em_middle_column_html
+#
+# Shared artwork/tab-bar/page assembly:
+#   _artwork_picker_html -- the 5-category artwork grid, real results or skeleton.
+#   _tab_bar_targets_html/_tab_bar_html -- the URL/Apps/RetroArch/Emulators tab strip.
+#   render_page -- the single page-builder every state (home, loading, results) goes through.
+#
+# Whole-page renderers:
+#   render_login/render_done/render_restarting/render_pending/render_settings/
+#     render_remove_confirm/render_gallery -- top-level pages besides /new.
+#   _queue_edit_rename_cleanup -- cleans up an old shortcut entry when an edit renames it.
+#   _poster_card_html -- one shortcut's card on the gallery.
+#
+# Background commit:
+#   _run_commit_in_background -- the actual Steam-stop/write/restart work, run off-thread.
+#
+# HTTP:
+#   class Handler -- the request handler itself (do_GET/do_POST and every /route).
+#   main() -- starts the ThreadingHTTPServer.
+#
 PORT = int(os.environ.get("SELFSTEAM_SERVER_PORT", "8845"))
 SESSION_COOKIE = "selfsteam_session"
 REMEMBER_COOKIE = "selfsteam_remember"

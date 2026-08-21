@@ -33,6 +33,53 @@ import zipfile
 
 import host_exec
 
+# Functions, grouped:
+#
+# Public catalog/dispatch API (used by selfsteam_server.py):
+#   by_install_type(install_type) -- emulator names filtered to "flathub" or "binary".
+#   installed(name) / install(name) -- whether/how to install an entry's own app.
+#   grant_permissions(name) -- flatpak override for an entry's own permission gap, if any.
+#   launch_args(name, romfile) -- argv for launching name against romfile.
+#   configure_game_dir(name, game_dir) -- registers game_dir as a watched ROM folder, if supported.
+#   bios_slots(name) / bios_slot_installed(name, prefix) / install_bios_slot(name, prefix, path) --
+#       the multi-BIOS-file dispatch (xemu, PCSX2, RPCS3, Vita3K).
+#   keys_installed(name) / install_keys(name, path) -- Switch prod.keys/title.keys handling.
+#   firmware_installed(name) / install_firmware_zip(name, path) -- Switch firmware handling.
+#   binary_path(name) -- real AppImage path for a "binary" install_type entry.
+#
+# Per-emulator launch-arg builders (one per catalog entry, e.g. _dolphin_args, _pcsx2_args,
+#   _xemu_args, _eden_args, _rpcs3_args, ...) -- each returns the real argv tail for that
+#   emulator, confirmed against its own source/docs, not guessed.
+#
+# Per-emulator game-dir configurators (_dolphin_configure_game_dir, _ryubing_configure_game_dir,
+#   _cemu_configure_game_dir, _flycast_configure_game_dir) -- registers a watched ROM folder in
+#   that emulator's own config format.
+#
+# Switch-family (Ryubing/Eden) keys sharing:
+#   _switch_keys_dirs() -- every real prod.keys/title.keys directory across the whole family.
+#   _switch_keys_installed(entry) / _switch_install_keys(entry, path) -- shared keys dispatch.
+#   _ryujinx_family_contents_dirs() -- every real bis/system/Contents dir across the Ryujinx family.
+#   _firmware_marker_path/_old_firmware_marker_path(dir) -- sidecar file recording what was installed.
+#
+# Per-emulator one-off config helpers (Cemu keys, xemu's own TOML, PCSX2's own INI):
+#   _cemu_keys_path/_cemu_keys_installed/_cemu_install_keys
+#   _toml_get_in_section/_toml_set_in_section/_xemu_toml_path/xemu_bios_slot_installed/
+#     install_xemu_bios_slot
+#   _pcsx2_bios_dir/_pcsx2_ini_path/pcsx2_bios_slot_installed/install_pcsx2_bios_slot
+#   _rpcs3_dev_flash_dir/rpcs3_firmware_installed/install_rpcs3_firmware -- PUP install via
+#     RPCS3's own --installfw (needs its real GUI, not headless).
+#   _vita3k_fs_dir/vita3k_firmware_installed/install_vita3k_firmware -- Vita3K's own --firmware flag.
+#
+# Binary (AppImage) install machinery:
+#   _xdg_data_dir/_xdg_config_dir -- real (unsandboxed) XDG dirs on the host.
+#   _binary_dir_name(name)/_binary_dir(name)/_binary_path(name, entry) -- where an AppImage lives.
+#   _ensure_flathub_remote() -- adds the Flathub remote if it's missing.
+#   install_binary(name, entry) -- resolves the latest release fresh from the emulator's own
+#       release feed (GitHub/Forgejo API) and downloads/chmods the AppImage.
+#
+# Shared path helpers:
+#   _flatpak_config_dir/_flatpak_data_dir(app_id, *parts) -- a Flatpak app's own sandboxed dir.
+
 # Official, stable URL for Flathub's own repo file -- same one Flathub's
 # own "Quick Setup" instructions use. Needed because a fresh machine
 # (never having installed anything from Flathub before) doesn't have

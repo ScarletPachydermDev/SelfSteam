@@ -17,6 +17,9 @@ import window_titles
 
 _SPLASH_SCRIPT = os.path.join(os.path.dirname(__file__), "splash.py")
 
+# Functions:
+#   run_with_steam_stopped(apply_fn, message) -- stop Steam, show a splash, run apply_fn, restart Steam.
+
 
 def run_with_steam_stopped(apply_fn, message="Applying changes…"):
     """Stop Steam, show a splash (gamescope sessions only), call

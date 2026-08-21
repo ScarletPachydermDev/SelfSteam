@@ -13,6 +13,13 @@ import subprocess
 
 import host_exec
 
+# Functions:
+#   _get_flatpak_edge_version() -- installed Flatpak Edge's version string, or None.
+#   class EdgeNotFoundError -- raised when no Edge install can be found.
+#   _flatpak_edge_installed() -- True if the Flatpak Edge is installed.
+#   find_edge() -- (exe, prefix_args) for the installed Edge.
+#   suppress_first_run() -- pre-seeds Edge's first-run sentinel/FRE state so kiosk launches skip it.
+
 NATIVE_BINARY_NAMES = ["microsoft-edge-stable", "microsoft-edge", "microsoft-edge-beta", "microsoft-edge-dev"]
 FLATPAK_APP_ID = "com.microsoft.Edge"
 

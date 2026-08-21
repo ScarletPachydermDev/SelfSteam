@@ -15,6 +15,10 @@ from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
 import window_titles
 
+# Functions:
+#   class SplashWindow -- the fullscreen "please wait" GTK window itself.
+#   main() -- entrypoint: parses argv, builds and shows a SplashWindow.
+
 # Plain Gtk4, deliberately no libadwaita: this runs natively on the host
 # (not inside SelfSteam's own Flatpak sandbox, which is where Adw
 # normally comes from), and SteamOS doesn't ship libadwaita for host

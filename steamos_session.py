@@ -27,6 +27,12 @@ SERVICE = "steam-launcher.service"
 POLL_INTERVAL = 0.5
 POLL_TIMEOUT = 30
 
+# Functions:
+#   is_gamescope_session() -- True if steam-launcher.service exists as a systemd user unit.
+#   _systemctl(*args) -- one `systemctl --user` call.
+#   enter_maintenance_mode() -- mask + stop Steam so shortcuts.vdf/artwork writes can't be clobbered.
+#   exit_maintenance_mode() -- bring Steam back (unmask+start on gamescope, restart_steam elsewhere).
+
 
 def is_gamescope_session():
     """True if steam-launcher.service exists as a systemd user unit --

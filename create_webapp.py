@@ -22,6 +22,30 @@ import shortcuts_vdf
 import standalone_emulators
 import steam_paths
 
+# Functions:
+#   is_gridge_launch_wrapper(exe) -- True if exe is one of this tool's own launch-browser.sh paths.
+#   _grant_steam_flatpak_spawn_permission() -- lets Steam's own flatpak-spawn talk to the host.
+#   _copy_launcher(dest_dir) -- copies the launch wrapper + its runtime deps into dest_dir.
+#   get_launch_wrapper_path() -- the launch-browser.sh path to use as a shortcut's exe.
+#   slugify(name) -- filesystem-safe slug for a shortcut name.
+#   clean_shortcut_name(name) -- strips SGDB's own category-tag suffix from a match name.
+#   pick_match(matches, index) -- the chosen match dict, or a synthetic fallback.
+#   _download_asset_url(url, dest) -- downloads one artwork URL to disk.
+#   fetch_assets(game_id) -- downloads all 5 artwork categories for an SGDB game id.
+#   download_selected_assets(slug, selections) -- downloads only the user-picked candidates.
+#   register_steam_shortcut(name, url, asset_paths, ...) -- writes the shortcut + copies its artwork.
+#   _field(entry, *names) -- reads a shortcuts.vdf entry field trying several key casings.
+#   _extract_launch_url(launch_options) -- pulls a URL-tab shortcut's target URL back out.
+#   _extract_retroarch_info(launch_options) -- pulls (console, romfile) back out of an RA shortcut.
+#   _extract_standalone_emulator_info(launch_options) -- pulls (emulator_name, romfile) back out.
+#   find_grid_image_path(appid, grid_dir) -- the vertical-grid image file for appid.
+#   find_grid_image_for_appid(appid) -- same, searching every Steam user's own grid dir.
+#   thumbnail_for_appid(appid) -- a small cached webp copy of appid's vertical grid image.
+#   list_gridge_shortcuts() -- every non-Steam shortcut this tool itself created.
+#   remove_gridge_shortcut(appid) -- removes a shortcut this tool created, and its grid assets.
+#   register_test_desktop_entry() -- adds a .desktop file for local testing without Steam.
+#   main() -- Stage 1 CLI entrypoint.
+
 # XDG_CACHE_HOME, not a path next to the source files -- the latter
 # resolves to /app/share/selfsteam/assets once packaged as a Flatpak,
 # which is the read-only app installation dir; writes there would fail

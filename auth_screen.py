@@ -23,6 +23,11 @@ import window_titles
 # GTK CSS has no vw/vh-style unit to do this on its own (that's a web
 # CSS thing), so the px values are computed and interpolated in Python
 # before the stylesheet is ever loaded.
+# Functions:
+#   _screen_scale() -- proportional font/margin scale factor for the real screen height.
+#   _build_css() -- builds the GTK stylesheet from _BASE_SIZES scaled by _screen_scale().
+#   class AuthScreen -- the fullscreen GTK window itself, showing the code + LAN address.
+#   main() -- entrypoint: parses argv, builds and shows an AuthScreen.
 _BASE_SIZES = {
     "title_font": 90, "code_font": 420, "code_spacing": 20, "code_margin_top": 40,
     "address_font": 46, "address_margin_top": 24, "address_margin_left": 32,

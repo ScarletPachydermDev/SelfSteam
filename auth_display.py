@@ -14,6 +14,12 @@ import gamescope_splash
 import steamos_session
 import window_titles
 
+# Functions:
+#   _local_ip() -- best-guess LAN-facing IP address, for the "connect from another device" hint.
+#   ensure_shown() -- show the current code on screen if it isn't already being shown.
+#   dismiss() -- close the pairing-code window.
+#   _dismiss_locked() -- dismiss()'s actual work, run under the module's own lock.
+
 _AUTH_SCREEN_SCRIPT = os.path.join(os.path.dirname(__file__), "auth_screen.py")
 
 # Same env var + default selfsteam_server.py itself reads its port from

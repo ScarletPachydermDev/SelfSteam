@@ -14,6 +14,12 @@ import subprocess
 
 import host_exec
 
+# Functions:
+#   _installed_app_ids() -- app ids of every installed Flatpak app.
+#   _parse_desktop_file(path) -- (name, categories, mimetypes) parsed out of a .desktop file.
+#   _is_browser(categories, mimetypes) -- True if those fields self-identify as a web browser.
+#   list_installed_browsers() -- [(app_id, display_name), ...] for installed browsers, sorted.
+
 _EXPORT_DIRS = [
     os.path.expanduser("~/.local/share/flatpak/exports/share/applications"),
     "/var/lib/flatpak/exports/share/applications",

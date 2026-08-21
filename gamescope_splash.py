@@ -17,6 +17,12 @@ import time
 
 import host_exec
 
+# Functions:
+#   _run(argv) -- subprocess.run wrapper via host_exec.
+#   _find_window_by_title(title) -- finds our own window by its exact title.
+#   foreground(win_id) -- marks win_id as gamescope's foreground base layer.
+#   restore(prior) -- restores whatever was foregrounded before.
+#   launch_foregrounded(argv, title) -- launches argv, finds its window by title, foregrounds it.
 _WINDOW_RE = re.compile(r"^\s*(0x[0-9a-fA-F]+)\s")
 
 

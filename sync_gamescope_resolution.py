@@ -30,6 +30,9 @@ from Xlib.protocol import event as xevent  # noqa: E402
 ATOM_NAME = "GAMESCOPE_XWAYLAND_MODE_CONTROL"
 INT32_MAX = 2**30 + (2**30 - 1)
 
+# Functions:
+#   sync_to_native() -- tells Gamescope to size this shortcut's Xwayland display to its own output.
+
 
 def sync_to_native():
     dpy_name = os.environ.get("DISPLAY")

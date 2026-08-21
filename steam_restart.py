@@ -31,6 +31,13 @@ POLL_TIMEOUT = 60
 # restarting" from the UI side.
 LAUNCH_POLL_TIMEOUT = 150
 
+# Functions:
+#   is_steam_running() -- True if a Steam process is currently running (native or Flatpak).
+#   restart_steam() -- kill Steam, wait for it to actually exit, relaunch it.
+#   steam_pids() -- pids of any currently-running Steam process.
+#   _launch_and_wait(argv) -- launches argv, then polls until Steam is confirmed running again.
+#   launch_flatpak_steam_detached() -- fire-and-forget launch, used right after installing Steam.
+
 
 def is_steam_running():
     """True if a Steam process is currently running on the host (native

@@ -22,6 +22,18 @@ import host_exec
 RETROARCH_APP_ID = "org.libretro.RetroArch"
 _BUILDBOT_BASE = "https://buildbot.libretro.com/nightly/linux/x86_64/latest"
 
+# Functions:
+#   _cores_dir() -- RetroArch's own real cores directory.
+#   core_path(console) -- the .so file path for a given console/core entry.
+#   core_installed(console) -- whether that core's .so is already on disk.
+#   retroarch_installed() -- whether the RetroArch Flatpak itself is installed.
+#   install_retroarch() -- flatpak installs RetroArch.
+#   install_core(console) -- downloads the real prebuilt core .so from libretro's buildbot.
+#   _system_dir() -- RetroArch's own real BIOS/system directory.
+#   bios_installed(console) -- real on-disk check for that console's required BIOS file(s).
+#   install_bios(console, file_path) -- copies a picked BIOS file into RetroArch's system dir.
+#   launch_args(console, romfile) -- argv for launching console's core against romfile.
+
 # (console group, libretro core name, needs BIOS, core's own real display
 # name). Wider than the original 7-console starter list, but still a
 # curated pick -- one or more cores per mainstream system RetroArch/

@@ -30,6 +30,14 @@ import subprocess
 
 import host_exec
 
+# Functions:
+#   class UnsupportedBrowserError -- raised for a browser_app_id kiosk_launch_args doesn't know.
+#   _pref_line(name, value) -- one Firefox-style prefs.js line.
+#   _ensure_zen_profile() -- (re)writes the dedicated Zen profile's user.js on every call.
+#   _flatpak_installed(flatpak_exe, app_id) -- True if that Flatpak app id is installed.
+#   kiosk_launch_args(browser_app_id, url, couch_mode, youtube_tv_user_agent=None) -- argv for
+#       launching browser_app_id in kiosk mode against url.
+
 CHROMIUM_APP_IDS = {
     "com.microsoft.Edge",  # handled by edge_launcher.py instead, listed for classification only
     "com.google.Chrome",
