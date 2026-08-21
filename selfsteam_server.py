@@ -1102,7 +1102,7 @@ function selfsteamEmFormNav(form) {
 // the specific emulator, not the game.
 function selfsteamEmEmulatorChanged(select) {
   var form = select.form;
-  ["em_biosfile", "em_bios2file", "em_bios3file", "em_keysfile", "em_firmwarefile"].forEach(function (name) {
+  ["em_biosfile", "em_bios2file", "em_bios3file", "em_bios4file", "em_keysfile", "em_firmwarefile"].forEach(function (name) {
     var el = form.elements[name];
     if (el) el.value = "";
   });
@@ -2153,7 +2153,7 @@ def _emulators_tab_panel_html(state, chosen=None):
         # AppImage list would just be wrong, not merely stale.
         href = _em_url(
             "/new", state, em_install_source=value, em_emulator="",
-            em_romfile="", em_biosfile="", em_bios2file="", em_bios3file="",
+            em_romfile="", em_biosfile="", em_bios2file="", em_bios3file="", em_bios4file="",
             em_keysfile="", em_firmwarefile="", em_resolved="",
         )
         return f'<a class="{active}" href="{href}" onclick="return selfsteamEmNav(this)">{text}</a>'
@@ -3060,6 +3060,7 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
   <input type="hidden" name="em_biosfile" value="{html.escape(em_state.get('em_biosfile', ''))}">
   <input type="hidden" name="em_bios2file" value="{html.escape(em_state.get('em_bios2file', ''))}">
   <input type="hidden" name="em_bios3file" value="{html.escape(em_state.get('em_bios3file', ''))}">
+  <input type="hidden" name="em_bios4file" value="{html.escape(em_state.get('em_bios4file', ''))}">
   <input type="hidden" name="em_keysfile" value="{html.escape(em_state.get('em_keysfile', ''))}">
   <input type="hidden" name="em_firmwarefile" value="{html.escape(em_state.get('em_firmwarefile', ''))}">
   <input type="hidden" name="em_edit_appid" value="{html.escape(em_edit_appid)}">
