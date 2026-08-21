@@ -1160,7 +1160,14 @@ def _hostname():
     # title -- it's the fastest way to confirm from the login screen
     # alone that you've reached the right machine, useful the moment
     # there's more than one SelfSteam on the same network.
-    return socket.gethostname()
+    name = socket.gethostname()
+    # SELFSTEAM_DEV_TEST is only ever set by the throwaway unsandboxed
+    # dev-test copy (see dev-test.sh) -- never by the real installed
+    # Flatpak -- so this is purely a visual "this is a scratch test
+    # instance, not your real one" marker, off by default.
+    if os.environ.get("SELFSTEAM_DEV_TEST"):
+        name += " \U0001F6A7"
+    return name
 
 
 def _steam_warning_html():
