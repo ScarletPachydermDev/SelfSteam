@@ -73,4 +73,4 @@ SelfSteam doesn't vendor code from any of these, but real behavior/patterns here
 
 ## License
 
-[MIT](LICENSE)
+[FSL-1.1-MIT](LICENSE) -- free for any non-competing use (personal use, internal use, non-commercial education/research); converts automatically to plain MIT two years after each version is released.

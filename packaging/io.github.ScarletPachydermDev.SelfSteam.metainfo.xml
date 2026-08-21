@@ -3,8 +3,12 @@
   <id>io.github.ScarletPachydermDev.SelfSteam</id>
   <name>SelfSteam</name>
   <summary>Add Steam shortcuts with artwork from another device</summary>
+  <!-- metadata_license stays MIT/permissive by AppStream convention --
+       it covers this metainfo.xml file itself, not the software, so
+       app-store catalogs can freely reuse it regardless of the
+       software's own (more restrictive) license below. -->
   <metadata_license>MIT</metadata_license>
-  <project_license>MIT</project_license>
+  <project_license>FSL-1.1-MIT</project_license>
   <description>
     <p>
       SelfSteam is a headless companion that adds non-Steam shortcuts --
