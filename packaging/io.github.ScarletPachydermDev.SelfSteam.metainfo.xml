@@ -26,6 +26,14 @@
   </categories>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="0.1.7" date="2026-08-21">
+      <description>
+        <ul>
+          <li>Fix Flathub-installed emulator shortcuts routing Edit to the URL tab instead of the Emulators tab</li>
+          <li>Fix BIOS/keys/firmware files (xemu, and any other Flathub emulator) silently failing to save -- other Flatpak apps' own config directories weren't actually reachable from the sandbox</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.6" date="2026-08-21">
       <description>
         <ul>
