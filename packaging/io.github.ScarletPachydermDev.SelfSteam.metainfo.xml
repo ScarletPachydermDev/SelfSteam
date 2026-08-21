@@ -3,8 +3,8 @@
   <id>io.github.ScarletPachydermDev.SelfSteam</id>
   <name>SelfSteam</name>
   <summary>Add Steam shortcuts with artwork from another device</summary>
-  <!-- metadata_license stays MIT/permissive by AppStream convention --
-       it covers this metainfo.xml file itself, not the software, so
+  <!-- metadata_license stays MIT/permissive by AppStream convention,
+       since it covers this metainfo.xml file itself, not the software:
        app-store catalogs can freely reuse it regardless of the
        software's own (more restrictive) license below. -->
   <metadata_license>MIT</metadata_license>
