@@ -26,6 +26,16 @@
   </categories>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="0.1.2" date="2026-08-21">
+      <description>
+        <p>Fix the pairing-code screen not appearing at all in gamescope sessions (missing DISPLAY in the sandbox).</p>
+      </description>
+    </release>
+    <release version="0.1.1" date="2026-08-21">
+      <description>
+        <p>Fix the pairing-code screen failing to launch under Flatpak.</p>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-08-21">
       <description>
         <p>First packaged release.</p>
