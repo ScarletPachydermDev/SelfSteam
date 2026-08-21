@@ -76,8 +76,21 @@ def launch_foregrounded(argv, window_title, display=":0"):
     the launched app must call Gtk set_title(window_title)), and
     foreground it. Returns (process, prior_baselayer_value) -- caller
     is responsible for terminating the process and calling restore()
-    when done."""
-    proc = subprocess.Popen(host_exec.wrap(argv), start_new_session=True)
+    when done.
+
+    argv itself is launched directly, NOT through host_exec.wrap --
+    both real callers (auth_display.py's auth_screen.py, maintenance.py's
+    splash.py) launch this app's own script, which only exists inside
+    the Flatpak sandbox (/app/share/selfsteam/...) and needs the
+    sandbox's own GTK4/PyGObject (org.gnome.Platform), neither of which
+    exist on the bare host. host_exec.wrap is still correct for _run's
+    own X11 property calls below (those genuinely need the host's real
+    X server tools), just not for the launched app itself. Confirmed
+    live as a real bug: wrapping this too made the auth screen silently
+    fail with "No such file or directory" on every gamescope-session
+    Flatpak install, since flatpak-spawn --host was trying to run a
+    sandbox-only path directly on the host."""
+    proc = subprocess.Popen(argv, start_new_session=True)
     win_id = _find_window_by_title(display, window_title)
     if win_id is None:
         return proc, None
