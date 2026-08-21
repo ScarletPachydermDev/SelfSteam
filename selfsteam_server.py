@@ -2325,6 +2325,181 @@ def _em_middle_column_html(state, matches, extra_class=""):
 """
 
 
+# /custom: a standalone page (not a /new tab -- there's no "blank"
+# state for it, every visit arrives from the gallery's own Edit link
+# for a shortcut this tool doesn't recognize as its own, see
+# _poster_card_html) for editing a foreign non-Steam shortcut's raw
+# Target/Start In/Launch Options directly. Same state-on-querystring /
+# SGDB-search-by-name / artwork-picker pattern as the RetroArch/
+# Emulators tabs, just without a tab bar or "Find Artwork" button --
+# the search runs immediately from whatever cu_target's own basename
+# guesses at (_ra_guess_name_from_filename is generic path-basename
+# cleanup, not actually RA-specific), and Target/Start In/Launch
+# Options/Name are plain fields owned by the Add form (form="...")
+# rather than a form of their own, since editing them shouldn't
+# re-trigger a fresh search -- only the SGDB search box itself does.
+_CU_STATE_KEYS = [
+    "cu_target", "cu_start_dir", "cu_launch_options",
+    "cu_resolved", "cu_sgdb_q", "cu_sgdb_cleared",
+    # Always set in practice (every /custom visit comes from an Edit
+    # link) -- carried the same way ra_edit_appid/ra_edit_name are, to
+    # swap the Add button to "Save Shortcut" and let /add clean up the
+    # old entry if the Name field changes before submitting.
+    "cu_edit_appid", "cu_edit_name",
+]
+
+
+def _cu_state_from_params(params):
+    return {key: (params.get(key) or [""])[0] for key in _CU_STATE_KEYS}
+
+
+def _cu_qs(state, **overrides):
+    merged = dict(state)
+    merged.update(overrides)
+    return "&".join(f"{k}={urllib.parse.quote(str(merged[k]))}" for k in _CU_STATE_KEYS if merged.get(k))
+
+
+def _cu_url(path, state, **overrides):
+    return f"{path}?{_cu_qs(state, **overrides)}"
+
+
+def _cu_display_term(state, chosen=None):
+    # Same override/cleared/resolved-match/guessed-from-path fallback
+    # chain as _ra_display_term -- see its own comment for the reasoning,
+    # "path" here being cu_target instead of a ROM's romfile.
+    if state.get("cu_sgdb_q"):
+        return state["cu_sgdb_q"].lower()
+    if state.get("cu_sgdb_cleared"):
+        return ""
+    if chosen and chosen.get("name"):
+        return chosen["name"].lower()
+    target = state.get("cu_target")
+    return _ra_guess_name_from_filename(target).lower() if target else ""
+
+
+def _cu_sgdb_search_bar_html(state, chosen=None):
+    display_term = _cu_display_term(state, chosen)
+    clear_href = _cu_url("/custom", state, cu_sgdb_q="", cu_resolved="", cu_sgdb_cleared="1")
+    hidden = _ra_hidden_fields({k: v for k, v in state.items() if k not in ("cu_sgdb_q", "cu_resolved")})
+    return f"""
+<form action="/custom" method="get">
+  {hidden}
+  <div class="search-field-row">
+    <div class="field-with-clear">
+      <input type="text" name="cu_sgdb_q" value="{html.escape(display_term)}" placeholder="SGDB search">
+      <a href="{clear_href}" class="field-clear-btn" title="Clear">&#10005;</a>
+    </div>
+    <button type="submit" class="search-submit-btn" title="Search">{_SEARCH_ICON_SVG}</button>
+  </div>
+</form>
+"""
+
+
+def _cu_middle_column_html(state, matches):
+    if not matches:
+        list_html = _placeholder_matches_html()
+    else:
+        href = _cu_url("/custom", state)
+        rows = []
+        for i, m in enumerate(matches):
+            cls = " selected" if i == 0 else ""
+            rows.append(f'<a class="{cls.strip()}" href="{href}">{html.escape(m["name"])}</a>')
+        list_html = f'<div class="boxed-list">{"".join(rows)}</div>'
+    return f"""
+<div class="card">
+  {_cu_sgdb_search_bar_html(state, matches[0] if matches else None)}
+  <div class="field-group" style="flex:1;min-height:0">
+    <h2>SGDB matches</h2>
+    {list_html}
+  </div>
+</div>
+"""
+
+
+def _custom_left_html(state, chosen=None):
+    # No tab bar, no separate GET-triggered form for Target/Start In/
+    # Launch Options -- unlike the RA/Emulators pickers, there's no
+    # single-click "pick again" action to hook a re-search onto here,
+    # so these are just plain fields on the shared Add form, submitted
+    # (as currently typed) only when the user actually saves. The
+    # search itself already ran the moment this page was first reached
+    # (see the /custom GET handler's cu_target-gated branch), driven by
+    # cu_target's own guessed name, not by these fields directly.
+    target = state.get("cu_target", "")
+    name_default = chosen["name"] if chosen else (_ra_guess_name_from_filename(target) if target else "")
+    return f"""
+  <div class="field-group">
+    <label class="field-label" for="cu-target-field">Target <span class="required-asterisk">*</span></label>
+    <input type="text" name="cu_target" id="cu-target-field" form="{_ADD_FORM_ID}"
+           value="{html.escape(target)}" placeholder="/path/to/executable" required>
+  </div>
+  <div class="field-group">
+    <label class="field-label" for="cu-startdir-field">Start In</label>
+    <input type="text" name="cu_start_dir" id="cu-startdir-field" form="{_ADD_FORM_ID}"
+           value="{html.escape(state.get('cu_start_dir', ''))}" placeholder="/path/to/">
+  </div>
+  <div class="field-group">
+    <label class="field-label" for="cu-launchoptions-field">Launch options</label>
+    <input type="text" name="cu_launch_options" id="cu-launchoptions-field" form="{_ADD_FORM_ID}"
+           value="{html.escape(state.get('cu_launch_options', ''))}" placeholder="(optional)">
+  </div>
+  <div class="selfsteam-spacer"></div>
+  <div class="field-group">
+    <label class="field-label" for="cu-name-field">Name</label>
+    <div class="field-with-clear">
+      <img class="name-field-icon" src="/vendor/name-field-wand.webp" alt="">
+      <input type="text" name="cu_match_name" id="cu-name-field" form="{_ADD_FORM_ID}"
+             value="{html.escape(name_default)}" placeholder="Shortcut name">
+    </div>
+  </div>"""
+
+
+def render_custom_page(cu_state, cu_candidates_by_category=None, cu_chosen=None, cu_loading=False):
+    cu_state = cu_state or {}
+    cu_candidates_by_category = cu_candidates_by_category or {}
+    cu_edit_appid = cu_state.get("cu_edit_appid", "")
+
+    extra_head = ""
+    if cu_loading:
+        refresh_url = _cu_url("/custom", cu_state, cu_resolved="1")
+        extra_head = f'<meta http-equiv="refresh" content="0;url={html.escape(refresh_url)}">'
+        middle_html = _cu_middle_column_html(cu_state, [])
+        right_content = _ra_loading_artwork_html()
+        add_button = (
+            '<button type="button" id="selfsteam-add-button" disabled style="opacity:0.45;cursor:not-allowed">'
+            'Searching for artwork...<span class="spinner"></span></button>'
+        )
+        add_form = ""
+    else:
+        middle_html = _cu_middle_column_html(cu_state, [cu_chosen] if cu_chosen else [])
+        right_content = _artwork_picker_html(cu_candidates_by_category, prefix="cu_")
+        add_form = f"""
+<form id="{_ADD_FORM_ID}" action="/add" method="post" onsubmit="selfsteamShowCreating(this)">
+  <input type="hidden" name="cu_edit_appid" value="{html.escape(cu_edit_appid)}">
+  <input type="hidden" name="cu_edit_name" value="{html.escape(cu_state.get('cu_edit_name', ''))}">
+</form>
+"""
+        add_button_text = "Save Shortcut" if cu_edit_appid else "Create Steam Shortcut"
+        add_button = f'<button type="submit" id="selfsteam-add-button" form="{_ADD_FORM_ID}">{add_button_text}</button>'
+
+    left = f"""
+<div class="card">
+  <div style="display:flex;flex-direction:column;gap:0.9rem;flex:1;min-height:0">
+    {_custom_left_html(cu_state, cu_chosen)}
+  </div>
+  {add_button}
+</div>
+"""
+    return render(f"""
+<div id="selfsteam-add-form-slot">{add_form}</div>
+<div class="selfsteam-columns">
+  <div class="selfsteam-left">{left}</div>
+  <div class="selfsteam-middle">{middle_html}</div>
+  <div class="selfsteam-right"><div class="card artwork-card">{right_content}</div></div>
+</div>
+""", extra_head=extra_head)
+
+
 _FORM_TABS = [("tab-url", "URL"), ("tab-apps", "Apps"), ("tab-retroarch", "RetroArch"), ("tab-emulators", "Emulators")]
 
 
@@ -3095,6 +3270,10 @@ def _run_commit_in_background(items, label):
                 romfile = item.get("romfile")
                 if romfile and os.path.isfile(romfile):
                     os.remove(romfile)
+            elif item.get("type") == "add_custom":
+                create_webapp.register_custom_shortcut(
+                    item["name"], item["target"], item["start_dir"], item["launch_options"], item["asset_paths"],
+                )
             else:
                 create_webapp.register_steam_shortcut(
                     item["name"], item["url"], item["asset_paths"],
@@ -3316,11 +3495,25 @@ def _poster_card_html(shortcut, pending_removal_appids):
             "em_romfile": romfile_rel,
             "em_edit_appid": str(appid), "em_edit_name": name,
         })
-    else:
+    elif shortcut.get("managed"):
         edit_href = (
             f"/search?q={urllib.parse.quote(shortcut['url'] or name)}"
             f"&url_edit_appid={urllib.parse.quote(str(appid))}&url_edit_name={urllib.parse.quote(name)}"
         )
+    else:
+        # Not created by this tool (or not recognized as such) and not
+        # a RetroArch/Emulators shortcut either -- there's no tab that
+        # knows how this shortcut's own exe/LaunchOptions were built,
+        # so it edits via /custom instead, with its actual raw Target/
+        # Start In/Launch Options carried over as-is (see
+        # create_webapp.list_gridge_shortcuts' own docstring on why
+        # these shortcuts are listed here at all).
+        edit_href = _cu_url("/custom", {
+            "cu_target": shortcut.get("exe") or "",
+            "cu_start_dir": shortcut.get("start_dir") or "",
+            "cu_launch_options": shortcut.get("launch_options") or "",
+            "cu_edit_appid": str(appid), "cu_edit_name": name,
+        })
     # A RetroArch/Emulators-tab shortcut's ROM might be a local pick
     # (referenced in place, wherever it already lives -- see the local
     # file browser) rather than something SelfSteam uploaded itself, so
@@ -3581,6 +3774,29 @@ class Handler(BaseHTTPRequestHandler):
 
         if parsed.path == "/":
             self._send_html(render_gallery())
+            return
+
+        if parsed.path == "/custom":
+            cu_state = _cu_state_from_params(params)
+            cu_target = cu_state.get("cu_target")
+            # Same fast-loading-response-then-real-search split as /new's
+            # own ra_loading/em_loading branches -- see their own comment.
+            # Every /custom visit arrives with cu_target already set (the
+            # gallery's own Edit link, see _poster_card_html), so the
+            # search runs immediately with no separate trigger needed.
+            if cu_target and not cu_state.get("cu_resolved"):
+                self._send_html(render_custom_page(cu_state, cu_loading=True))
+                return
+            cu_chosen = None
+            cu_candidates = {}
+            if cu_target:
+                guessed = _ra_guess_name_from_filename(cu_target)
+                cu_matches = _resolve_matches(
+                    guessed, service_resolver.Resolved(name=guessed), cu_state.get("cu_sgdb_q"),
+                )
+                cu_chosen = cu_matches[0]
+                cu_candidates = _fetch_candidates(cu_chosen["id"])
+            self._send_html(render_custom_page(cu_state, cu_candidates, cu_chosen))
             return
 
         if parsed.path == "/new":
@@ -3898,6 +4114,11 @@ class Handler(BaseHTTPRequestHandler):
             self._add_standalone_emulator_shortcut(params, em_emulator, em_romfile)
             return
 
+        cu_target = (params.get("cu_target") or [""])[0]
+        if cu_target:
+            self._add_custom_shortcut(params, cu_target)
+            return
+
         query = (params.get("query") or [""])[0]
         couch_mode = bool(params.get("couch_mode"))
         # match_name comes straight from the Name field's own live value
@@ -3934,6 +4155,35 @@ class Handler(BaseHTTPRequestHandler):
             _queue_edit_rename_cleanup(params, "url", match_name)
             pending_queue.add(match_name, url, couch_mode, asset_paths, browser_app_id=browser or None)
             self._redirect("/new#tab-url")
+        except Exception as e:  # noqa: BLE001 -- surfaced to the user, not swallowed
+            self._send_html(render_done(match_name, ok=False, error=e))
+
+    def _add_custom_shortcut(self, params, cu_target):
+        # cu_match_name comes straight from /custom's own Name field
+        # live value -- same reasoning as match_name/ra_match_name/
+        # em_match_name, a separate field name of its own.
+        cu_start_dir = (params.get("cu_start_dir") or [""])[0]
+        cu_launch_options = (params.get("cu_launch_options") or [""])[0]
+        match_name = (params.get("cu_match_name") or [""])[0] or _ra_guess_name_from_filename(cu_target) or cu_target
+
+        try:
+            # No file/BIOS/core install step -- unlike RetroArch/
+            # Emulators, a /custom shortcut's Target is whatever the
+            # user typed, used exactly as given (this page exists
+            # specifically so a shortcut this tool didn't create can be
+            # edited here with its real params intact, not re-synthesized).
+            slug = create_webapp.slugify(match_name)
+            selections = {}
+            for basename, _title, _fetch, _w, _h in ARTWORK_CATEGORIES:
+                # artwork_cu_{basename}, not artwork_{basename} -- see
+                # _add_retroarch_shortcut's own comment on why every
+                # picker needs its own prefixed field name.
+                selection_url = (params.get(f"artwork_cu_{basename}") or [None])[0]
+                selections[basename] = {"url": selection_url} if selection_url else None
+            asset_paths = create_webapp.download_selected_assets(slug, selections)
+            _queue_edit_rename_cleanup(params, "cu", match_name)
+            pending_queue.add_custom(match_name, cu_target, cu_start_dir, cu_launch_options, asset_paths)
+            self._redirect("/")
         except Exception as e:  # noqa: BLE001 -- surfaced to the user, not swallowed
             self._send_html(render_done(match_name, ok=False, error=e))
 
@@ -4245,7 +4495,7 @@ class Handler(BaseHTTPRequestHandler):
         if not items:
             self._redirect("/")
             return
-        added = sum(1 for i in items if i.get("type", "add") == "add")
+        added = sum(1 for i in items if i.get("type", "add") in ("add", "add_custom"))
         removed = sum(1 for i in items if i.get("type") == "remove")
         parts = []
         if added:
