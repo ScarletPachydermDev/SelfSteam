@@ -26,6 +26,15 @@
   </categories>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="0.1.8" date="2026-08-21">
+      <description>
+        <ul>
+          <li>Add xemu's missing Hard Disk Image slot (xemu needs 4 files, not 3), with a link to xemu's own free legal image</li>
+          <li>Make xemu's EEPROM slot optional and last in the list, since xemu auto-generates a default if none is provided</li>
+          <li>Set xemu to use the Vulkan renderer automatically on shortcut creation</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.7" date="2026-08-21">
       <description>
         <ul>
