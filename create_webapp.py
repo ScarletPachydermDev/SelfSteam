@@ -41,7 +41,7 @@ import steam_paths
 #   find_grid_image_path(appid, grid_dir) -- the vertical-grid image file for appid.
 #   find_grid_image_for_appid(appid) -- same, searching every Steam user's own grid dir.
 #   thumbnail_for_appid(appid) -- a small cached webp copy of appid's vertical grid image.
-#   list_gridge_shortcuts() -- every non-Steam shortcut this tool itself created.
+#   list_gridge_shortcuts() -- every non-Steam shortcut across all Steam profiles, ours and foreign alike.
 #   remove_gridge_shortcut(appid) -- removes a shortcut this tool created, and its grid assets.
 #   register_test_desktop_entry() -- adds a .desktop file for local testing without Steam.
 #   main() -- Stage 1 CLI entrypoint.
@@ -617,17 +617,30 @@ def thumbnail_for_appid(appid):
 
 
 def list_gridge_shortcuts():
-    """Every non-Steam shortcut this tool itself created (matched via
-    is_gridge_launch_wrapper on the exe field, never a user's own
-    unrelated non-Steam shortcuts), across every Steam user profile.
-    Returns dicts with appid/name/url/ra_console/ra_romfile/em_emulator/
-    em_romfile/user_id -- ra_console/ra_romfile are None for anything
-    but a RetroArch shortcut (see _extract_retroarch_info), em_emulator/
-    em_romfile are None for anything but a standalone-emulator shortcut
-    (see _extract_standalone_emulator_info). Callers needing the
-    grid image should call find_grid_image_path themselves with the
-    right per-user grid_dir, since two different users could each have
-    their own art for a same-named shortcut."""
+    """Every non-Steam shortcut across every Steam user profile --
+    ones this tool itself created (matched via is_gridge_launch_wrapper
+    on the exe field) as well as shortcuts the user added some other
+    way (Steam's own "Add a Non-Steam Game", another tool, or a
+    pre-rename SelfSteam build whose exe path this version's
+    is_gridge_launch_wrapper doesn't happen to recognize). Confirmed
+    live (2026-08-21) that filtering to only recognized-wrapper
+    shortcuts hid entries a user reasonably expects to see and manage
+    from here. Returns dicts with appid/name/url/ra_console/ra_romfile/
+    em_emulator/em_romfile/user_id/managed -- ra_console/ra_romfile are
+    None for anything but a RetroArch shortcut (see
+    _extract_retroarch_info), em_emulator/em_romfile are None for
+    anything but a standalone-emulator shortcut (see
+    _extract_standalone_emulator_info), url is None when LaunchOptions
+    doesn't look like a browser launch at all -- all of which
+    _poster_card_html already renders a sane generic card/edit-link
+    for. managed is True only for shortcuts is_gridge_launch_wrapper
+    recognizes; foreign entries still list and can be edited/removed,
+    editing one just adopts it as a SelfSteam-managed shortcut going
+    forward, same as always happens when Edit's Create/Save button is
+    used. Callers needing the grid image should call
+    find_grid_image_path themselves with the right per-user grid_dir,
+    since two different users could each have their own art for a
+    same-named shortcut."""
     root = steam_paths.find_steam_root()
     userdata = os.path.join(root, "userdata")
     if not os.path.isdir(userdata):
@@ -640,8 +653,6 @@ def list_gridge_shortcuts():
         data = shortcuts_vdf.load(vdf_path)
         for entry in data.get("shortcuts", {}).values():
             exe = _field(entry, "exe", "Exe") or ""
-            if not is_gridge_launch_wrapper(exe):
-                continue
             launch_options = _field(entry, "LaunchOptions", "launchoptions") or ""
             ra_console, ra_romfile = _extract_retroarch_info(launch_options)
             em_emulator, em_romfile = _extract_standalone_emulator_info(launch_options)
@@ -654,6 +665,7 @@ def list_gridge_shortcuts():
                 "em_emulator": em_emulator,
                 "em_romfile": em_romfile,
                 "user_id": uid,
+                "managed": is_gridge_launch_wrapper(exe),
             })
     results.sort(key=lambda r: r["name"].lower())
     return results
