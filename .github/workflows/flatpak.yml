@@ -1,0 +1,102 @@
+name: Flatpak
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+
+jobs:
+  build:
+    name: Build
+    # Runs on every push/PR as a quick "does it still build" check -- no
+    # signing, no publishing, unlike the release job below. Skipped for
+    # tag pushes since the release job's own build supersedes it.
+    if: "!startsWith(github.ref, 'refs/tags/v')"
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-50
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: selfsteam-x86_64.flatpak
+          manifest-path: packaging/io.github.ScarletPachydermDev.SelfSteam.yml
+
+  release:
+    name: Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-50
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: src
+
+      - uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: gh-pages
+          fetch-depth: 0
+
+      - name: Import GPG signing key
+        run: echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+
+      # Signed, built straight into its own fresh repo dir rather than the
+      # gh-pages checkout -- rsync'd over afterward. Each release replaces
+      # the published repo's contents rather than accumulating OSTree
+      # history release-to-release, matching gridge-desktop's own
+      # approach: flatpak update only needs the current commit to be
+      # newer than what a client has, not a preserved full history, so
+      # this is simpler and still correct -- just without delta-update
+      # efficiency across releases.
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          manifest-path: src/packaging/io.github.ScarletPachydermDev.SelfSteam.yml
+          repo-dir: built-repo
+          gpg-sign: ${{ secrets.GPG_KEY_ID }}
+          build-bundle: false
+
+      - name: Build the release bundle (embeds the update repo's URL, its GPG key, and a Flathub fallback for the runtime)
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          flatpak build-bundle \
+            --gpg-sign="$GPG_KEY_ID" \
+            --gpg-keys=src/packaging/selfsteam-repo-public.gpg \
+            --repo-url=https://scarletpachydermdev.github.io/SelfSteam/repo \
+            --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo \
+            built-repo "selfsteam-${version}-x86_64.flatpak" \
+            io.github.ScarletPachydermDev.SelfSteam master
+        env:
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+
+      - name: Publish the updated repo to GitHub Pages
+        run: |
+          rm -rf gh-pages/repo
+          cp -a built-repo gh-pages/repo
+          cd gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add repo
+          if ! git diff --cached --quiet; then
+            git commit -m "Update repo for ${GITHUB_REF_NAME}"
+            git push origin gh-pages
+          fi
+
+      - name: Create/update release and attach bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" ||
+            gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" \
+              --title "SelfSteam ${version}" --generate-notes
+          gh release upload "${GITHUB_REF_NAME}" "selfsteam-${version}-x86_64.flatpak" --repo "${GITHUB_REPOSITORY}" --clobber

@@ -1,0 +1,70 @@
+app-id: io.github.ScarletPachydermDev.SelfSteam
+runtime: org.gnome.Platform
+# Current stable branch confirmed live via Flathub's own API
+# (flathub.org/api/v2/summary/org.gnome.Platform -> "branch": "50"),
+# not guessed -- matches gridge-desktop's own manifest, which pins the
+# same branch.
+runtime-version: '50'
+sdk: org.gnome.Sdk
+command: selfsteam-launcher
+
+finish-args:
+  - --share=network
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --socket=x11
+  - --device=dri
+  # flatpak-spawn --host escape hatch (see host_exec.py's own docstring)
+  # -- required for: systemctl/loginctl (installing/enabling the
+  # persistent background service), and everything else this app shells
+  # out to on the host (flatpak install/override for emulators, Steam
+  # restart, gamescope window foregrounding, etc).
+  - --talk-name=org.freedesktop.Flatpak
+  # Real, broad host filesystem access, read-write -- wider than
+  # gridge-desktop's own narrower --filesystem grants (~/.steam,
+  # xdg-data/Steam, ~/.var/app), because this app's actual job is
+  # wider: browsing/reading a user's own ROM library from anywhere on
+  # disk (see selfsteam_server.py's own _RA_ROOT = "/" comment on why
+  # that picker is deliberately rooted at the real filesystem root, not
+  # just home), writing shortcuts.vdf and grid artwork into Steam's own
+  # directory (native or Flatpak), and writing keys/BIOS/firmware files
+  # into *other* Flatpak apps' own ~/.var/app/<id>/ directories (every
+  # standalone_emulators.py install helper does this). None of that is
+  # reachable through a narrower --filesystem grant.
+  - --filesystem=host
+
+modules:
+  - name: selfsteam
+    buildsystem: simple
+    build-commands:
+      - mkdir -p /app/share/selfsteam
+      - cp -r *.py vendor launch-browser.sh /app/share/selfsteam/
+      - install -Dm755 packaging/selfsteam.sh /app/bin/selfsteam-launcher
+      - install -Dm644 packaging/io.github.ScarletPachydermDev.SelfSteam.desktop
+          /app/share/applications/io.github.ScarletPachydermDev.SelfSteam.desktop
+      - install -Dm644 packaging/io.github.ScarletPachydermDev.SelfSteam.metainfo.xml
+          /app/share/metainfo/io.github.ScarletPachydermDev.SelfSteam.metainfo.xml
+      # Pre-rasterized PNGs, not the source SVG -- confirmed live that
+      # org.gnome.Sdk//50's appstreamcli-compose can't rasterize SVG
+      # itself during the build ("Unrecognised image file format" /
+      # file-read-error, reproduced directly against appstreamcli, not
+      # a manifest/build-script bug), so a raw SVG in hicolor/scalable
+      # fails the whole compose step. Shipping pre-rendered 64/128px
+      # PNGs (packaging/hicolor/<size>/apps/, generated from the same
+      # source SVG via cairosvg) sidesteps that entirely -- also the
+      # standard, common workaround for exactly this SDK limitation.
+      - install -Dm644 packaging/hicolor/64x64/apps/io.github.ScarletPachydermDev.SelfSteam.png
+          /app/share/icons/hicolor/64x64/apps/io.github.ScarletPachydermDev.SelfSteam.png
+      - install -Dm644 packaging/hicolor/128x128/apps/io.github.ScarletPachydermDev.SelfSteam.png
+          /app/share/icons/hicolor/128x128/apps/io.github.ScarletPachydermDev.SelfSteam.png
+    sources:
+      # Real git source, matching gridge-desktop's own manifest --
+      # reproducible from the public repo + ref, not a local checkout
+      # path. GitHub Actions' own checkout puts the full repo right
+      # next to this manifest anyway, but a manifest that only works
+      # from inside a specific CI checkout layout isn't actually
+      # reproducible for anyone building it standalone later.
+      - type: git
+        url: https://github.com/ScarletPachydermDev/SelfSteam.git
+        branch: master
