@@ -26,50 +26,21 @@
   </categories>
   <content_rating type="oars-1.1" />
   <releases>
-    <release version="0.1.8" date="2026-08-21">
+    <release version="0.1.9" date="2026-08-21">
       <description>
         <ul>
-          <li>Add xemu's missing Hard Disk Image slot (xemu needs 4 files, not 3), with a link to xemu's own free legal image</li>
-          <li>Make xemu's EEPROM slot optional and last in the list, since xemu auto-generates a default if none is provided</li>
-          <li>Set xemu to use the Vulkan renderer automatically on shortcut creation</li>
-        </ul>
-      </description>
-    </release>
-    <release version="0.1.7" date="2026-08-21">
-      <description>
-        <ul>
+          <li>Fix the pairing-code screen not appearing at all in gamescope sessions (missing DISPLAY in the sandbox)</li>
+          <li>Show all non-Steam shortcuts in the gallery, not just ones SelfSteam itself created</li>
+          <li>Add a /custom page for editing non-SelfSteam shortcuts (Target/Start In/Launch options/Name), with automatic SteamGridDB artwork search</li>
           <li>Fix Flathub-installed emulator shortcuts routing Edit to the URL tab instead of the Emulators tab</li>
-          <li>Fix BIOS/keys/firmware files (xemu, and any other Flathub emulator) silently failing to save -- other Flatpak apps' own config directories weren't actually reachable from the sandbox</li>
+          <li>Fix BIOS/keys/firmware files for Flathub emulators silently failing to save -- other Flatpak apps' own config directories weren't actually reachable from the sandbox</li>
+          <li>Add xemu's missing Hard Disk Image slot (xemu needs 4 files, not 3), with a link to xemu's own free legal image; make EEPROM optional; set Vulkan as the default renderer</li>
+          <li>Fix xemu's HDD image failing to save game data (its own sandbox only had read-only host access)</li>
+          <li>Fix EEPROM re-picks silently not saving</li>
+          <li>Auth screen: exit on a gamepad button press, not just keyboard; tightened the gap between the title and the code</li>
+          <li>SGDB search box and matches now correctly show as disabled with no API key configured, instead of looking interactive with nothing behind it</li>
+          <li>Renamed the uploads folder to selfsteam (new installs no longer create a folder named "gridge")</li>
         </ul>
-      </description>
-    </release>
-    <release version="0.1.6" date="2026-08-21">
-      <description>
-        <ul>
-          <li>Add a standalone /custom page for editing non-SelfSteam shortcuts (Target/Start In/Launch options/Name, no tabs, no extra button)</li>
-          <li>SteamGridDB artwork search runs automatically as soon as the page loads</li>
-          <li>Name field defaults to the shortcut's real saved name instead of a re-guess</li>
-        </ul>
-      </description>
-    </release>
-    <release version="0.1.5" date="2026-08-21">
-      <description>
-        <p>Revert the Custom tab for editing non-SelfSteam shortcuts (still listed, just not editable here yet).</p>
-      </description>
-    </release>
-    <release version="0.1.3" date="2026-08-21">
-      <description>
-        <p>Show all non-Steam shortcuts, not just ones SelfSteam itself created.</p>
-      </description>
-    </release>
-    <release version="0.1.2" date="2026-08-21">
-      <description>
-        <p>Fix the pairing-code screen not appearing at all in gamescope sessions (missing DISPLAY in the sandbox).</p>
-      </description>
-    </release>
-    <release version="0.1.1" date="2026-08-21">
-      <description>
-        <p>Fix the pairing-code screen failing to launch under Flatpak.</p>
       </description>
     </release>
     <release version="0.1.0" date="2026-08-21">
