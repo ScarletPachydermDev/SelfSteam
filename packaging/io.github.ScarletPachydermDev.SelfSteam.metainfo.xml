@@ -26,6 +26,15 @@
   </categories>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="0.1.6" date="2026-08-21">
+      <description>
+        <ul>
+          <li>Add a standalone /custom page for editing non-SelfSteam shortcuts (Target/Start In/Launch options/Name, no tabs, no extra button)</li>
+          <li>SteamGridDB artwork search runs automatically as soon as the page loads</li>
+          <li>Name field defaults to the shortcut's real saved name instead of a re-guess</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.5" date="2026-08-21">
       <description>
         <p>Revert the Custom tab for editing non-SelfSteam shortcuts (still listed, just not editable here yet).</p>
