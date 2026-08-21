@@ -2426,7 +2426,16 @@ def _custom_left_html(state, chosen=None):
     # (see the /custom GET handler's cu_target-gated branch), driven by
     # cu_target's own guessed name, not by these fields directly.
     target = state.get("cu_target", "")
-    name_default = chosen["name"] if chosen else (_ra_guess_name_from_filename(target) if target else "")
+    # Unlike RA/Emulators (whose Name field defaults to a fresh SGDB-
+    # resolved guess even on Edit, see _ra_guess_name_from_filename's
+    # own "not a perfect restore" comment), a /custom shortcut's real
+    # appname is already known -- cu_edit_name, carried from the
+    # gallery's own Edit link -- so there's no reason to show a re-
+    # guessed name instead. Falls back to the guess/chosen-match name
+    # only when there's no real name to restore (shouldn't normally
+    # happen, every /custom visit comes from an existing shortcut).
+    edit_name = state.get("cu_edit_name")
+    name_default = edit_name or (chosen["name"] if chosen else (_ra_guess_name_from_filename(target) if target else ""))
     return f"""
   <div class="field-group">
     <label class="field-label" for="cu-target-field">Target <span class="required-asterisk">*</span></label>
