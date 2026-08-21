@@ -39,17 +39,26 @@ python3 selfsteam_server.py
 
 Needs a SteamGridDB API key, either in `STEAMGRIDDB_API_KEY` or via SelfSteam's own config file (`$XDG_CONFIG_HOME/selfsteam/config.json`) -- or Gridge's GUI-written one directly (`$XDG_CONFIG_HOME/gridge/config.json`), which `config.py` migrates automatically on first run if the SelfSteam one doesn't exist yet.
 
-### Flatpak (in progress)
+### Flatpak
 
-`flatpak/io.github.ScarletPachydermDev.SelfSteam.yml` builds and installs SelfSteam as a real Flatpak, live-tested end to end (`org.flatpak.Builder`, GNOME 50 runtime):
+Not on Flathub -- their own policy excludes AI-authored apps like this one. Instead this follows the exact same self-hosted-repo pattern [Gridge](https://github.com/ScarletPachydermDev/gridge-desktop) already uses: install once from a downloaded bundle, then ordinary `flatpak update` picks up every release after that on its own, no repeated manual downloads.
 
 ```
-flatpak run org.flatpak.Builder --user --force-clean --install build-dir flatpak/io.github.ScarletPachydermDev.SelfSteam.yml
+flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo && flatpak remote-add --user --if-not-exists selfsteam https://raw.githubusercontent.com/ScarletPachydermDev/SelfSteam/master/packaging/io.github.ScarletPachydermDev.SelfSteam.flatpakrepo && flatpak install --user selfsteam io.github.ScarletPachydermDev.SelfSteam
 ```
 
-The sandbox still needs `--talk-name=org.freedesktop.Flatpak` (the same host-escape hatch `host_exec.py` already uses everywhere else) and a broad `--filesystem=host`, since this app genuinely reads/writes across the whole host filesystem by design -- browsing a user's own ROM library from anywhere on disk, writing into Steam's own directory, and writing into *other* Flatpak apps' own `~/.var/app/<id>/` directories for keys/BIOS/firmware. Flatpak's own guidance is that it isn't really meant for server/daemon apps, and this manifest doesn't pretend otherwise: persistence works exactly the same way `install.sh` already does it, a real systemd user service on the host, just installed by `selfsteam_launcher.py` (the exported `command:`) via that same escape hatch on first launch instead of by a separate shell script. Clicking the installed app a second time doesn't reinstall anything -- it just shows the pairing screen, the same as any other trigger.
+> [!NOTE]
+> Flathub is only needed for the GNOME runtime dependency, same as Gridge's own install line.
 
-Not yet submitted anywhere -- the manifest's `sources:` still points at a local `type: dir` for development; a real submission would pin a `type: git` source instead, and the placeholder icon (`flatpak/io.github.ScarletPachydermDev.SelfSteam.svg`, rasterized to PNG at build time -- `org.gnome.Sdk`'s own `appstreamcli compose` can't rasterize SVG itself, confirmed live) needs a real bespoke replacement first.
+Or grab a one-off bundle from a [release](https://github.com/ScarletPachydermDev/SelfSteam/releases/latest) instead and `flatpak install --user selfsteam-x86_64.flatpak` -- it embeds the same repo URL and update-tracking still works afterward either way.
+
+Click the installed app once to set up the persistent background service (a real systemd user service on the host, same mechanism `install.sh` already uses for the unsandboxed install -- installed via the sandbox's `--talk-name=org.freedesktop.Flatpak` escape hatch, `host_exec.py`'s own pattern, on first launch only) and show the pairing screen. Clicking it again later doesn't reinstall anything, it just shows the pairing screen.
+
+`.github/workflows/flatpak.yml` builds and GPG-signs the repo on every `v*` tag, publishes it to this repo's own `gh-pages` branch (served via GitHub Pages), and attaches a release bundle with that repo's URL and signing key embedded -- mirroring gridge-desktop's own workflow exactly. `packaging/io.github.ScarletPachydermDev.SelfSteam.yml` is the manifest itself, live-tested end to end (`org.flatpak.Builder`, GNOME 50 runtime) including the sandbox-escape service setup and the packaged server actually answering requests.
+
+The sandbox needs a broad `--filesystem=host` (wider than Gridge's own narrower grants), since this app genuinely reads/writes across the whole host filesystem by design -- browsing a user's own ROM library from anywhere on disk, writing into Steam's own directory, and writing into *other* Flatpak apps' own `~/.var/app/<id>/` directories for keys/BIOS/firmware.
+
+The icon (`packaging/io.github.ScarletPachydermDev.SelfSteam.svg`, rasterized to PNG at build time -- `org.gnome.Sdk`'s own `appstreamcli compose` can't rasterize SVG itself, confirmed live) is still a rough placeholder.
 
 ## License
 
