@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=SelfSteam
+Comment=Add Steam shortcuts with artwork from another device
+Exec=selfsteam-launcher
+Icon=io.github.ScarletPachydermDev.SelfSteam
+Terminal=false
+Categories=Utility;

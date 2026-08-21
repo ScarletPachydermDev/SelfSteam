@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.ScarletPachydermDev.SelfSteam</id>
+  <name>SelfSteam</name>
+  <summary>Add Steam shortcuts with artwork from another device</summary>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <description>
+    <p>
+      SelfSteam is a headless companion that adds non-Steam shortcuts --
+      streaming services, RetroArch cores, and standalone emulators --
+      complete with SteamGridDB artwork, from a phone or another
+      computer on the same network, while the target machine stays in
+      Steam's Game Mode. A pairing code shown on screen is the only
+      access control, no accounts needed.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.ScarletPachydermDev.SelfSteam.desktop</launchable>
+  <url type="homepage">https://github.com/ScarletPachydermDev/SelfSteam</url>
+  <categories>
+    <category>Utility</category>
+  </categories>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="0.1.0" date="2026-08-21">
+      <description>
+        <p>First packaged release.</p>
+      </description>
+    </release>
+  </releases>
+</component>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Placeholder icon, swap for a real bespoke one before any real
+     Flathub submission. Pure vector shapes only, no text or font
+     glyphs. Rounded square with a simple stylized "S" built from two
+     overlapping arcs. -->
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <rect x="4" y="4" width="120" height="120" rx="26" fill="#1a1a1a"/>
+  <path d="M40 44 a20 16 0 0 1 40 0 h-14 a6 4 0 0 0 -12 0 c0 8 30 4 30 26
+           a20 16 0 0 1 -40 0 h14 a6 4 0 0 0 12 0 c0 -8 -30 -4 -30 -26 Z"
+        fill="#ffffff"/>
+</svg>
