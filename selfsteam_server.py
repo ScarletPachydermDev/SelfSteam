@@ -951,6 +951,21 @@ function selfsteamShowCreating(form) {
   } else {
     button.innerHTML = "Creating Shortcut" + '<span class="spinner"></span>';
   }
+  // Locks every other control across all three columns (search boxes,
+  // artwork picks, tab links, pickers) while this request is in
+  // flight -- a first-time emulator download alone can take several
+  // minutes (see _add_standalone_emulator_shortcut's own comment), and
+  // picking different artwork or re-uploading a file mid-request raced
+  // against whatever the server was already doing with the previous
+  // state, which could genuinely conflict with it. pointer-events, not
+  // disabling each element -- #selfsteam-add-form-slot (this form's
+  // own hidden fields) is a sibling of .selfsteam-columns, not inside
+  // it, so the submission already in flight is unaffected either way.
+  var columns = document.querySelector(".selfsteam-columns");
+  if (columns) {
+    columns.style.pointerEvents = "none";
+    columns.style.opacity = "0.6";
+  }
 }
 
 // Fifth deliberate JS exception: every other RA-tab interaction that

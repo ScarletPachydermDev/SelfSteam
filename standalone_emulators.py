@@ -901,7 +901,22 @@ def _xdg_data_dir(*parts):
     # gives every other emulator here, just real $XDG_DATA_HOME (falling
     # back to ~/.local/share per the XDG basedir spec's own default,
     # same fallback Eden's own GetDataDirectory() uses).
-    base = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    #
+    # NOT os.environ.get("XDG_DATA_HOME") -- confirmed live (2026-08-23)
+    # Flatpak automatically redirects that env var to SelfSteam's own
+    # private ~/.var/app/<selfsteam-app-id>/data when SelfSteam itself
+    # is running sandboxed, which is nowhere the real, unsandboxed Eden
+    # AppImage would ever look. $HOME itself isn't redirected the same
+    # way (confirmed live: os.path.expanduser("~") still resolves to
+    # the real host home even inside the sandbox), so anchoring on that
+    # instead reaches Eden's real data dir every time, sandboxed or
+    # not -- this was a real bug, not a hardening measure: keys/
+    # firmware installs for every AppImage-based emulator here were
+    # silently landing in SelfSteam's own isolated sandbox storage
+    # instead of where the actual unsandboxed emulator process reads
+    # from, the whole time SelfSteam itself has been a packaged
+    # Flatpak.
+    base = os.path.expanduser("~/.local/share")
     return os.path.join(base, *parts)
 
 
@@ -914,7 +929,16 @@ def _eden_args(romfile):
 
 
 def _xdg_config_dir(*parts):
-    base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    # Same real-host-path reasoning as _xdg_data_dir's own comment --
+    # not os.environ.get("XDG_CONFIG_HOME"), confirmed live (2026-08-23)
+    # to be Flatpak's own sandbox redirect to SelfSteam's private config
+    # dir, not the real ~/.config the AppImage-based Ryujinx builds
+    # (running unsandboxed) actually read from. This was the real,
+    # confirmed cause of an AppImage Ryujinx build still asking for
+    # firmware after SelfSteam reported it as installed -- the install
+    # itself was silently landing in SelfSteam's own sandbox storage,
+    # never reaching ~/.config/Ryujinx at all.
+    base = os.path.expanduser("~/.config")
     return os.path.join(base, *parts)
 
 
