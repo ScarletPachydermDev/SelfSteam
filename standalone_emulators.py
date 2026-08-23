@@ -46,7 +46,7 @@ import host_exec
 #   keys_installed(name) / install_keys(name, path) -- Switch prod.keys/title.keys handling.
 #   firmware_installed(name) / install_firmware_zip(name, path) -- Switch firmware handling.
 #   configure_renderer(name) -- sets an emulator's own renderer preference, if it has one (xemu -> Vulkan).
-#   bootstrap_config(name) -- copies an emulator's own bundled config it needs but won't set up itself, if any (Supermodel -> Games.xml/Music.xml).
+#   bootstrap_config(name) -- copies an emulator's own bundled config it needs but won't set up itself, if any (no current user).
 #   binary_path(name) -- real AppImage path for a "binary" install_type entry.
 #
 # Per-emulator launch-arg builders (one per catalog entry, e.g. _dolphin_args, _pcsx2_args,
@@ -753,57 +753,6 @@ def install_pcsx2_bios_slot(entry, slot_prefix, file_path):
         cp.write(f, space_around_delimiters=True)
 
 
-def _supermodel_args(romfile):
-    # Bare positional romfile (a MAME-compatible ROM-set zip) plus
-    # -fullscreen -- confirmed real via Supermodel's own docs
-    # (Docs/README.txt: "supermodel scud.zip -fullscreen").
-    return [shlex.quote(romfile), "-fullscreen"]
-
-
-def _supermodel_bootstrap_config(entry):
-    """Supermodel needs several of its own bundled files -- not just
-    Config/Games.xml (its ROM-set/game database, without which it
-    can't recognize ANY rom at all: confirmed live, 2026-08-23, a
-    genuinely complete Model 3 ROM zip still failed with "No complete
-    Model 3 games found") but also Assets/{p1,p2}crosshair.bmp (a
-    lightgun-game crosshair texture Supermodel loads unconditionally
-    at startup regardless of whether the current game even uses one --
-    confirmed live: without it, Supermodel printed "Unable to load
-    bitmap crosshair texture" and exited before ever reaching the ROM
-    itself, a second, independent blocker behind the Games.xml one).
-    All of it ships inside Supermodel's own Flatpak, read-only, under
-    /app/bin/{Config,Assets}/, but Supermodel itself only ever reads
-    from its writable per-user dirs (~/.var/app/com.supermodel3.
-    Supermodel/config/supermodel/{Config,Assets}/), empty on a fresh
-    install -- nothing in Supermodel's own manifest/first-run flow
-    copies any of this there on its own. Run every shortcut creation,
-    same as grant_permissions/configure_renderer, to also reach an
-    install from before this fix existed; each file is skipped once
-    already present, so this is a no-op after the first real copy."""
-    app_id = entry["app_id"]
-    flatpak = host_exec.which("flatpak")
-    if not flatpak:
-        return
-    config_base = os.path.expanduser(f"~/.var/app/{app_id}/config/supermodel")
-    files = [
-        ("Config", "Games.xml"), ("Config", "Music.xml"),
-        ("Assets", "p1crosshair.bmp"), ("Assets", "p2crosshair.bmp"),
-    ]
-    for subdir, fname in files:
-        dest_dir = os.path.join(config_base, subdir)
-        dest = os.path.join(dest_dir, fname)
-        if os.path.isfile(dest):
-            continue
-        result = subprocess.run(
-            host_exec.wrap([flatpak, "run", "--command=cat", app_id, f"/app/bin/{subdir}/{fname}"]),
-            capture_output=True,
-        )
-        if result.returncode == 0 and result.stdout:
-            os.makedirs(dest_dir, exist_ok=True)
-            with open(dest, "wb") as f:
-                f.write(result.stdout)
-
-
 def _bigpemu_args(romfile):
     # Bare positional romfile -- confirmed real via BigPEmu's own user
     # manual ("BigPEmu always expects the first command line argument
@@ -1276,24 +1225,6 @@ EMULATORS = {
         # read-write, not even :ro) + /media, /run/media -- no host:ro.
         # Same gap as melonDS/RPCS3/Play! before their own fixes.
         "grant_permissions": ["--filesystem=host:ro"],
-    },
-    "Supermodel": {
-        "install_type": "flathub",
-        "app_id": "com.supermodel3.Supermodel",
-        "consoles": "Sega Model 3",
-        # Self-contained MAME-compatible ROM-set zips (checksum-detected
-        # game data, not a separate boot ROM) -- confirmed via its own
-        # docs: "No separate BIOS file is required beyond the per-game
-        # ROM archives."
-        "needs_bios": False,
-        "needs_keys": False,
-        "needs_firmware": False,
-        "args": _supermodel_args,
-        # No grant_permissions needed -- confirmed LIVE via
-        # `flatpak info --show-permissions com.supermodel3.Supermodel`
-        # on X1 (filesystems=home;host:ro), not just read from the
-        # manifest text.
-        "bootstrap_config": _supermodel_bootstrap_config,
     },
     "BigPEmu": {
         "install_type": "flathub",
@@ -1824,9 +1755,11 @@ def configure_renderer(name):
 
 def bootstrap_config(name):
     """Dispatches to the entry's own "bootstrap_config" handler, if it
-    has one -- a no-op for every emulator that doesn't need this
-    (Supermodel so far is the only one; see its own
-    _supermodel_bootstrap_config docstring)."""
+    has one -- a no-op for every emulator that doesn't need this. No
+    current user (Supermodel, the original reason this existed, was
+    removed -- see its own removal for why); kept as a real, generic
+    hook for whatever needs it next, same pattern as grant_permissions/
+    configure_renderer."""
     entry = EMULATORS.get(name)
     handler = entry.get("bootstrap_config") if entry else None
     if handler:

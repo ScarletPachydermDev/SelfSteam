@@ -572,7 +572,7 @@ def _extract_retroarch_info(launch_options):
 # Entries whose own args() (standalone_emulators.py) puts the romfile
 # first, ahead of its flags, rather than last like every other entry --
 # see _extract_standalone_emulator_info's own comment.
-_ROMFILE_FIRST_EMULATORS = {"Supermodel", "Xenia Canary (AppImage)"}
+_ROMFILE_FIRST_EMULATORS = {"Xenia Canary (AppImage)"}
 
 
 def _extract_standalone_emulator_info(launch_options):
@@ -580,11 +580,11 @@ def _extract_standalone_emulator_info(launch_options):
     shortcut's own LaunchOptions (see standalone_emulators.launch_args)
     so the Emulators tab's own Edit link can jump straight back into it,
     same contract as _extract_retroarch_info above. The romfile is
-    assumed to be the argv's own last token, EXCEPT for the couple of
-    entries in _ROMFILE_FIRST_EMULATORS whose own args() puts it first
-    instead (Supermodel, Xenia Canary -- both confirmed via their own
-    CLI docs to need the positional romfile before their flags, unlike
-    every other entry here). Returns (None, None) for anything else.
+    assumed to be the argv's own last token, EXCEPT for entries in
+    _ROMFILE_FIRST_EMULATORS whose own args() puts it first instead
+    (Xenia Canary -- confirmed via its own CLI docs to need the
+    positional romfile before its flags, unlike every other entry
+    here). Returns (None, None) for anything else.
 
     Two install_type shapes to reverse: a flathub entry's own
     "<flatpak> run <app_id> ..." (argv[2] is the app id, reverse-mapped
