@@ -761,36 +761,45 @@ def _supermodel_args(romfile):
 
 
 def _supermodel_bootstrap_config(entry):
-    """Supermodel needs its own Config/Games.xml (its ROM-set/game
-    database) before it can recognize ANY rom at all, .zip contents
-    aside -- confirmed live (2026-08-23): a genuinely complete, valid
-    Model 3 ROM zip still failed with "No complete Model 3 games
-    found" and "Game and ROM set definitions could not be loaded"
-    until this was in place. It ships inside Supermodel's own Flatpak,
-    read-only, at /app/bin/Config/{Games,Music}.xml, but Supermodel
-    itself only ever reads from its writable per-user config dir
-    (~/.var/app/com.supermodel3.Supermodel/config/supermodel/Config/),
-    which is empty on a fresh install -- nothing in Supermodel's own
-    manifest/first-run flow copies it there on its own. Run every
-    shortcut creation, same as grant_permissions/configure_renderer,
-    to also reach an install from before this fix existed; each file
-    is skipped once already present, so this is a no-op after the
-    first real copy."""
+    """Supermodel needs several of its own bundled files -- not just
+    Config/Games.xml (its ROM-set/game database, without which it
+    can't recognize ANY rom at all: confirmed live, 2026-08-23, a
+    genuinely complete Model 3 ROM zip still failed with "No complete
+    Model 3 games found") but also Assets/{p1,p2}crosshair.bmp (a
+    lightgun-game crosshair texture Supermodel loads unconditionally
+    at startup regardless of whether the current game even uses one --
+    confirmed live: without it, Supermodel printed "Unable to load
+    bitmap crosshair texture" and exited before ever reaching the ROM
+    itself, a second, independent blocker behind the Games.xml one).
+    All of it ships inside Supermodel's own Flatpak, read-only, under
+    /app/bin/{Config,Assets}/, but Supermodel itself only ever reads
+    from its writable per-user dirs (~/.var/app/com.supermodel3.
+    Supermodel/config/supermodel/{Config,Assets}/), empty on a fresh
+    install -- nothing in Supermodel's own manifest/first-run flow
+    copies any of this there on its own. Run every shortcut creation,
+    same as grant_permissions/configure_renderer, to also reach an
+    install from before this fix existed; each file is skipped once
+    already present, so this is a no-op after the first real copy."""
     app_id = entry["app_id"]
     flatpak = host_exec.which("flatpak")
     if not flatpak:
         return
-    dest_dir = os.path.expanduser(f"~/.var/app/{app_id}/config/supermodel/Config")
-    os.makedirs(dest_dir, exist_ok=True)
-    for fname in ("Games.xml", "Music.xml"):
+    config_base = os.path.expanduser(f"~/.var/app/{app_id}/config/supermodel")
+    files = [
+        ("Config", "Games.xml"), ("Config", "Music.xml"),
+        ("Assets", "p1crosshair.bmp"), ("Assets", "p2crosshair.bmp"),
+    ]
+    for subdir, fname in files:
+        dest_dir = os.path.join(config_base, subdir)
         dest = os.path.join(dest_dir, fname)
         if os.path.isfile(dest):
             continue
         result = subprocess.run(
-            host_exec.wrap([flatpak, "run", "--command=cat", app_id, f"/app/bin/Config/{fname}"]),
+            host_exec.wrap([flatpak, "run", "--command=cat", app_id, f"/app/bin/{subdir}/{fname}"]),
             capture_output=True,
         )
         if result.returncode == 0 and result.stdout:
+            os.makedirs(dest_dir, exist_ok=True)
             with open(dest, "wb") as f:
                 f.write(result.stdout)
 
