@@ -28,6 +28,7 @@ import subprocess
 import tempfile
 import urllib.error
 import urllib.request
+import uuid
 import xml.etree.ElementTree as ET
 import zipfile
 
@@ -870,12 +871,17 @@ def vita3k_firmware_installed(entry, slot_prefix):
     # exists" check RPCS3's own firmware-installed check uses (though
     # unlike RPCS3, no single sentinel file with a version string inside
     # it is confirmed here, so this only reports a count, not a real
-    # version number).
-    vs0_dir = os.path.join(_vita3k_fs_dir(), "vs0")
-    if not os.path.isdir(vs0_dir):
+    # version number). sa0/ is the separate font-package partition (see
+    # the Vita3K EMULATORS entry's own comment on bios2) -- checked the
+    # same way, independently of vs0/, matching Vita3K's own source
+    # (app.cpp's get_firmware_state checks each partition separately).
+    subdir = "sa0" if slot_prefix == "bios2" else "vs0"
+    label = "font package" if slot_prefix == "bios2" else "firmware"
+    part_dir = os.path.join(_vita3k_fs_dir(), subdir)
+    if not os.path.isdir(part_dir):
         return None
-    count = len(os.listdir(vs0_dir))
-    return f"firmware ({count} items)" if count else None
+    count = len(os.listdir(part_dir))
+    return f"{label} ({count} items)" if count else None
 
 
 def install_vita3k_firmware(entry, slot_prefix, file_path):
@@ -885,7 +891,12 @@ def install_vita3k_firmware(entry, slot_prefix, file_path):
     checks for and calls install_pup() with, logging progress via a
     callback -- not gated behind opening a GUI dialog first the way
     RPCS3's --installfw is). Still a real, separate binary launch that
-    blocks until it's done, same shape as RPCS3's own install call."""
+    blocks until it's done, same shape as RPCS3's own install call.
+    Shared verbatim by both bios_slots ("bios" and "bios2") -- Vita3K's
+    own install_pup() extracts whichever of vs0/sa0 the given PUP file
+    actually contains (see pup.cpp), so a main-firmware PUP and a
+    font-pack PUP both just go through --firmware, only the file
+    differs."""
     path = _binary_path("Vita3K", EMULATORS["Vita3K"])
     subprocess.run(host_exec.wrap([path, "--firmware", file_path]))
 
@@ -905,15 +916,33 @@ def install_vita3k_pkg(pkg_path, zrif):
     the install to find it. Raises RuntimeError if no new title shows
     up (a bad zrif/pkg pair just fails the install silently from the
     CLI's own point of view, no distinct error exit code to check
-    instead)."""
+    instead).
+
+    Vita3K's own --pkg argument parsing silently truncates the path at
+    its first space character -- confirmed live (2026-08-23) even when
+    the full path is passed as a single, already-split argv element
+    (no shell re-parsing involved), so this isn't a quoting issue on
+    our end. Uploaded ROM filenames routinely contain spaces, so this
+    hard-links pkg_path to a space-free scratch path first (same
+    filesystem as the uploads dir, so a hard link is instant and free,
+    unlike a real copy of a multi-GB file) and installs from that
+    instead."""
     path = _binary_path("Vita3K", EMULATORS["Vita3K"])
     app_dir = os.path.join(_vita3k_fs_dir(), "ux0", "app")
     before = set(os.listdir(app_dir)) if os.path.isdir(app_dir) else set()
-    subprocess.run(host_exec.wrap([path, "--pkg", pkg_path, "--zrif", zrif]))
+    scratch_path = os.path.join(tempfile.gettempdir(), f"selfsteam-vita3k-pkg-{uuid.uuid4().hex}.pkg")
+    try:
+        os.link(pkg_path, scratch_path)
+    except OSError:
+        shutil.copyfile(pkg_path, scratch_path)
+    try:
+        subprocess.run(host_exec.wrap([path, "--pkg", scratch_path, "--zrif", zrif]))
+    finally:
+        os.remove(scratch_path)
     after = set(os.listdir(app_dir)) if os.path.isdir(app_dir) else set()
     new_ids = after - before
     if not new_ids:
-        raise RuntimeError("Vita3K didn't install anything -- check the zRIF key and try again")
+        raise RuntimeError("Vita3K didn't install anything -- check the pkg file and zRIF key and try again")
     return sorted(new_ids)[0]
 
 
@@ -1415,12 +1444,28 @@ EMULATORS = {
         "binary_asset_re": re.compile(r"^Vita3K-x86_64\.AppImage$"),
         "consoles": "PlayStation Vita",
         # No HLE -- a real PS Vita firmware (.pup) is mandatory, same as
-        # RPCS3's PS3 firmware. Routed through bios_slots (a single
-        # slot) for the same reason RPCS3's own entry is: the label
-        # reads "Select PS Vita Firmware" instead of the generic
-        # "Select BIOS" every needs_bios-only emulator shows.
+        # RPCS3's PS3 firmware. Routed through bios_slots for the same
+        # reason RPCS3's own entry is: the label reads "Select PS Vita
+        # Firmware" instead of the generic "Select BIOS" every
+        # needs_bios-only emulator shows.
+        # Second slot is a real, separate thing -- confirmed via
+        # Vita3K's own source (app.cpp's get_firmware_state checks sa0/
+        # for font_package completely independently of vs0/ for
+        # main_firmware, and has_firmware_installed -- what gates a
+        # real launch -- only ever checks vs0/, never sa0/). Installed
+        # via the exact same --firmware/install_pup() mechanism as the
+        # main slot, just fed a different PUP file: Sony's main
+        # firmware download bundles sa0 (font) data into the same PUP
+        # in most modern versions, but not always, so this is a real
+        # fallback for whoever's PUP doesn't -- optional (4th tuple
+        # element False, same convention as xemu's own EEPROM slot)
+        # since a missing font pack doesn't block a game from booting,
+        # just non-Latin text rendering within it.
         "needs_bios": True,
-        "bios_slots": [("bios", "Select PS Vita Firmware (PUP)", "firmware")],
+        "bios_slots": [
+            ("bios", "Select PS Vita Firmware (PUP)", "firmware"),
+            ("bios2", "Select Font Package (optional)", "font", False),
+        ],
         # Sony's own official download -- same reasoning as RPCS3's own
         # entry: not obtainable any other legitimate way.
         "bios_slot_links": {"bios": ("https://www.playstation.com/en-gb/support/hardware/psvita/system-software/", "Get it from Sony")},

@@ -1993,7 +1993,7 @@ def _em_list_rows(abs_path, rel_path, state, path_key, file_key):
     return "".join(rows)
 
 
-def _em_picker_section(prefix, label, state, already_installed=None, info_tooltip=None, info_link=None):
+def _em_picker_section(prefix, label, state, already_installed=None, info_tooltip=None, info_link=None, optional=False):
     path_key = f"em_{prefix}path"
     file_key = f"em_{prefix}file"
     source_key = f"em_{prefix}source"
@@ -2015,7 +2015,7 @@ def _em_picker_section(prefix, label, state, already_installed=None, info_toolti
         f'<span id="{dom_prefix}-upload-status" class="upload-status" style="display:none">'
         f'Uploading<span class="spinner"></span></span>'
     )
-    label_text = f'{label} <span class="required-asterisk">*</span>'
+    label_text = label if optional else f'{label} <span class="required-asterisk">*</span>'
     if info_tooltip:
         label_text += f' {_info_tooltip_icon_html(info_tooltip)}'
     # Hidden once a file is either freshly picked or already installed --
@@ -2197,6 +2197,12 @@ def _emulators_tab_panel_html(state, chosen=None):
                 prefix, label, state,
                 already_installed=standalone_emulators.bios_slot_installed(emulator, prefix),
                 info_link=bios_slot_links.get(prefix),
+                # Same optional-4th-tuple-element convention as the
+                # Create-button gating below (em_prereqs_ready) --
+                # xemu's EEPROM slot and Vita3K's font-package slot so
+                # far. The label text itself already says "(optional)"
+                # for these, so the asterisk would be redundant/wrong.
+                optional=bool(_rest and _rest[-1] is False),
             )
             for prefix, label, *_rest in bios_slots
         )

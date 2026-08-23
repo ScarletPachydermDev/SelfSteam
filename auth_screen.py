@@ -15,26 +15,30 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
-# evdev is what actually sees a real gamepad's own button presses --
-# confirmed live (2026-08-21) that a plain Gtk.EventControllerKey (the
-# existing keyboard handler below) never fires for one at all. Steam's
-# own "lizard mode" translates a controller to synthetic keyboard/mouse
-# events while idle/navigating menus, which is why keyboard exit alone
-# happened to work for some controllers -- but a real joystick-class
-# device (confirmed via a genuine Xbox-360-compatible pad on the Steam
-# Machine) reports raw EV_KEY gamepad button codes instead, which only
-# evdev sees. Optional import: not every host this runs on is
-# guaranteed to have python3-evdev installed (SteamOS ships it, since
-# Steam Input itself depends on it, but this app isn't SteamOS-only) --
-# gamepad exit just silently isn't available without it, keyboard exit
-# still works regardless.
-try:
-    import evdev
-    from evdev import ecodes
-except ImportError:
-    evdev = None
-
 import window_titles
+
+# Steam Controller/Deck controller exit was investigated at length
+# (2026-08-21..23) and shelved unresolved. Confirmed dead ends, each
+# tried and observed live on real hardware:
+#   - Gtk.EventControllerKey: never fires for a real Steam Controller
+#     at all (only for a genuine Xbox-360-compatible pad, via Steam's
+#     own synthetic keyboard/mouse "lizard mode" translation).
+#   - raw evdev: zero events of any kind reach /dev/input/event* for
+#     the Steam Controller once a non-Steam window has focus -- Steam
+#     claims the evdev-visible interface exclusively for itself.
+#   - the legacy /dev/input/js0 joydev API: same story -- a real INIT
+#     state dump appears at open time, but no live button-press event
+#     ever follows while Steam holds focus elsewhere.
+#   - SDL2 (via ctypes, system libSDL2 and a Flatpak-runtime libSDL2):
+#     SDL_NumJoysticks() reports 0 regardless of SDL_INIT_VIDEO,
+#     SDL_VIDEODRIVER=dummy, or the SDL_JOYSTICK_HIDAPI_STEAM(DECK)
+#     hints -- SDL never enumerates it either.
+# The one path confirmed to still carry live data is the controller's
+# raw /dev/hidraw interface (streams continuously regardless of
+# focus), but its report format isn't standard HID gamepad usage and
+# would need real Steam Controller protocol parsing to decode button
+# presses -- out of scope for now. Keyboard-only exit (below) is the
+# confirmed-working baseline.
 
 # Sizes below are tuned by eye against a 1080p TV -- everything scales
 # from that baseline by actual screen height (_screen_scale) so a 720p
@@ -46,52 +50,24 @@ import window_titles
 # Functions:
 #   _screen_scale() -- proportional font/margin scale factor for the real screen height.
 #   _build_css() -- builds the GTK stylesheet from _BASE_SIZES scaled by _screen_scale().
-#   _watch_gamepads(on_press) -- fires on_press() on the first raw gamepad button press, if evdev is available.
 #   class AuthScreen -- the fullscreen GTK window itself, showing the code + LAN address.
 #   main() -- entrypoint: parses argv, builds and shows an AuthScreen.
 _BASE_SIZES = {
     "title_font": 90, "code_font": 420, "code_spacing": 20, "code_margin_top": 40,
     "address_font": 46, "address_margin_top": 24, "address_margin_left": 32,
     "hint_font": 46, "hint_margin_bottom": 24,
+    "timeout_bar_height": 28,
 }
 
-
-def _watch_gamepads(on_press):
-    """Fires on_press() the first time any button is pressed on any
-    currently-connected gamepad-class evdev device -- detected via the
-    presence of BTN_GAMEPAD in a device's own EV_KEY capabilities, the
-    same heuristic udev/SDL's own joystick detection already uses
-    (BTN_GAMEPAD and BTN_SOUTH/BTN_A share event code 304 by kernel
-    convention, so this also naturally covers plain BTN_SOUTH-only
-    devices). No-op if evdev isn't importable. Devices are polled via
-    GLib.io_add_watch on their own fd, integrated into the same GLib
-    main loop the rest of this window already runs on -- not a
-    separate thread, so no locking needed around on_press (which just
-    calls app.quit(), same as the keyboard handler)."""
-    if evdev is None:
-        return
-    devices = []
-    for path in evdev.list_devices():
-        try:
-            dev = evdev.InputDevice(path)
-        except OSError:
-            continue
-        if ecodes.BTN_GAMEPAD in dev.capabilities().get(ecodes.EV_KEY, []):
-            devices.append(dev)
-
-    def _on_readable(_fd, _condition, dev):
-        try:
-            events = list(dev.read())
-        except OSError:
-            return False
-        for event in events:
-            if event.type == ecodes.EV_KEY and event.value == 1:
-                on_press()
-                return False
-        return True
-
-    for dev in devices:
-        GLib.io_add_watch(dev.fd, GLib.IO_IN, lambda fd, cond, dev=dev: _on_readable(fd, cond, dev))
+# No controller can dismiss this screen (see the investigation above),
+# so a plain gamepad-only household would otherwise be stuck staring
+# at it until the code's own TTL expires and auth_display.py tears it
+# down from outside. This auto-dismiss is that fallback -- deliberately
+# shorter than auth.CODE_TTL so it kicks in well before that. It isn't
+# a numeric countdown on screen (would read as an error/warning, not
+# what this is) -- just a thin bar draining at the very bottom, same
+# idea as a game's own "session about to end" indicator.
+_AUTO_DISMISS_SECONDS = 20.0
 
 
 def _screen_scale():
@@ -131,6 +107,14 @@ label.selfsteam-auth-hint {{
   font-family: Helvetica, Arial, sans-serif; font-size: {s['hint_font']}px; font-weight: 400;
   margin-bottom: {s['hint_margin_bottom']}px;
 }}
+progressbar.selfsteam-auth-timeout {{ min-height: {s['timeout_bar_height']}px; }}
+progressbar.selfsteam-auth-timeout trough {{
+  min-height: {s['timeout_bar_height']}px; border: none; border-radius: 0;
+  background-color: rgba(255, 255, 255, 0.15);
+}}
+progressbar.selfsteam-auth-timeout trough progress {{
+  min-height: {s['timeout_bar_height']}px; border-radius: 0; background-color: #ffffff;
+}}
 """.encode()
 
 
@@ -169,6 +153,24 @@ class AuthScreen(Gtk.ApplicationWindow):
         hint_label.add_css_class("selfsteam-auth-hint")
         overlay.add_overlay(hint_label)
 
+        # Pinned flush to the bottom edge (no margin, unlike hint_label
+        # above it) -- drains over _AUTO_DISMISS_SECONDS as a fallback
+        # exit for a gamepad-only household that can't dismiss this via
+        # a controller press (see the investigation above). No percent
+        # text (show_text defaults to False already, left explicit).
+        timeout_bar = Gtk.ProgressBar(valign=Gtk.Align.END, halign=Gtk.Align.FILL, hexpand=True)
+        timeout_bar.set_show_text(False)
+        timeout_bar.set_fraction(1.0)
+        # GTK fills a progressbar from the start (left, in LTR) as
+        # fraction grows, anchored to the left edge -- since fraction
+        # here counts down instead, that default would drain from the
+        # right edge inward. inverted=True anchors the fill to the
+        # right instead, so the remaining-time fill drains left-to-
+        # right (the empty portion grows from the left) as time passes.
+        timeout_bar.set_inverted(True)
+        timeout_bar.add_css_class("selfsteam-auth-timeout")
+        overlay.add_overlay(timeout_bar)
+
         self.set_child(overlay)
 
         # Matches the hint above: any keypress dismisses the screen
@@ -179,6 +181,19 @@ class AuthScreen(Gtk.ApplicationWindow):
         key_controller = Gtk.EventControllerKey()
         key_controller.connect("key-pressed", lambda *_args: app.quit())
         self.add_controller(key_controller)
+
+        start_us = GLib.get_monotonic_time()
+
+        def _tick():
+            elapsed = (GLib.get_monotonic_time() - start_us) / 1_000_000.0
+            remaining = _AUTO_DISMISS_SECONDS - elapsed
+            if remaining <= 0:
+                app.quit()
+                return False
+            timeout_bar.set_fraction(remaining / _AUTO_DISMISS_SECONDS)
+            return True
+
+        GLib.timeout_add(100, _tick)
 
 
 def main():
@@ -220,10 +235,6 @@ def main():
         # loop -- routes it through the loop itself instead of
         # interrupting a C call at a random point.
         GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, app.quit)
-        # Same "press anything to exit" as the keyboard handler above,
-        # for a real gamepad -- see _watch_gamepads' own docstring for
-        # why GTK's key controller alone doesn't already cover this.
-        _watch_gamepads(app.quit)
 
     app.connect("activate", on_activate)
     app.run([])
