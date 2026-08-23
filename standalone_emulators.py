@@ -39,7 +39,7 @@ import host_exec
 #   by_install_type(install_type) -- emulator names filtered to "flathub" or "binary".
 #   installed(name) / install(name) -- whether/how to install an entry's own app.
 #   grant_permissions(name) -- flatpak override for an entry's own permission gap, if any.
-#   launch_args(name, romfile) -- argv for launching name against romfile.
+#   launch_args(name, romfile, zrif=None) -- argv for launching name against romfile (zrif only used for a Vita3K .pkg -- see install_vita3k_pkg).
 #   configure_game_dir(name, game_dir) -- registers game_dir as a watched ROM folder, if supported.
 #   bios_slots(name) / bios_slot_installed(name, prefix) / install_bios_slot(name, prefix, path) --
 #       the multi-BIOS-file dispatch (xemu, PCSX2, RPCS3, Vita3K).
@@ -71,6 +71,7 @@ import host_exec
 #   _rpcs3_dev_flash_dir/rpcs3_firmware_installed/install_rpcs3_firmware -- PUP install via
 #     RPCS3's own --installfw (needs its real GUI, not headless).
 #   _vita3k_fs_dir/vita3k_firmware_installed/install_vita3k_firmware -- Vita3K's own --firmware flag.
+#   install_vita3k_pkg(pkg_path, zrif) -- Vita3K's own --pkg/--zrif install (headless, unlike RPCS3's), returns the installed title id.
 #
 # Binary (AppImage) install machinery:
 #   _xdg_data_dir/_xdg_config_dir -- real (unsandboxed) XDG dirs on the host.
@@ -889,6 +890,33 @@ def install_vita3k_firmware(entry, slot_prefix, file_path):
     subprocess.run(host_exec.wrap([path, "--firmware", file_path]))
 
 
+def install_vita3k_pkg(pkg_path, zrif):
+    """Installs a .pkg via Vita3K's own --pkg/--zrif CLI flags (confirmed
+    real via source: config.cpp's command-line handler calls
+    install_pkg(pkg_path, pref_path, zrif) directly and returns
+    QuitRequested -- genuinely headless like the firmware install
+    above, unlike RPCS3's own --installfw which refuses to run at all
+    without a GUI). --pkg only installs; it never launches, and the
+    later launch needs a different flag entirely (--installed-path,
+    the installed title's own folder name under ux0/app/, confirmed
+    via source: CLI11's own IsMember check validates it against
+    exactly that directory listing) -- Vita3K's CLI doesn't print or
+    return that id anywhere, so this diffs ux0/app/ before and after
+    the install to find it. Raises RuntimeError if no new title shows
+    up (a bad zrif/pkg pair just fails the install silently from the
+    CLI's own point of view, no distinct error exit code to check
+    instead)."""
+    path = _binary_path("Vita3K", EMULATORS["Vita3K"])
+    app_dir = os.path.join(_vita3k_fs_dir(), "ux0", "app")
+    before = set(os.listdir(app_dir)) if os.path.isdir(app_dir) else set()
+    subprocess.run(host_exec.wrap([path, "--pkg", pkg_path, "--zrif", zrif]))
+    after = set(os.listdir(app_dir)) if os.path.isdir(app_dir) else set()
+    new_ids = after - before
+    if not new_ids:
+        raise RuntimeError("Vita3K didn't install anything -- check the zRIF key and try again")
+    return sorted(new_ids)[0]
+
+
 def _xdg_data_dir(*parts):
     # Eden runs as a plain AppImage on the host, not inside a Flatpak
     # sandbox -- no ~/.var/app/<id> redirect the way _flatpak_data_dir
@@ -1653,7 +1681,7 @@ def grant_permissions(name):
     )
 
 
-def launch_args(name, romfile):
+def launch_args(name, romfile, zrif=None):
     entry = EMULATORS.get(name)
     if not entry:
         return None
@@ -1661,6 +1689,17 @@ def launch_args(name, romfile):
         path = _binary_path(name, entry)
         if not os.path.isfile(path):
             return None
+        # Vita3K .pkg is a real, separate case, not just another
+        # content-path -- see install_vita3k_pkg's own docstring for
+        # why: --pkg/--zrif only installs, the actual launch afterward
+        # needs --installed-path <title id> instead of the original
+        # .pkg path at all. zrif is None for every other emulator/file
+        # type, so this never affects them.
+        if name == "Vita3K" and romfile.lower().endswith(".pkg"):
+            if not zrif:
+                return None
+            title_id = install_vita3k_pkg(romfile, zrif)
+            return [shlex.quote(path), "--installed-path", shlex.quote(title_id), "--fullscreen"]
         # shlex.quote the AppImage path itself, not just the romfile --
         # LaunchOptions is stored/joined as one shell-like string with a
         # plain " ".join (see register_steam_shortcut), so every element

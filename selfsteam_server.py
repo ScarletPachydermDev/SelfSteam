@@ -2218,6 +2218,27 @@ def _emulators_tab_panel_html(state, chosen=None):
     rom_block = _em_picker_section("rom", "Select ROM", state)
 
     romfile = state.get("em_romfile", "")
+    # Vita3K .pkg needs a real zRIF license key alongside the package
+    # itself to install at all -- see standalone_emulators.
+    # install_vita3k_pkg's own docstring. form="{_ADD_FORM_ID}", not
+    # part of the em_ picker form above, same as the Name field below:
+    # it's a live-typed value only ever needed at Create/Save time, not
+    # something a server round-trip needs to know about beforehand (the
+    # Create button itself doesn't gate on this -- a missing/wrong key
+    # is instead a real, specific error at submit time, same as any
+    # other bad file pick here). Shown only for Vita3K + a .pkg pick --
+    # everything else (.vpk/.zip/.vci) needs no key at all.
+    zrif_block = ""
+    if emulator == "Vita3K" and romfile.lower().endswith(".pkg"):
+        zrif_tooltip = "Vita3K needs this license key to install a .pkg -- not needed for .vpk/.zip/.vci."
+        zrif_block = f"""
+  <div class="field-group">
+    <label class="field-label" for="em-zrif-field">zRIF key <span class="required-asterisk">*</span>
+      {_info_tooltip_icon_html(zrif_tooltip)}
+    </label>
+    <input type="text" name="em_zrif" id="em-zrif-field" form="{_ADD_FORM_ID}"
+           value="{html.escape(state.get('em_zrif', ''))}" placeholder="Paste your zRIF key">
+  </div>"""
     # em_name_cleared -- see _retroarch_tab_panel_html's own comment on
     # the same flag/toggle, same reasoning here.
     name_cleared = bool(state.get("em_name_cleared"))
@@ -2262,6 +2283,7 @@ def _emulators_tab_panel_html(state, chosen=None):
   {keys_block}
   {firmware_block}
   {rom_block}
+  {zrif_block}
   <div class="selfsteam-spacer"></div>
   {name_field}"""
 
@@ -4326,11 +4348,21 @@ class Handler(BaseHTTPRequestHandler):
         em_biosfile = (params.get("em_biosfile") or [""])[0]
         em_keysfile = (params.get("em_keysfile") or [""])[0]
         em_firmwarefile = (params.get("em_firmwarefile") or [""])[0]
+        em_zrif = (params.get("em_zrif") or [""])[0].strip()
         match_name = (params.get("em_match_name") or [""])[0] or _ra_guess_name_from_filename(em_romfile) or em_emulator
 
         romfile_abs = _ra_safe_join(em_romfile)
         if romfile_abs is None or not os.path.isfile(romfile_abs):
             self._send_html(render_done(match_name, ok=False, error="ROM file not found -- please pick it again"))
+            return
+        # Vita3K .pkg specifically needs a zRIF key alongside it to
+        # install at all -- see standalone_emulators.install_vita3k_pkg's
+        # own docstring. Checked here (not gating the Create button
+        # itself, see _emulators_tab_panel_html's own zrif_block
+        # comment) since it's a live-typed value never round-tripped
+        # through server-rendered state the way a file pick is.
+        if em_emulator == "Vita3K" and em_romfile.lower().endswith(".pkg") and not em_zrif:
+            self._send_html(render_done(match_name, ok=False, error="A zRIF key is required to install a .pkg -- please enter it and try again"))
             return
         if em_biosfile and (_ra_safe_join(em_biosfile) is None or not os.path.isfile(_ra_safe_join(em_biosfile))):
             self._send_html(render_done(match_name, ok=False, error="BIOS file not found -- please pick it again"))
@@ -4414,9 +4446,12 @@ class Handler(BaseHTTPRequestHandler):
             for prefix, bios_abs in em_bios_slot_files.items():
                 standalone_emulators.install_bios_slot(em_emulator, prefix, bios_abs)
 
-            args = standalone_emulators.launch_args(em_emulator, romfile_abs)
+            args = standalone_emulators.launch_args(em_emulator, romfile_abs, zrif=em_zrif or None)
             if args is None:
-                raise RuntimeError("flatpak isn't available on this host, or this emulator isn't installable yet")
+                raise RuntimeError(
+                    "flatpak isn't available on this host, this emulator isn't installable yet, "
+                    "or (for a Vita3K .pkg) the zRIF key didn't take -- please check it and try again"
+                )
 
             slug = create_webapp.slugify(match_name)
             selections = {}
