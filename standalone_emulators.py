@@ -46,6 +46,7 @@ import host_exec
 #   keys_installed(name) / install_keys(name, path) -- Switch prod.keys/title.keys handling.
 #   firmware_installed(name) / install_firmware_zip(name, path) -- Switch firmware handling.
 #   configure_renderer(name) -- sets an emulator's own renderer preference, if it has one (xemu -> Vulkan).
+#   bootstrap_config(name) -- copies an emulator's own bundled config it needs but won't set up itself, if any (Supermodel -> Games.xml/Music.xml).
 #   binary_path(name) -- real AppImage path for a "binary" install_type entry.
 #
 # Per-emulator launch-arg builders (one per catalog entry, e.g. _dolphin_args, _pcsx2_args,
@@ -759,6 +760,41 @@ def _supermodel_args(romfile):
     return [shlex.quote(romfile), "-fullscreen"]
 
 
+def _supermodel_bootstrap_config(entry):
+    """Supermodel needs its own Config/Games.xml (its ROM-set/game
+    database) before it can recognize ANY rom at all, .zip contents
+    aside -- confirmed live (2026-08-23): a genuinely complete, valid
+    Model 3 ROM zip still failed with "No complete Model 3 games
+    found" and "Game and ROM set definitions could not be loaded"
+    until this was in place. It ships inside Supermodel's own Flatpak,
+    read-only, at /app/bin/Config/{Games,Music}.xml, but Supermodel
+    itself only ever reads from its writable per-user config dir
+    (~/.var/app/com.supermodel3.Supermodel/config/supermodel/Config/),
+    which is empty on a fresh install -- nothing in Supermodel's own
+    manifest/first-run flow copies it there on its own. Run every
+    shortcut creation, same as grant_permissions/configure_renderer,
+    to also reach an install from before this fix existed; each file
+    is skipped once already present, so this is a no-op after the
+    first real copy."""
+    app_id = entry["app_id"]
+    flatpak = host_exec.which("flatpak")
+    if not flatpak:
+        return
+    dest_dir = os.path.expanduser(f"~/.var/app/{app_id}/config/supermodel/Config")
+    os.makedirs(dest_dir, exist_ok=True)
+    for fname in ("Games.xml", "Music.xml"):
+        dest = os.path.join(dest_dir, fname)
+        if os.path.isfile(dest):
+            continue
+        result = subprocess.run(
+            host_exec.wrap([flatpak, "run", "--command=cat", app_id, f"/app/bin/Config/{fname}"]),
+            capture_output=True,
+        )
+        if result.returncode == 0 and result.stdout:
+            with open(dest, "wb") as f:
+                f.write(result.stdout)
+
+
 def _bigpemu_args(romfile):
     # Bare positional romfile -- confirmed real via BigPEmu's own user
     # manual ("BigPEmu always expects the first command line argument
@@ -1248,6 +1284,7 @@ EMULATORS = {
         # `flatpak info --show-permissions com.supermodel3.Supermodel`
         # on X1 (filesystems=home;host:ro), not just read from the
         # manifest text.
+        "bootstrap_config": _supermodel_bootstrap_config,
     },
     "BigPEmu": {
         "install_type": "flathub",
@@ -1772,6 +1809,17 @@ def configure_renderer(name):
     for; see _xemu_configure_vulkan's own docstring)."""
     entry = EMULATORS.get(name)
     handler = entry.get("configure_renderer") if entry else None
+    if handler:
+        handler(entry)
+
+
+def bootstrap_config(name):
+    """Dispatches to the entry's own "bootstrap_config" handler, if it
+    has one -- a no-op for every emulator that doesn't need this
+    (Supermodel so far is the only one; see its own
+    _supermodel_bootstrap_config docstring)."""
+    entry = EMULATORS.get(name)
+    handler = entry.get("bootstrap_config") if entry else None
     if handler:
         handler(entry)
 

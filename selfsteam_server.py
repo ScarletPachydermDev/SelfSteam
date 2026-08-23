@@ -4394,6 +4394,12 @@ class Handler(BaseHTTPRequestHandler):
             # above, so it also reaches an emulator SelfSteam didn't
             # freshly install this time.
             standalone_emulators.configure_renderer(em_emulator)
+            # No-op for every emulator that doesn't define one
+            # (Supermodel so far is the only one) -- see
+            # bootstrap_config's own docstring. Same unconditional-
+            # every-time reasoning as grant_permissions/
+            # configure_renderer above.
+            standalone_emulators.bootstrap_config(em_emulator)
             # Keys/firmware installs are real, verified (not guessed)
             # ports of Ryubing's own ContentManager.InstallKeys/
             # InstallFirmware -- see standalone_emulators.py's own
