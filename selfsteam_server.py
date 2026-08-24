@@ -49,6 +49,9 @@ import auth_display
 import browser_picker
 import config
 import create_webapp
+import appimage_apps
+import flathub_browse
+import host_exec
 import maintenance
 import pending_queue
 import multipart_upload
@@ -122,6 +125,22 @@ _SEARCH_ICON_SVG = (
     '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="white" '
     'stroke-width="3" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle>'
     '<line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>'
+)
+# Apps tab: links out to an app's own real homepage (Flathub's own
+# listing, or the AppImage entry's own project page -- see
+# appimage_apps.APPS' own "homepage" field).
+_EXTERNAL_LINK_ICON_SVG = (
+    '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+    'stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'
+    '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>'
+    '<polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>'
+)
+# Apps tab: marks a card whose app already has a Steam shortcut (see
+# create_webapp.list_gridge_shortcuts' own apps_app_id field).
+_CHECK_ICON_SVG = (
+    '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2ea04a" '
+    'stroke-width="3" stroke-linecap="round" stroke-linejoin="round">'
+    '<polyline points="20 6 9 17 4 12"></polyline></svg>'
 )
 # Original artwork (not copied from anywhere) -- same crescent-moon/sun
 # toggle *concept* as sites like dekudeals.com use, but their actual
@@ -349,6 +368,20 @@ input[type=text], select {
   border: 1px solid var(--input-border); border-radius: 20px; background: #fff; color: var(--text);
   appearance: none; outline: none;
 }
+/* select's own appearance:none (above) drops the native dropdown arrow
+   entirely with nothing put back -- every <select> in the app (browser
+   picker, emulator picker, Apps category picker) was silently missing
+   one. A plain inline SVG chevron via background-image, not a real
+   element -- text-dim so it's visible on both the light input
+   background and (via currentColor not being used here) doesn't need
+   a separate dark-mode variant. */
+select {
+  padding-right: 2.4rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 1rem center;
+  background-size: 1rem;
+}
 input[type=text]:focus, select:focus { border-color: var(--accent); }
 /* Pairs the pill input with a separate circular search button beside
    it (not an icon glued inside the pill) -- a real type=submit, not
@@ -567,7 +600,8 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
    any content of their own) -- only switches away from it when that
    specific tab is the targeted one. */
 .middle-panel-retroarch, .right-panel-retroarch,
-.middle-panel-emulators, .right-panel-emulators { display: none; }
+.middle-panel-emulators, .right-panel-emulators,
+.middle-panel-apps, .right-panel-apps { display: none; }
 #tab-retroarch:target ~ .selfsteam-columns .middle-panel-url,
 #tab-retroarch:target ~ .selfsteam-columns .right-panel-url { display: none; }
 #tab-retroarch:target ~ .selfsteam-columns .middle-panel-retroarch,
@@ -576,15 +610,73 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
 #tab-emulators:target ~ .selfsteam-columns .right-panel-url { display: none; }
 #tab-emulators:target ~ .selfsteam-columns .middle-panel-emulators,
 #tab-emulators:target ~ .selfsteam-columns .right-panel-emulators { display: flex; }
+#tab-apps:target ~ .selfsteam-columns .middle-panel-url,
+#tab-apps:target ~ .selfsteam-columns .right-panel-url { display: none; }
+#tab-apps:target ~ .selfsteam-columns .middle-panel-apps,
+#tab-apps:target ~ .selfsteam-columns .right-panel-apps { display: flex; }
 .coming-soon { color: var(--text-dim); font-size: 0.85rem; padding: 1rem 0; text-align: center; }
+/* Apps tab: the category dropdown + the Flathub app grid both live in
+   the left column (browseable, protected from Install/Remove clicks by
+   SELFSTEAM_APPS_SWAP_IDS never including it) -- the middle column is
+   the SGDB search bar + matches, same shape as RA/Emulators' own
+   middle column, once an app's installed. Cards reuse .boxed-list's
+   own alternating-row look but aren't plain <a> rows (icon + two-line
+   text + an Install/Remove button all in one row), so they get their
+   own rule instead of .boxed-list a. */
+.apps-card { display: flex; align-items: center; gap: 0.7rem; padding: 0.6rem 0.8rem; border-radius: 8px; background: #f3f3f3; }
+.apps-card:nth-child(even) { background: #ececec; }
+/* Applied/removed purely client-side (selfsteamAppsHighlightCard,
+   PAGE_TAIL) -- the grid itself never re-renders after a selection
+   (see _apps_card_html's own comment), so there's no server-side
+   "selected" state to render this from in the first place. */
+.apps-card.selected { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* Wraps icon+text (not the extras/Remove button, separate siblings) so
+   clicking the card itself is how an app gets selected -- see
+   _apps_card_html's own comment. flex:1 + min-width:0 (not
+   .apps-card-text's own, now nested one level deeper) is what keeps
+   .apps-card-summary's text-overflow:ellipsis working with a flex
+   ancestor in between. */
+.apps-card-link { display: flex; align-items: center; gap: 0.7rem; flex: 1; min-width: 0; color: inherit; text-decoration: none; }
+.apps-card-icon { width: 40px; height: 40px; border-radius: 8px; flex: 0 0 auto; object-fit: contain; background: #fff; }
+.apps-card-text { flex: 1; min-width: 0; }
+.apps-card-name { font-weight: 600; font-size: 0.9rem; }
+.apps-card-summary { font-size: 0.8rem; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.apps-card-install { flex: 0 0 auto; }
+/* Sits before .apps-card-install in the markup (checkmark + homepage
+   link to the left of Remove). */
+.apps-card-extras { flex: 0 0 auto; display: flex; align-items: center; gap: 0.5rem; margin-right: 0.5rem; }
+.apps-card-homepage { display: inline-flex; color: var(--text-dim); }
+.apps-card-shortcut-check { display: inline-flex; }
+/* .apps-grid-list, not .boxed-list -- .boxed-list's own "a" rule
+   (background/padding, meant for its plain <a> rows elsewhere on this
+   page) is a class+type selector, higher specificity than a single
+   class alone, so it silently overrode .apps-btn-remove's own
+   background/padding below when these cards used to sit inside a
+   .boxed-list wrapper -- confirmed live (grey background, squashed
+   vertical padding) despite .apps-btn-remove's own rule looking
+   correct in isolation. */
+.apps-grid-list { display: flex; flex-direction: column; gap: 6px; }
+.apps-btn-remove { display: inline-flex; align-items: center; justify-content: center;
+  padding: 0.5rem 0.9rem; font-size: 0.85rem; line-height: 1; border-radius: 6px;
+  text-decoration: none; color: #fff; font-weight: 600; border: none; cursor: pointer;
+  background: #d64545; }
+.apps-grid-sentinel { text-align: center; padding: 0.6rem 0; color: var(--text-dim); font-size: 0.85rem; }
 /* RetroArch tab: BIOS/ROM source toggles + embedded server file picker.
    Plain links, not a CSS-radio-hack -- that trick is client-side only
    and can't survive a page reload, but this toggle needs to be
    *remembered* across every other click (console change, folder
    navigation), which only a real server-tracked value can do. */
 .source-toggle { display: flex; gap: 4px; background: var(--bg); border-radius: 12px; padding: 4px; }
+/* display:flex + align-items:center (not the old display:block +
+   text-align:center) -- text-align only centers horizontally, so a
+   plain-text pill (Flathub) and one carrying an inline info icon after
+   its text (AppImage, see _apps_source_toggle_link) rendered at
+   slightly different heights and never actually lined up vertically
+   with each other, even though .source-toggle's own flex row stretched
+   both pills to the same overall height. Confirmed live (2026-08-25). */
 .source-label { flex: 1; padding: 0.55rem 0.25rem; border-radius: 9px; font-size: 0.85rem; font-weight: 600;
-  text-align: center; cursor: pointer; color: var(--text-dim); text-decoration: none; display: block; }
+  text-align: center; cursor: pointer; color: var(--text-dim); text-decoration: none;
+  display: flex; align-items: center; justify-content: center; gap: 0.3rem; }
 .source-label.active { background: #fff; color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
 .breadcrumbs { font-size: 0.8rem; color: var(--text-dim); margin-bottom: 0.5rem; }
 .breadcrumbs a { color: var(--accent); text-decoration: none; }
@@ -825,6 +917,17 @@ input[type=file]::file-selector-button {
      smaller categories' real mobile height (Logo/Icon at 55-57px),
      which is exactly what auto had real content to clip/scroll. */
   .artwork-cell, .artwork-cell label { height: var(--mobile-cell-height, 140px) !important; min-height: 0 !important; }
+  /* Deliberate exception to this block's own "let the whole page
+     scroll" philosophy (see its very first comment) -- that's the
+     right call for a bounded set of real content (artwork candidates,
+     a picked emulator's own BIOS pickers), but the Apps grid keeps
+     loading more forever as you scroll it (see selfsteamAppsObserveScroll),
+     so without a real cap here it never actually ends, and the SGDB
+     matches/artwork columns below it become practically unreachable on
+     a phone. flex:none (not the desktop flex:1;min-height:0, which has
+     nothing to flex-grow against once columns stack) + a real bounded
+     height gives it its own internal scroll instead. */
+  .apps-grid-scroll { flex: none !important; max-height: 45vh; overflow-y: auto; }
 }
 </style></head><body>
 <header class="selfsteam-header">
@@ -948,6 +1051,8 @@ function selfsteamShowCreating(form) {
   button.disabled = true;
   if (form.dataset.emulator && !form.dataset.installed) {
     button.innerHTML = "Downloading " + form.dataset.emulator + '<span class="spinner"></span>';
+  } else if (form.dataset.appName && !form.dataset.installed) {
+    button.innerHTML = "Installing " + form.dataset.appName + '<span class="spinner"></span>';
   } else {
     button.innerHTML = "Creating Shortcut" + '<span class="spinner"></span>';
   }
@@ -1008,7 +1113,7 @@ function selfsteamSizeArtworkCells() {
   });
 }
 
-function selfsteamApplySwap(htmlText, url, swapIds) {
+function selfsteamApplySwap(htmlText, url, swapIds, onDone) {
   history.replaceState(null, "", url);
   var doc = new DOMParser().parseFromString(htmlText, "text/html");
   swapIds.forEach(function (id) {
@@ -1024,14 +1129,21 @@ function selfsteamApplySwap(htmlText, url, swapIds) {
   // follow-up itself instead of waiting for an actual page reload.
   var meta = doc.querySelector('meta[http-equiv="refresh"]');
   var match = meta && /url=(.*)$/.exec(meta.getAttribute("content") || "");
-  if (match) selfsteamTabFetch(match[1], swapIds);
+  if (match) {
+    selfsteamTabFetch(match[1], swapIds, onDone);
+  } else if (onDone) {
+    // onDone (optional -- every existing caller omits it) fires once
+    // the whole chase is genuinely finished, no further meta-refresh
+    // to follow.
+    onDone();
+  }
   selfsteamSizeArtworkCells();
 }
 
-function selfsteamTabFetch(url, swapIds) {
+function selfsteamTabFetch(url, swapIds, onDone) {
   fetch(url)
     .then(function (r) { if (!r.ok) throw new Error("bad status"); return r.text(); })
-    .then(function (htmlText) { selfsteamApplySwap(htmlText, url, swapIds); })
+    .then(function (htmlText) { selfsteamApplySwap(htmlText, url, swapIds, onDone); })
     .catch(function () { window.location.href = url; });
 }
 
@@ -1105,6 +1217,98 @@ function selfsteamEmFormNav(form) {
   selfsteamEmFetch(action + "?" + qs + "#tab-emulators");
 }
 
+// Deliberately excludes selfsteam-apps-tab-panel, unlike RA/Emulators'
+// own swap lists above -- the category pills and the app grid both
+// live there now, and an Install click's whole point is to leave that
+// browsing (scroll position included) exactly as it was, so someone
+// can install several apps from the same browse session without
+// losing their place. selfsteam-apps-middle (the SGDB search bar +
+// matches) IS included though, unlike an earlier version of this list
+// -- once it held part of the app grid too, but now it's the same
+// "updates once resolved" shape as RA/Emulators' own middle column, so
+// it needs the same treatment.
+var SELFSTEAM_APPS_SWAP_IDS = [
+  "selfsteam-apps-middle", "selfsteam-apps-right", "selfsteam-apps-name-slot",
+  "selfsteam-add-form-slot", "selfsteam-add-button",
+];
+
+function selfsteamAppsFetch(url) { selfsteamTabFetch(url, SELFSTEAM_APPS_SWAP_IDS); }
+
+function selfsteamAppsNav(a) {
+  selfsteamAppsFetch(a.getAttribute("href"));
+  return false;
+}
+
+// The SGDB search box's own form -- pressing Enter/clicking Search
+// previously submitted it as a real top-level GET navigation (no
+// onsubmit at all), which reloads the whole page from scratch. That's
+// exactly why searching while an app was already selected read as "the
+// grid/left column got reset" -- a real page load, unlike every other
+// Apps action, which all go through selfsteamAppsFetch's own AJAX swap
+// that deliberately leaves the grid (selfsteam-apps-tab-panel) alone.
+function selfsteamAppsFormNav(form) {
+  var qs = new URLSearchParams(new FormData(form)).toString();
+  var action = form.getAttribute("action").split("#")[0];
+  selfsteamAppsFetch(action + "?" + qs + "#tab-apps");
+  return false;
+}
+
+// Purely client-side (see .apps-card.selected's own comment) -- the
+// grid never re-renders after a selection, so there's no server-side
+// "which card is active" state to reflect otherwise.
+function selfsteamAppsHighlightCard(el) {
+  var card = el.closest(".apps-card");
+  if (!card) return;
+  var grid = document.getElementById("selfsteam-apps-grid-list");
+  if (grid) {
+    grid.querySelectorAll(".apps-card.selected").forEach(function (c) { c.classList.remove("selected"); });
+  }
+  card.classList.add("selected");
+}
+
+function selfsteamAppsCardClick(a) {
+  selfsteamAppsHighlightCard(a);
+  return selfsteamAppsNav(a);
+}
+
+// No page swap at all -- a plain fetch to /apps/uninstall plus hiding
+// this one button (see _apps_card_html's own remove_btn markup: Remove
+// only renders at all once already_installed) is the whole thing. If a
+// Steam shortcut already existed for this app, the server has also
+// queued its removal (see /apps/uninstall's own comment) -- surfaced
+// here with a plain alert since there's no other UI on this tab for
+// "this needs a Steam restart to take effect".
+function selfsteamAppsUninstall(btn) {
+  var appId = btn.getAttribute("data-app-id");
+  var source = btn.getAttribute("data-source") || "flathub";
+  btn.disabled = true;
+  btn.textContent = "Removing…";
+  fetch("/apps/uninstall", {
+    method: "POST",
+    headers: {"Content-Type": "application/x-www-form-urlencoded"},
+    body: "apps_app_id=" + encodeURIComponent(appId) + "&apps_source=" + encodeURIComponent(source),
+  })
+    .then(function (r) { return r.json(); })
+    .then(function (result) {
+      if (result.ok) {
+        btn.style.display = "none";
+        if (result.shortcut_removed) {
+          alert("App removed. Its Steam shortcut is queued for removal on next Steam restart.");
+        }
+      } else {
+        btn.disabled = false;
+        btn.textContent = "Remove";
+        alert(result.error || "Couldn't remove this app.");
+      }
+    })
+    .catch(function () {
+      btn.disabled = false;
+      btn.textContent = "Remove";
+      alert("Couldn't remove this app -- check the connection and try again.");
+    });
+  return false;
+}
+
 // Switching the Emulator picker to a different emulator, not just
 // re-submitting the same one -- the bios/keys/firmware fields carried
 // forward as hidden inputs in this same form are real file picks made
@@ -1152,6 +1356,157 @@ window.addEventListener("hashchange", function () { setTimeout(selfsteamSizeArtw
     resizeTimer = setTimeout(selfsteamSizeArtworkCells, 150);
   });
 })();
+
+// Apps tab: infinite scroll instead of Prev/Next clicks (see
+// _apps_tab_panel_html's own sentinel comment). One IntersectionObserver
+// set up at real page load -- the sentinel (and the whole Apps tab
+// panel around it) is always rendered regardless of which tab is
+// currently visible (see render_page's own "every column always
+// populated" comment), so this works even set up while display:none;
+// the observer just won't fire until the Apps tab is actually shown
+// and scrolled to the bottom, same as it would if set up after. No
+// hashchange re-init needed the way selfsteamSizeArtworkCells' own
+// measurement does -- intersection state, unlike a real pixel height,
+// keeps updating live as visibility/scroll change, it doesn't need a
+// fresh read once something becomes visible.
+// Splits a fetched page's cards between "installed" (inserted right
+// before #selfsteam-apps-grid-boundary -- see _apps_tab_panel_html's
+// own comment on why that marker exists) and "not installed" (appended
+// at the very end, after the sentinel). Without this split, a later
+// page's own installed app would land below an earlier page's entire
+// not-installed batch instead of genuinely floating to the top of the
+// whole grid -- each card's own installed/not-installed state is read
+// straight off its already-rendered buttons (.apps-btn-remove visible
+// means installed), same source of truth the server itself used to
+// decide it.
+function selfsteamAppsAppendCards(htmlText) {
+  var grid = document.getElementById("selfsteam-apps-grid-list");
+  var boundary = document.getElementById("selfsteam-apps-grid-boundary");
+  var wrapper = document.createElement("div");
+  wrapper.innerHTML = htmlText;
+  Array.from(wrapper.children).forEach(function (card) {
+    // An installed app already shown up front (see
+    // _apps_hits_page1_with_installed's own comment -- it pulls
+    // installed apps in from later pages onto page 1) can genuinely
+    // show up again once scrolling actually reaches that later page
+    // for real -- skip it rather than render a duplicate card.
+    var appId = card.getAttribute("data-app-id");
+    if (appId && grid.querySelector('.apps-card[data-app-id="' + CSS.escape(appId) + '"]')) return;
+    var removeBtn = card.querySelector(".apps-btn-remove");
+    var isInstalled = removeBtn && removeBtn.style.display !== "none";
+    if (isInstalled && boundary) {
+      grid.insertBefore(card, boundary);
+    } else {
+      grid.appendChild(card);
+    }
+  });
+}
+
+function selfsteamAppsToggleSearch() {
+  var box = document.getElementById("apps-search-box");
+  var input = document.getElementById("apps-search-input");
+  var showing = box.style.display !== "none";
+  box.style.display = showing ? "none" : "flex";
+  if (!showing) input.focus();
+}
+
+// Replaces the whole grid (a fresh search query is a different result
+// set entirely, not more of the current one -- unlike
+// selfsteamAppsAppendCards' own scroll-continuation append) and
+// refreshes the sentinel's own data-search-q/data-next-page/data-has-
+// more so scrolling further still works, now in search-continuation
+// mode (see selfsteamAppsObserveScroll's own data-search-q check).
+function selfsteamAppsReplaceCards(result, query) {
+  var grid = document.getElementById("selfsteam-apps-grid-list");
+  grid.innerHTML = result.empty
+    ? '<p class="coming-soon">No apps found for "' + query.replace(/</g, "&lt;") + '".</p>'
+    : result.html;
+  var sentinel = document.getElementById("selfsteam-apps-sentinel");
+  if (sentinel) {
+    sentinel.setAttribute("data-search-q", query);
+    sentinel.setAttribute("data-next-page", result.next_page || 2);
+    sentinel.setAttribute("data-has-more", result.has_more ? "1" : "");
+    sentinel.textContent = result.has_more ? "Loading more…" : "";
+    selfsteamAppsObserveScroll();
+  }
+}
+
+var _selfsteamAppsSearchTimer = null;
+
+function selfsteamAppsLiveSearch(query) {
+  clearTimeout(_selfsteamAppsSearchTimer);
+  _selfsteamAppsSearchTimer = setTimeout(function () {
+    if (!query.trim()) {
+      selfsteamAppsReplaceCards({html: "", empty: true, has_more: false}, query);
+      return;
+    }
+    fetch("/apps/search?apps_search_q=" + encodeURIComponent(query))
+      .then(function (r) { if (!r.ok) throw new Error("bad status"); return r.json(); })
+      .then(function (result) { selfsteamAppsReplaceCards(result, query); })
+      .catch(function () {});
+  }, 300);
+}
+
+function selfsteamAppsObserveScroll() {
+  var sentinel = document.getElementById("selfsteam-apps-sentinel");
+  // Disconnects any observer from a previous call -- selfsteamAppsReplaceCards
+  // calls this again after every live search, and without this, each
+  // call stacked another live IntersectionObserver on the same
+  // sentinel node, firing the same /apps/more fetch multiple times at
+  // once the next time it scrolled into view.
+  if (sentinel && sentinel._selfsteamObserver) sentinel._selfsteamObserver.disconnect();
+  if (!sentinel || sentinel.getAttribute("data-has-more") !== "1") return;
+  var panel = sentinel.closest(".apps-grid-scroll");
+  var observer = new IntersectionObserver(function (entries) {
+    if (!entries[0].isIntersecting) return;
+    observer.disconnect();
+    var category = sentinel.getAttribute("data-category");
+    var searchQ = sentinel.getAttribute("data-search-q");
+    var page = sentinel.getAttribute("data-next-page");
+    sentinel.textContent = "Loading more…";
+    var moreUrl = searchQ
+      ? "/apps/more?apps_search_q=" + encodeURIComponent(searchQ) + "&apps_page=" + encodeURIComponent(page)
+      : "/apps/more?apps_category=" + encodeURIComponent(category) + "&apps_page=" + encodeURIComponent(page);
+    fetch(moreUrl)
+      .then(function (r) { if (!r.ok) throw new Error("bad status"); return r.json(); })
+      .then(function (result) {
+        selfsteamAppsAppendCards(result.html);
+        if (result.has_more) {
+          sentinel.setAttribute("data-next-page", result.next_page);
+          sentinel.textContent = "Loading more…";
+          observer.observe(sentinel);
+        } else {
+          sentinel.setAttribute("data-has-more", "");
+          sentinel.textContent = "";
+        }
+      })
+      .catch(function () {
+        sentinel.textContent = "Couldn't load more -- scroll to retry";
+        observer.observe(sentinel);
+      });
+  }, {root: panel, rootMargin: "200px"});
+  sentinel._selfsteamObserver = observer;
+  observer.observe(sentinel);
+}
+window.addEventListener("load", selfsteamAppsObserveScroll);
+
+// Highlights the already-resolved app's own card on a real page load
+// (the gallery's own Edit link for an Apps-tab shortcut, or any other
+// full navigation that lands with an app already resolved) -- the
+// click-driven highlight (selfsteamAppsHighlightCard) only ever runs
+// from an actual click, so a fresh page load needs its own pass. Only
+// finds a match if that app happens to be on the currently-displayed
+// grid page at all (see _apps_card_html's own comment on the grid
+// never re-rendering to reflect a selection) -- silently does nothing
+// otherwise, same as any other best-effort UI nicety.
+function selfsteamAppsHighlightFromMarker() {
+  var marker = document.getElementById("apps-resolved-app-id");
+  if (!marker || !marker.value) return;
+  var removeBtn = document.querySelector('.apps-btn-remove[data-app-id="' + CSS.escape(marker.value) + '"]');
+  var card = removeBtn && removeBtn.closest(".apps-card");
+  if (card) card.classList.add("selected");
+}
+window.addEventListener("load", selfsteamAppsHighlightFromMarker);
 </script>
 </body></html>"""
 
@@ -1844,7 +2199,10 @@ def _retroarch_tab_panel_html(state, chosen=None):
     # (blanks it, sets the flag) and Reset to guessed name (drops the
     # flag, goes back to auto-fill) depending on which state it's in.
     name_cleared = bool(state.get("ra_name_cleared"))
-    name_default = "" if name_cleared else (chosen["name"] if chosen else (_ra_guess_name_from_filename(romfile) if romfile else ""))
+    # clean_sgdb_name strips SGDB's own trailing category tag ("Sober
+    # (Program)", etc.) -- a useful disambiguator in a match list, but
+    # not something that belongs in the actual shortcut name.
+    name_default = "" if name_cleared else (sgdb.clean_sgdb_name(chosen["name"]) if chosen else (_ra_guess_name_from_filename(romfile) if romfile else ""))
     name_reset_href = _ra_url("/new", state, ra_name_cleared=("" if name_cleared else "1"))
     name_reset_title = "Reset to guessed name" if name_cleared else "Clear"
     # onclick=selfsteamRaNav -- routes through the AJAX fetch layer instead
@@ -1929,6 +2287,508 @@ def _em_qs(state, **overrides):
 
 def _em_url(path, state, **overrides):
     return f"{path}?{_em_qs(state, **overrides)}#tab-emulators"
+
+
+# apps_app_id/apps_app_name: the Flathub/AppImage app currently
+# selected -- set by a card click (apps_preview, "just resolve SGDB
+# artwork, never touch flatpak/AppImage installs" -- see
+# _apps_card_html's own card_link_href). No install happens here at
+# all: Create itself only ever installs (if not already) at the moment
+# it's actually clicked (see _add_apps_shortcut) -- a preview of
+# something not installed yet is harmless, it just can't produce a
+# shortcut until Create is actually pressed.
+#
+# apps_resolved: same two-step meta-refresh flag as ra_resolved/
+# em_resolved -- a preview goes through the loading page first (RA/
+# Emulators' own "Searching for artwork…" spinner state) before the
+# real SGDB lookup happens, even though that lookup alone is fast
+# enough it wouldn't strictly need it -- confirmed live (2026-08-24)
+# that skipping straight to a synchronous resolve for preview
+# specifically felt inconsistent with every other tab's own visible
+# "something is happening" feedback.
+_APPS_STATE_KEYS = [
+    "apps_category", "apps_page", "apps_source", "apps_search_q",
+    "apps_app_id", "apps_app_name", "apps_preview", "apps_resolved",
+    "apps_sgdb_q", "apps_match_index", "apps_name_cleared", "apps_match_name",
+    # Same reasoning as _RA_STATE_KEYS' own ra_edit_appid/ra_edit_name --
+    # carries an existing shortcut's identity forward from the gallery's
+    # own Edit link (see _poster_card_html) so Create becomes "Save
+    # Shortcut" and _add_apps_shortcut's own _queue_edit_rename_cleanup
+    # call can remove the old entry if the Name field changes before
+    # submitting.
+    "apps_edit_appid", "apps_edit_name",
+]
+
+
+def _apps_state_from_params(params):
+    return {key: (params.get(key) or [""])[0] for key in _APPS_STATE_KEYS}
+
+
+def _appimage_apps_hits():
+    """appimage_apps.APPS reshaped to look like a Flathub API hit
+    (app_id/name/summary/icon/homepage) -- so _apps_card_html and every
+    caller downstream of it can treat both sources identically."""
+    return [
+        {
+            "app_id": app_id, "name": entry["name"], "summary": entry["summary"],
+            "icon": entry.get("icon", ""), "homepage": entry.get("homepage", ""),
+        }
+        for app_id, entry in appimage_apps.APPS.items()
+    ]
+
+
+def _apps_shortcut_app_ids():
+    """Every app_id (Flathub or AppImage) that already has a real Steam
+    shortcut *for that app itself* -- the Apps tab's own "already has a
+    shortcut" checkmark (see _apps_card_html's own check_html). Reuses
+    create_webapp.list_gridge_shortcuts (the same source the gallery
+    itself renders from) rather than re-deriving this from
+    shortcuts.vdf a second way.
+
+    Deliberately only ever apps_app_id (an Apps-tab-created shortcut),
+    never an em_emulator one -- an Emulators-tab shortcut always names
+    one specific game (em_romfile is mandatory, see
+    _add_standalone_emulator_shortcut's own "ROM file not found" check),
+    it's never a bare launcher for the emulator app on its own. Counting
+    it here would make Dolphin's own Apps-tab card show a checkmark
+    just because *some* Dolphin-launched game (e.g. Mario Galaxy) has a
+    shortcut, which reads as "Dolphin itself was added" when it wasn't
+    -- confirmed wrong by the user (2026-08-25) after an earlier version
+    of this function counted em_emulator shortcuts too."""
+    return {s["apps_app_id"] for s in create_webapp.list_gridge_shortcuts() if s.get("apps_app_id")}
+
+
+def _apps_hits_page1_with_installed(fetch_page, installed_ids, extra_pages=4):
+    """Page 1 of a Flathub browse/search, topped up with any already-
+    installed apps that Flathub's own ranking put further back -- a
+    plain page-1 fetch only ever floats the *subset* of installed apps
+    that happen to already be on page 1 (installed_ids ∩ page 1's own
+    24 hits) to the top; the rest only ever surfaced once /apps/more
+    happened to scroll far enough to fetch whichever later page they
+    were actually on. Confirmed live (2026-08-25) that this read as "way
+    fewer apps show as installed than are actually installed" on first
+    load, only fixing itself once the user scrolled all the way down
+    (fetching every intervening page) and back up. fetch_page(page) is
+    search_category(category, page) or search_apps(query, page),
+    whichever this call site is already using -- same shape either way.
+    Bounded to extra_pages (default 4) additional real requests, and
+    only even attempted once installed_ids has anything left to find,
+    so a user with nothing installed (or everything already on page 1)
+    costs nothing extra."""
+    hits, total_pages = fetch_page(1)
+    missing = installed_ids - {h.get("app_id") for h in hits}
+    extra_hits = []
+    page = 2
+    while missing and page <= total_pages and page < 2 + extra_pages:
+        more_hits, _ = fetch_page(page)
+        for h in more_hits:
+            aid = h.get("app_id")
+            if aid in missing:
+                extra_hits.append(h)
+                missing.discard(aid)
+        page += 1
+    return extra_hits + hits, total_pages
+
+
+def _apps_source_installed(source, app_id):
+    """Real live installed-state check, dispatched to whichever source
+    this app_id actually belongs to -- shared by _apps_card_html's own
+    Remove-button visibility and _add_apps_shortcut's own install-if-
+    needed check, so both agree on what "already installed" means for a
+    given source without duplicating the dispatch logic."""
+    if source == "appimage":
+        return appimage_apps.installed(app_id)
+    return standalone_emulators.flathub_app_id_installed(app_id)
+
+
+def _apps_source_install(source, app_id):
+    if source == "appimage":
+        appimage_apps.install(app_id)
+    else:
+        standalone_emulators.install_flathub_app_id(app_id)
+
+
+def _apps_source_launch_args(source, app_id):
+    """The real argv a shortcut for this app should launch -- a bare
+    AppImage path for appimage_apps' own entries (no "flatpak run"
+    prefix, same shape a binary-install emulator's own launch_args
+    already uses), or "<flatpak> run <app_id>" for a real Flathub one."""
+    if source == "appimage":
+        return [appimage_apps.binary_path(app_id)]
+    flatpak = host_exec.which("flatpak")
+    if not flatpak:
+        raise RuntimeError("flatpak isn't available on this host")
+    return [flatpak, "run", app_id]
+
+
+def _apps_qs(state, **overrides):
+    merged = dict(state)
+    merged.update(overrides)
+    return "&".join(f"{k}={urllib.parse.quote(str(merged[k]))}" for k in _APPS_STATE_KEYS if merged.get(k))
+
+
+def _apps_url(path, state, **overrides):
+    return f"{path}?{_apps_qs(state, **overrides)}#tab-apps"
+
+
+def _apps_card_html(hit, state, category, page, installed_ids, source="flathub", shortcut_app_ids=frozenset()):
+    # One card's markup -- shared by _apps_tab_panel_html's own first
+    # page and /apps/more's incremental scroll fetch (see
+    # selfsteamAppsObserveScroll in PAGE_TAIL), so a page loaded via
+    # scroll looks byte-for-byte identical to one rendered up front.
+    # source ("flathub" or "appimage") only ever affects which URL
+    # param round-trips (apps_source) and, via installed_ids, which
+    # real install-state check already ran -- the markup itself is
+    # identical either way, appimage_apps.APPS entries are pre-shaped
+    # to look like a Flathub hit (app_id/name/summary/icon/homepage)
+    # specifically so this one renderer covers both.
+    app_id = hit.get("app_id", "")
+    name = hit.get("name", app_id)
+    summary = hit.get("summary", "")
+    icon = hit.get("icon", "")
+    homepage = hit.get("homepage") or f"https://flathub.org/apps/{app_id}"
+    has_shortcut = app_id in shortcut_app_ids
+    already_installed = app_id in installed_ids
+    # No separate Install button anymore -- picking an app (a card
+    # click) just resolves SGDB artwork, and Create itself now installs
+    # (if not already) before queuing the shortcut (see
+    # _add_apps_shortcut). apps_sgdb_q/apps_match_index are per-app
+    # search state (a manual query, or a specific match picked from its
+    # results) -- reset when switching to a genuinely different app
+    # (otherwise they'd carry forward from whatever was selected
+    # before, via _apps_url's own state merge, and get wrongly applied
+    # to this different app's fresh resolve), but left alone when
+    # re-clicking the SAME app that's already the active one, so a
+    # manually-picked match/artwork survives re-selecting it.
+    same_app = app_id == state.get("apps_app_id")
+    card_link_href = _apps_url(
+        "/new", state, apps_category=category, apps_page=page, apps_source=source,
+        apps_app_id=app_id, apps_app_name=name, apps_preview="1",
+        **({} if same_app else {"apps_sgdb_q": "", "apps_match_index": ""}),
+    )
+    # Remove only ever shows once actually installed -- nothing to
+    # remove otherwise. data-source tells /apps/uninstall which real
+    # uninstall function to call (see selfsteamAppsUninstall).
+    remove_btn = (
+        f'<button type="button" class="apps-btn-remove" data-app-id="{html.escape(app_id)}" data-source="{html.escape(source)}" '
+        f'onclick="return selfsteamAppsUninstall(this)">Remove</button>'
+        if already_installed else ""
+    )
+    icon_html = f'<img class="apps-card-icon" src="{html.escape(icon)}" alt="" loading="lazy">' if icon else '<span class="apps-card-icon"></span>'
+    # title on the link itself (not a separate icon) -- a native
+    # browser tooltip on hover, same zero-JS mechanism
+    # _info_tooltip_icon_html's own icons use, just without one here.
+    check_html = f'<span class="apps-card-shortcut-check" title="A Steam shortcut already exists for this app">{_CHECK_ICON_SVG}</span>' if has_shortcut else ""
+    homepage_link = (
+        f'<a class="apps-card-homepage" href="{html.escape(homepage)}" target="_blank" rel="noopener" '
+        f'title="Open its {"Flathub" if source == "flathub" else "project"} page" onclick="event.stopPropagation()">{_EXTERNAL_LINK_ICON_SVG}</a>'
+    )
+    return f"""
+    <div class="apps-card" data-app-id="{html.escape(app_id)}">
+      <a class="apps-card-link" href="{card_link_href}" onclick="return selfsteamAppsCardClick(this)" title="{html.escape(summary)}">
+        {icon_html}
+        <div class="apps-card-text">
+          <div class="apps-card-name">{html.escape(name)}</div>
+          <div class="apps-card-summary">{html.escape(summary)}</div>
+        </div>
+      </a>
+      <div class="apps-card-extras">{check_html}{homepage_link}</div>
+      <div class="apps-card-install">{remove_btn}</div>
+    </div>"""
+
+
+def _apps_tab_panel_html(state, hits, total_pages):
+    # Left column: real Flathub categories (flathub_browse.CATEGORIES)
+    # as a row of pills, and the app grid for the selected one, both
+    # together -- browsing is meant to be uninterrupted by an Install/
+    # Remove click elsewhere on this same panel, so the whole thing
+    # (id="selfsteam-apps-tab-panel") is deliberately left out of
+    # SELFSTEAM_APPS_SWAP_IDS (see PAGE_TAIL). Only the nested
+    # selfsteam-apps-name-slot below (which needs to appear/update once
+    # an install finishes) is in that swap list. The middle column is
+    # the SGDB search bar + matches instead (see
+    # _apps_middle_column_html), same shape RA/Emulators' own middle
+    # column already has -- browsing/installing lives here instead of
+    # there.
+    category = state.get("apps_category") or "game"
+    page = int(state.get("apps_page") or 1)
+    search_q = state.get("apps_search_q", "")
+    # A plain <select onchange="location.href=this.value"> -- real
+    # navigation, not selfsteamAppsNav, same reasoning as the pill list
+    # this replaced: a category switch is supposed to visibly change
+    # this same left column (new header, new grid), but that whole
+    # column (id="selfsteam-apps-tab-panel") is deliberately excluded
+    # from SELFSTEAM_APPS_SWAP_IDS precisely so Install/Remove clicks
+    # elsewhere don't reset it -- an AJAX swap here would just silently
+    # do nothing, fetching a page whose relevant content never gets
+    # applied. apps_search_q="" on every option -- picking a category
+    # always drops out of search mode back to browsing.
+    category_options = "".join(
+        f'<option value="{_apps_url("/new", state, apps_category=slug, apps_page=1, apps_search_q="")}"{" selected" if slug == category else ""}>'
+        f'{html.escape(label)}</option>'
+        for slug, label in flathub_browse.CATEGORIES
+    )
+    # source_toggle: AppImage is a small, hand-curated list
+    # (appimage_apps.APPS), same spirit as the Emulators tab's own
+    # AppImage entries but for general apps -- there's no equivalent
+    # "browse every AppImage app" catalog the way Flathub has one, so
+    # unlike the category dropdown this can't be arbitrarily large.
+    # Switching source clears the current app pick (apps_app_id and
+    # everything downstream of it), same reasoning as the Emulators
+    # tab's own source toggle: Flathub app_ids and AppImage app_ids are
+    # disjoint namespaces, so leaving one selected while viewing the
+    # other list would just be wrong, not merely stale.
+    apps_source = state.get("apps_source") or "flathub"
+    # .source-label's own flexbox centering (align-items:center) gets
+    # the pill-level alignment right regardless of what's inside, but
+    # _info_tooltip_icon_html's own icon still carries a baked-in
+    # top:-0.15rem (tuned for sitting next to plain text in a normal
+    # line, elsewhere on this page) -- inside this flex-centered label
+    # that reads as sitting too high relative to the text next to it.
+    # top:0.2rem here cancels that back out and nudges it slightly
+    # past neutral. Confirmed live (2026-08-25).
+    apps_appimage_tooltip_text = "AppImages are downloaded directly from the developer's own GitHub releases, or for itch.io, its own auto-updater."
+    apps_appimage_tooltip = f'<span style="position:relative;top:0.2rem">{_info_tooltip_icon_html(apps_appimage_tooltip_text)}</span>'
+
+    def _apps_source_toggle_link(value, text, extra=""):
+        active = "source-label active" if apps_source == value else "source-label"
+        href = _apps_url(
+            "/new", state, apps_source=value, apps_app_id="", apps_app_name="",
+            apps_preview="", apps_resolved="", apps_sgdb_q="", apps_match_index="",
+        )
+        space = " " if extra else ""
+        return f'<a class="{active}" href="{href}">{text}{space}{extra}</a>'
+
+    source_toggle = f"""
+    <div class="source-toggle" style="margin-bottom:0.6rem">
+      {_apps_source_toggle_link("flathub", "Flathub")}
+      {_apps_source_toggle_link("appimage", "AppImage", apps_appimage_tooltip)}
+    </div>"""
+    # Search icon toggles #apps-search-box open/closed (selfsteamAppsToggleSearch,
+    # PAGE_TAIL) -- typing live-searches (selfsteamAppsLiveSearch,
+    # debounced) via /apps/search, Flathub's own real text-search API
+    # (flathub_browse.search_apps), not the category browse one.
+    # Search replaces the whole grid (selfsteamAppsReplaceCards) rather
+    # than appending like /apps/more's own category-scroll continuation
+    # does -- a fresh query is a fresh result set, not more of the same
+    # one.
+    search_clear_href = _apps_url("/new", state, apps_search_q="", apps_page=1)
+    # Category dropdown/search box only mean anything for Flathub
+    # browsing -- appimage_apps.APPS is a fixed, tiny, hand-picked list
+    # with no categories or search of its own to offer.
+    category_picker = "" if apps_source == "appimage" else f"""
+  <div class="field-group" style="display:flex;flex-direction:row;align-items:center;gap:0.5rem">
+    <select id="apps-category-select" onchange="location.href=this.value" style="flex:1">{category_options}</select>
+    <button type="button" class="search-submit-btn" title="Search Flathub" onclick="selfsteamAppsToggleSearch()">{_SEARCH_ICON_SVG}</button>
+  </div>
+  <div class="field-with-clear" id="apps-search-box" style="display:{'flex' if search_q else 'none'}">
+    <input type="text" id="apps-search-input" value="{html.escape(search_q)}" placeholder="Search Flathub"
+           oninput="selfsteamAppsLiveSearch(this.value)">
+    <a href="{search_clear_href}" class="field-clear-btn" title="Close">&#10005;</a>
+  </div>"""
+    category_select = f"""
+  {source_toggle}
+  {category_picker}"""
+
+    # One `flatpak list` for the whole page instead of a `flatpak info`
+    # subprocess per card -- see installed_flathub_app_ids' own
+    # docstring. AppImage mode uses appimage_apps.installed() per entry
+    # instead -- only ever 3 apps, not worth a matching batch helper.
+    installed_ids = (
+        {app_id for app_id in appimage_apps.APPS if appimage_apps.installed(app_id)}
+        if apps_source == "appimage" else standalone_emulators.installed_flathub_app_ids()
+    )
+    # Installed apps first -- sorted() is stable, so within "installed"
+    # and "not installed" each keeps Flathub's own trending/relevance
+    # order, this only ever reorders across that one boundary. Only
+    # sorts *within* this one page's own hits on its own -- see
+    # selfsteam-apps-grid-boundary below for how a later page's own
+    # installed apps still end up ahead of an earlier page's
+    # not-yet-installed ones once scrolled in.
+    hits = sorted(hits, key=lambda hit: hit.get("app_id") not in installed_ids)
+    shortcut_app_ids = _apps_shortcut_app_ids()
+    cards = [
+        _apps_card_html(hit, state, category, page, installed_ids, source=apps_source, shortcut_app_ids=shortcut_app_ids)
+        for hit in hits
+    ]
+    # A stable insertion point, always present once there's at least
+    # one card, marking where this page's own "installed" cards end and
+    # its "not installed" ones begin. selfsteamAppsAppendCards (PAGE_TAIL)
+    # inserts each later page's own installed cards right before this
+    # same marker (not just at the top of that page's own new batch),
+    # and its not-installed ones after everything else -- without this,
+    # only each individual page's own installed apps sorted ahead of
+    # its own not-installed ones, but a later page's installed app still
+    # landed below an earlier page's entire not-installed batch, which
+    # didn't read as "installed apps first" once more than one page had
+    # loaded.
+    if cards:
+        first_not_installed = next((i for i, hit in enumerate(hits) if hit.get("app_id") not in installed_ids), len(cards))
+        cards.insert(first_not_installed, '<div id="selfsteam-apps-grid-boundary" style="display:none"></div>')
+    list_html = "".join(cards) if cards else '<p class="coming-soon">No apps found in this category.</p>'
+
+    # Infinite scroll, not Prev/Next clicks -- selfsteamAppsObserveScroll
+    # (PAGE_TAIL) watches this sentinel with an IntersectionObserver and
+    # fetches /apps/more for the next page once it's visible, appending
+    # straight into #selfsteam-apps-grid-list without touching anything
+    # already there (no full-column swap, same "don't disrupt browsing"
+    # goal SELFSTEAM_APPS_SWAP_IDS already protects Install/Remove
+    # clicks for). data-* carries what /apps/more needs to know which
+    # category/next-page to fetch and whether one even exists.
+    has_more = "1" if page < total_pages else ""
+    # data-search-q: when set, selfsteamAppsObserveScroll (PAGE_TAIL)
+    # fetches /apps/more in search-continuation mode instead of
+    # category-browse mode -- carried here too (not just used by
+    # selfsteamAppsLiveSearch's own direct sentinel update) so a page
+    # reload while mid-search still scrolls the right way.
+    sentinel = (
+        f'<div class="apps-grid-sentinel" id="selfsteam-apps-sentinel" '
+        f'data-category="{html.escape(category)}" data-search-q="{html.escape(search_q)}" '
+        f'data-next-page="{page + 1}" data-has-more="{has_more}">'
+        f'{"Loading more…" if has_more else ""}</div>'
+    )
+
+    # Always rendered, not just once an app's picked -- same as the
+    # RetroArch/Emulators tabs' own Name field (see
+    # _emulators_tab_panel_html's own name_field, unconditional there
+    # too), just empty until something's selected. Same em_name_cleared/
+    # reset-to-guessed pattern, "guessed" here being the app's own real
+    # Flathub name (apps_app_name) rather than a filename guess.
+    name_cleared = bool(state.get("apps_name_cleared"))
+    # Always the app's own real Flathub name -- never chosen["name"].
+    # Unlike RA/Emulators/URL (where the SGDB match genuinely *is* the
+    # best available real title, since all they start with is a
+    # filename/URL guess), an app's own name here is already exact and
+    # correct on its own; the SGDB match chosen alongside it exists
+    # purely to pick artwork, and searching a *different* SGDB entry
+    # just to find better art (see _apps_middle_column_html's own
+    # per-item match selection) shouldn't ever rename the shortcut out
+    # from under whatever the real app is. Confirmed live (2026-08-25):
+    # searching SGDB for "youtube" to grab art for VacuumTube silently
+    # renamed the shortcut to "Youtube VR" -- the exact bug this fixes.
+    name_default = "" if name_cleared else state.get("apps_app_name", "")
+    name_reset_href = _apps_url("/new", state, apps_name_cleared=("" if name_cleared else "1"))
+    name_reset_title = "Reset to app name" if name_cleared else "Clear"
+    name_field = f"""
+  <div class="field-group">
+    <label class="field-label" for="apps-name-field">Name</label>
+    <div class="field-with-clear">
+      <img class="name-field-icon" src="/vendor/name-field-wand.webp" alt="">
+      <input type="text" name="apps_match_name" id="apps-name-field" form="{_ADD_FORM_ID}"
+             value="{html.escape(name_default)}" placeholder="Shortcut name">
+      <a href="{name_reset_href}" class="field-clear-btn" title="{name_reset_title}" onclick="return selfsteamAppsNav(this)">&#10005;</a>
+    </div>
+  </div>"""
+
+    # Grid gets its own scroll container (flex:1;min-height:0;overflow-
+    # y:auto), separate from the outer field-group -- name_field below
+    # is a sibling of that whole field-group, not nested inside the
+    # scrolling part of it, so it stays pinned right above the (always-
+    # present) Create button the same way RA/Emulators' own Name field
+    # does, instead of requiring a scroll through the entire (possibly
+    # long, infinite-scrolling) app grid to reach it.
+    return f"""
+  {category_select}
+  <div class="field-group" style="flex:1;min-height:0;display:flex;flex-direction:column">
+    <div class="apps-grid-scroll" style="flex:1;min-height:0;overflow-y:auto">
+      <div class="apps-grid-list" id="selfsteam-apps-grid-list">{list_html}</div>
+      {sentinel}
+    </div>
+  </div>
+  <div id="selfsteam-apps-name-slot">{name_field}</div>
+"""
+
+
+def _apps_display_term(state, chosen=None):
+    # Same override/cleared/resolved-match fallback chain as
+    # _em_display_term -- see its own comment for the reasoning, just
+    # keyed to apps_sgdb_q/apps_sgdb_cleared/apps_app_name (the app's
+    # own real Flathub name) instead of a filename guess.
+    if state.get("apps_sgdb_q"):
+        return state["apps_sgdb_q"].lower()
+    if state.get("apps_sgdb_cleared"):
+        return ""
+    if chosen and chosen.get("name"):
+        return chosen["name"].lower()
+    return (state.get("apps_app_name") or "").lower()
+
+
+def _apps_sgdb_search_bar_html(state, chosen=None):
+    display_term = _apps_display_term(state, chosen)
+    # apps_match_index reset too, not just apps_sgdb_q -- confirmed live
+    # (2026-08-25) that leaving a stale index (picked from whatever the
+    # cleared search had returned) meant Clear could land on some other
+    # leftover match instead of genuinely resetting to the app's own
+    # default (index 0) result.
+    clear_href = _apps_url("/new", state, apps_sgdb_q="", apps_sgdb_cleared="1", apps_match_index="")
+    # apps_resolved dropped too (not just apps_sgdb_q) -- same reasoning
+    # as _em_sgdb_search_bar_html's own em_resolved exclusion: without
+    # it, a manual re-search would skip the loading branch entirely
+    # (only triggers when apps_resolved is falsy) and run synchronously
+    # with no visible feedback, not just the very first resolve.
+    hidden = _ra_hidden_fields({k: v for k, v in state.items() if k not in ("apps_sgdb_q", "apps_resolved")})
+    # Disabled until an app's actually been resolved (installed or
+    # previewed) -- same reasoning as _em_sgdb_search_bar_html's own
+    # disabled condition.
+    disabled = "" if (state.get("apps_app_id") and state.get("apps_resolved") and sgdb.has_api_key()) else " disabled"
+    return f"""
+<form action="/new#tab-apps" method="get" onsubmit="return selfsteamAppsFormNav(this)">
+  {hidden}
+  <div class="search-field-row">
+    <div class="field-with-clear">
+      <input type="text" name="apps_sgdb_q" value="{html.escape(display_term)}" placeholder="SGDB search"{disabled}>
+      <a href="{clear_href}" class="field-clear-btn" title="Clear" onclick="return selfsteamAppsNav(this)">&#10005;</a>
+    </div>
+    <button type="submit" class="search-submit-btn" title="Search"{disabled}>{_SEARCH_ICON_SVG}</button>
+  </div>
+</form>
+"""
+
+
+def _apps_middle_column_html(state, matches, match_index, extra_class=""):
+    # matches: every real SGDB result for the current search (not just
+    # the one chosen one) -- unlike RA/Emulators' own middle list
+    # (whose rows all point at the same URL, since a filename guess's
+    # own top SGDB result is trusted as-is), each row here is really
+    # clickable via apps_match_index, same real per-item selection the
+    # URL tab's own match list already has. Confirmed live (2026-08-25)
+    # that hiding every result but the top one was the real bug behind
+    # "searched for youtube, only youtube vr shows" -- SGDB had already
+    # returned a real "YouTube" entry too, this just never surfaced it.
+    if not sgdb.has_api_key():
+        matches = []
+    if not matches:
+        list_html = _placeholder_matches_html()
+    else:
+        rows = []
+        for i, m in enumerate(matches):
+            cls = " selected" if i == match_index else ""
+            href = _apps_url("/new", state, apps_match_index=str(i))
+            rows.append(f'<a class="{cls.strip()}" href="{href}" onclick="return selfsteamAppsNav(this)">{html.escape(m["name"])}</a>')
+        list_html = f'<div class="boxed-list">{"".join(rows)}</div>'
+    # Always present, empty until a real resolve completes for this
+    # exact app_id -- the one reliable client-side signal (see
+    # selfsteamAppsHighlightFromMarker in PAGE_TAIL) for "has this app
+    # already been previewed/resolved" that survives the grid itself never
+    # re-rendering (selfsteam-apps-tab-panel is deliberately excluded
+    # from SELFSTEAM_APPS_SWAP_IDS, so a card's own onclick baked in at
+    # its original render can never update later to reflect a preview
+    # that happened afterward -- this element, inside the middle column
+    # which DOES get swapped on every resolve, can).
+    resolved_marker = (
+        f'<input type="hidden" id="apps-resolved-app-id" value="{html.escape(state.get("apps_app_id", ""))}">'
+        if matches else '<input type="hidden" id="apps-resolved-app-id" value="">'
+    )
+    return f"""
+<div class="card {extra_class}" id="selfsteam-apps-middle">
+  {resolved_marker}
+  {_apps_sgdb_search_bar_html(state, matches[match_index] if matches else None)}
+  <div class="field-group" style="flex:1;min-height:0">
+    <h2>SGDB matches</h2>
+    {list_html}
+  </div>
+</div>
+"""
 
 
 def _em_breadcrumbs_html(rel_path, state, path_key):
@@ -2165,7 +3025,7 @@ def _emulators_tab_panel_html(state, chosen=None):
         for k in _EM_STATE_KEYS if k != "em_emulator"
     )
 
-    def _source_toggle_link(value, text):
+    def _source_toggle_link(value, text, extra=""):
         active = "source-label active" if install_source == value else "source-label"
         # Switching source clears the emulator pick (and anything
         # downstream of it) rather than leaving a stale selection from
@@ -2177,12 +3037,17 @@ def _emulators_tab_panel_html(state, chosen=None):
             em_romfile="", em_biosfile="", em_bios2file="", em_bios3file="", em_bios4file="",
             em_keysfile="", em_firmwarefile="", em_resolved="",
         )
-        return f'<a class="{active}" href="{href}" onclick="return selfsteamEmNav(this)">{text}</a>'
+        space = " " if extra else ""
+        return f'<a class="{active}" href="{href}" onclick="return selfsteamEmNav(this)">{text}{space}{extra}</a>'
 
+    # Same top:0.2rem counter-nudge as the Apps tab's own
+    # apps_appimage_tooltip -- see its comment for why.
+    appimage_tooltip_text = "AppImages are downloaded directly from the emulator developer's own GitHub releases."
+    appimage_tooltip = f'<span style="position:relative;top:0.2rem">{_info_tooltip_icon_html(appimage_tooltip_text)}</span>'
     source_toggle = f"""
     <div class="source-toggle" style="margin-bottom:0.6rem">
       {_source_toggle_link("flathub", "Flathub")}
-      {_source_toggle_link("binary", "AppImage")}
+      {_source_toggle_link("binary", "AppImage", appimage_tooltip)}
     </div>"""
 
     # bios_slots (xemu so far): more than one required BIOS-type file,
@@ -2248,7 +3113,10 @@ def _emulators_tab_panel_html(state, chosen=None):
     # em_name_cleared -- see _retroarch_tab_panel_html's own comment on
     # the same flag/toggle, same reasoning here.
     name_cleared = bool(state.get("em_name_cleared"))
-    name_default = "" if name_cleared else (chosen["name"] if chosen else (_ra_guess_name_from_filename(romfile) if romfile else ""))
+    # clean_sgdb_name strips SGDB's own trailing category tag ("Sober
+    # (Program)", etc.) -- a useful disambiguator in a match list, but
+    # not something that belongs in the actual shortcut name.
+    name_default = "" if name_cleared else (sgdb.clean_sgdb_name(chosen["name"]) if chosen else (_ra_guess_name_from_filename(romfile) if romfile else ""))
     name_reset_href = _em_url("/new", state, em_name_cleared=("" if name_cleared else "1"))
     name_reset_title = "Reset to guessed name" if name_cleared else "Clear"
     # onclick=selfsteamEmNav -- see _retroarch_tab_panel_html's own comment
@@ -2264,19 +3132,8 @@ def _emulators_tab_panel_html(state, chosen=None):
     </div>
   </div>"""
 
-    # Native title tooltip -- covers both install sources at once (not
-    # conditional on which one's active) since it's a hover reference,
-    # not a status message about what's about to happen this time.
-    emulator_info_tooltip = (
-        "Flatpaks will be downloaded from Flathub if not installed.\n\n"
-        "AppImage emulators will be downloaded from developer's own source."
-    )
-
     return f"""
   <div class="field-group">
-    <label class="field-label">Emulator <span class="required-asterisk">*</span>
-      {_info_tooltip_icon_html(emulator_info_tooltip)}
-    </label>
     {source_toggle}
     <form method="get" action="/new#tab-emulators" style="margin:0">
       {hidden_fields}
@@ -2504,7 +3361,7 @@ def _custom_left_html(state, chosen=None):
     # only when there's no real name to restore (shouldn't normally
     # happen, every /custom visit comes from an existing shortcut).
     edit_name = state.get("cu_edit_name")
-    name_default = edit_name or (chosen["name"] if chosen else (_ra_guess_name_from_filename(target) if target else ""))
+    name_default = edit_name or (sgdb.clean_sgdb_name(chosen["name"]) if chosen else (_ra_guess_name_from_filename(target) if target else ""))
     return f"""
   <div class="field-group">
     <label class="field-label" for="cu-target-field">Target <span class="required-asterisk">*</span></label>
@@ -2985,22 +3842,29 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
                  candidates_by_category=None, resolved_url=None, chosen=None,
                  url_edit_appid="", url_edit_name="", url_loading=False,
                  ra_state=None, ra_candidates_by_category=None, ra_chosen=None, ra_loading=False,
-                 em_state=None, em_candidates_by_category=None, em_chosen=None, em_loading=False):
+                 em_state=None, em_candidates_by_category=None, em_chosen=None, em_loading=False,
+                 apps_state=None, apps_hits=None, apps_total_pages=1,
+                 apps_candidates_by_category=None, apps_matches=None, apps_chosen=None, apps_loading=False):
     """Single page-builder for every state (home, unresolved input, no
     matches, a real workspace) -- all three columns are always present
     and always fully populated (placeholders when empty), rather than
     each state having its own bespoke partial layout.
 
-    ra_*/em_* cover the RetroArch/Emulators tabs' own flows, entirely
-    separate from the URL tab's and each other (different state,
-    different match_name fields -- ra_match_name/em_match_name -- so
-    none of the three ever collide as same-named inputs on the same Add
-    form). Only one flow drives the single shared Add button/artwork
-    column at a time: RetroArch, then Emulators, take priority over the
-    URL tab once their own required picks are complete, since that's
-    the more specific signal one of them is actually in progress."""
+    ra_*/em_*/apps_* cover the RetroArch/Emulators/Apps tabs' own
+    flows, entirely separate from the URL tab's and each other
+    (different state, different match_name fields -- ra_match_name/
+    em_match_name/apps_match_name -- so none of the four ever collide
+    as same-named inputs on the same Add form). Only one flow drives
+    the single shared Add button/artwork column at a time: RetroArch,
+    then Emulators, then Apps, take priority over the URL tab once
+    their own required picks are complete, since that's the more
+    specific signal one of them is actually in progress."""
     matches = matches or []
     candidates_by_category = candidates_by_category or {}
+    apps_state = apps_state or {}
+    apps_hits = apps_hits or []
+    apps_matches = apps_matches or []
+    apps_candidates_by_category = apps_candidates_by_category or {}
     ra_state = ra_state or {}
     ra_candidates_by_category = ra_candidates_by_category or {}
     em_state = em_state or {}
@@ -3075,6 +3939,20 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
     em_ready = em_prereqs_ready and bool(em_state.get("em_resolved"))
     em_awaiting_artwork = em_prereqs_ready and not em_state.get("em_resolved")
 
+    # No more real-install gate here -- Create no longer requires the
+    # app to already be installed (that only ever happens once, at
+    # Create-click time, inside _add_apps_shortcut); ready is purely
+    # "an app is selected and its artwork has resolved."
+    apps_app_id_state = apps_state.get("apps_app_id")
+    apps_ready = bool(apps_app_id_state) and apps_chosen is not None
+    apps_awaiting_artwork = bool(apps_app_id_state) and apps_chosen is None
+    # apps_resolved is the same two-step meta-refresh flag as ra_resolved/
+    # em_resolved (see _APPS_STATE_KEYS' own comment) -- apps_searching is
+    # a preview's (card click's) own "still searching" moment, shown even
+    # though that step alone is fast, for the same visible-feedback
+    # consistency ra/em's own awaiting-artwork state already has.
+    apps_searching = bool(apps_app_id_state) and bool(apps_state.get("apps_preview")) and not apps_state.get("apps_resolved")
+
     add_form = ""
     # Always present and pinned to the bottom, per the design handoff --
     # inert (not tied to any form) until a match/artwork exists to add.
@@ -3143,6 +4021,30 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
 """
         add_button_text = "Save Shortcut" if em_edit_appid else "Create Steam Shortcut"
         add_button = f'<button type="submit" id="selfsteam-add-button" form="{_ADD_FORM_ID}">{add_button_text}</button>'
+    elif apps_ready:
+        # Same data-app-name/data-installed split as em_ready's own
+        # data-emulator/data-installed above -- Create's own work now
+        # genuinely includes a real install (via _apps_source_install in
+        # _add_apps_shortcut) the first time an app's picked, so
+        # selfsteamShowCreating shows "Installing <name>..." for that
+        # case and the generic "Creating Shortcut" once it's already
+        # installed. Checked fresh at render time (same "not trusted,
+        # /add re-checks it again for real regardless" caveat em_ready's
+        # own comment already has).
+        apps_app_id = apps_state.get("apps_app_id", "")
+        apps_already_installed = _apps_source_installed(apps_state.get("apps_source") or "flathub", apps_app_id)
+        apps_edit_appid = apps_state.get("apps_edit_appid", "")
+        add_form = f"""
+<form id="{_ADD_FORM_ID}" action="/add" method="post" onsubmit="selfsteamShowCreating(this)"
+      data-app-name="{html.escape(apps_state.get('apps_app_name') or apps_app_id)}" data-installed="{"1" if apps_already_installed else ""}">
+  <input type="hidden" name="apps_app_id" value="{html.escape(apps_app_id)}">
+  <input type="hidden" name="apps_source" value="{html.escape(apps_state.get('apps_source', ''))}">
+  <input type="hidden" name="apps_edit_appid" value="{html.escape(apps_edit_appid)}">
+  <input type="hidden" name="apps_edit_name" value="{html.escape(apps_state.get('apps_edit_name', ''))}">
+</form>
+"""
+        apps_add_button_text = "Save Shortcut" if apps_edit_appid else "Create Steam Shortcut"
+        add_button = f'<button type="submit" id="selfsteam-add-button" form="{_ADD_FORM_ID}">{apps_add_button_text}</button>'
     elif chosen is not None:
         couch_field = '<input type="hidden" name="couch_mode" value="1">' if couch_mode else ""
         # The Name field itself (see _url_tab_panel_html) is what
@@ -3162,7 +4064,7 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
 """
         add_button_text = "Save Shortcut" if url_edit_appid else "Create Steam Shortcut"
         add_button = f'<button type="submit" id="selfsteam-add-button" form="{_ADD_FORM_ID}">{add_button_text}</button>'
-    elif ra_awaiting_artwork or em_awaiting_artwork or url_loading:
+    elif ra_awaiting_artwork or em_awaiting_artwork or apps_awaiting_artwork or apps_searching or url_loading:
         # Everything else (console/rom/bios, or emulator/rom/keys/
         # firmware) is already picked -- just waiting on the SGDB fetch
         # itself (see ra_ready/em_ready's own comment on why this is
@@ -3197,7 +4099,9 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
         {_url_tab_panel_html(query, couch_mode, browser, chosen, name_reset_href, ra_state, em_state)}
       </form>
     </div>
-    <div class="tab-panel tab-panel-apps"><div class="coming-soon">Apps (Flathub/Installed) -- coming soon</div></div>
+    <div class="tab-panel tab-panel-apps" id="selfsteam-apps-tab-panel">
+      {_apps_tab_panel_html(apps_state, apps_hits, apps_total_pages)}
+    </div>
     <div class="tab-panel tab-panel-retroarch" id="selfsteam-ra-tab-panel">
       {_retroarch_tab_panel_html(ra_state, ra_chosen)}
     </div>
@@ -3245,6 +4149,21 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
         em_middle_html = _em_middle_column_html(em_state, [em_chosen] if em_chosen else [], extra_class="middle-panel-emulators")
         em_right_content = _artwork_picker_html(em_candidates_by_category, prefix="em_")
 
+    if apps_loading:
+        # Same two-step meta-refresh as ra_loading/em_loading above --
+        # apps_resolved="1" marks the follow-up request as the one that
+        # should actually do the real work: the SGDB lookup by the
+        # app's own name (never a real install here -- that only ever
+        # happens later, at Create-click time, inside
+        # _add_apps_shortcut).
+        apps_refresh_url = _apps_url("/new", apps_state, apps_resolved="1")
+        extra_head = f'<meta http-equiv="refresh" content="0;url={html.escape(apps_refresh_url)}">'
+        apps_right_content = _ra_loading_artwork_html()
+    else:
+        apps_right_content = _artwork_picker_html(apps_candidates_by_category, prefix="apps_")
+    apps_match_index_state = int(apps_state.get("apps_match_index") or 0)
+    apps_middle_html = _apps_middle_column_html(apps_state, apps_matches, apps_match_index_state, extra_class="middle-panel-apps")
+
     if url_loading:
         # Same two-step meta-refresh trick as ra_loading/em_loading
         # above -- the URL tab previously had none of this at all, so a
@@ -3268,6 +4187,7 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
         right_url = f'<div class="card artwork-card right-panel-url">{_artwork_picker_html(candidates_by_category)}</div>'
     right_ra = f'<div class="card artwork-card right-panel-retroarch" id="selfsteam-ra-right">{ra_right_content}</div>'
     right_em = f'<div class="card artwork-card right-panel-emulators" id="selfsteam-em-right">{em_right_content}</div>'
+    right_apps = f'<div class="card artwork-card right-panel-apps" id="selfsteam-apps-right">{apps_right_content}</div>'
 
     # id="selfsteam-add-form-slot" is a stable AJAX-swap target even when
     # add_form itself is empty (no id of its own to grab in that case) --
@@ -3279,8 +4199,8 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
 {_tab_bar_targets_html()}
 <div class="selfsteam-columns">
   <div class="selfsteam-left">{left}</div>
-  <div class="selfsteam-middle">{middle_url}{ra_middle_html}{em_middle_html}</div>
-  <div class="selfsteam-right">{right_url}{right_ra}{right_em}</div>
+  <div class="selfsteam-middle">{middle_url}{ra_middle_html}{em_middle_html}{apps_middle_html}</div>
+  <div class="selfsteam-right">{right_url}{right_ra}{right_em}{right_apps}</div>
 </div>
 """, extra_head=extra_head)
 
@@ -3587,6 +4507,22 @@ def _poster_card_html(shortcut, pending_removal_appids):
             "em_romfile": romfile_rel,
             "em_edit_appid": str(appid), "em_edit_name": name,
         })
+    elif shortcut.get("apps_app_id"):
+        # apps_preview="1" -- same SGDB-resolve-only path a card's own
+        # preview click uses (see _apps_card_html); a real install only
+        # ever happens again if Create is actually clicked, and this app
+        # is already installed anyway (that's the only way an Apps-tab
+        # shortcut for it could exist at all). apps_app_name is this
+        # shortcut's own current display name, not necessarily still
+        # the app's real Flathub name if the user renamed it after
+        # creating it -- close enough to guess a reasonable SGDB search
+        # from, same as every other tab's own edit_href does with
+        # whatever name it already has on hand.
+        edit_href = _apps_url("/new", {
+            "apps_app_id": shortcut["apps_app_id"], "apps_app_name": name, "apps_preview": "1",
+            "apps_source": shortcut.get("apps_source") or "flathub",
+            "apps_edit_appid": str(appid), "apps_edit_name": name,
+        })
     elif shortcut.get("managed"):
         edit_href = (
             f"/search?q={urllib.parse.quote(shortcut['url'] or name)}"
@@ -3670,7 +4606,7 @@ def render_remove_confirm(appid, name, romfile):
     <button type="submit" name="delete_file" value="1" class="btn" style="background:#c00;color:#fff">Remove shortcut and delete ROM file</button>
   </form>
 </div>
-""", page_title=_hostname(), show_back=False)
+""", page_title=_hostname())
 
 
 def render_gallery():
@@ -3894,6 +4830,7 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/new":
             ra_state = _ra_state_from_params(params)
             em_state = _em_state_from_params(params)
+            apps_state = _apps_state_from_params(params)
             romfile = ra_state.get("ra_romfile")
             em_romfile = em_state.get("em_romfile")
             # A freshly-picked ROM (ra_resolved/em_resolved not yet set
@@ -3902,15 +4839,25 @@ class Handler(BaseHTTPRequestHandler):
             # the real SGDB search can take a few seconds, and skipping
             # straight to it left the previous page sitting there
             # unchanged the whole time, easy to mistake for the click
-            # not registering. Only one of ra_*/em_* is ever the one
-            # actually driving a given request (each tab's own links
-            # only ever set its own romfile), so checking ra's first and
-            # falling through to em's never actually races.
+            # not registering. Only one of ra_*/em_*/apps_* is ever the
+            # one actually driving a given request (each tab's own
+            # links only ever set its own state), so checking each in
+            # turn never actually races.
             if romfile and not ra_state.get("ra_resolved"):
-                self._send_html(render_page(ra_state=ra_state, ra_loading=True, em_state=em_state))
+                self._send_html(render_page(ra_state=ra_state, ra_loading=True, em_state=em_state, apps_state=apps_state))
                 return
             if em_romfile and not em_state.get("em_resolved"):
-                self._send_html(render_page(ra_state=ra_state, em_state=em_state, em_loading=True))
+                self._send_html(render_page(ra_state=ra_state, em_state=em_state, em_loading=True, apps_state=apps_state))
+                return
+            # apps_app_id set but apps_resolved not yet -- either an
+            # Install click (still needs the real, slow
+            # install_flathub_app_id call below) or a card-click preview
+            # (its own SGDB-only resolve is fast, but shown through this
+            # same loading step anyway for the same visible "something
+            # is happening" feedback ra/em's own awaiting-artwork state
+            # already gives -- see apps_searching's own comment).
+            if apps_state.get("apps_app_id") and not apps_state.get("apps_resolved"):
+                self._send_html(render_page(ra_state=ra_state, em_state=em_state, apps_state=apps_state, apps_loading=True))
                 return
             ra_chosen = None
             ra_candidates = {}
@@ -3936,10 +4883,153 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 em_chosen = em_matches[0]
                 em_candidates = _fetch_candidates(em_chosen["id"])
+            # Apps grid is always rendered fully, same "every column
+            # always populated" philosophy as ra_middle_html/
+            # em_middle_html -- otherwise clicking the Apps tab for the
+            # very first time (a pure CSS :target switch, no server
+            # round trip) would show an empty grid until some other
+            # action happened to trigger a fresh /new request.
+            # apps_search_q, if set, takes over the whole grid (a fresh
+            # query is a different result set entirely, not a filter on
+            # top of the current category) -- apps_category defaults to
+            # "game" either way (see flathub_browse.search_category) so
+            # this is meaningful even on a bare, param-less /new.
+            if apps_state.get("apps_source") == "appimage":
+                # A fixed, tiny, hand-picked list (appimage_apps.APPS) --
+                # no category/search/pagination concept applies, unlike
+                # Flathub's own real catalog below.
+                apps_hits, apps_total_pages = _appimage_apps_hits(), 1
+            else:
+                requested_page = int(apps_state.get("apps_page") or 1)
+                try:
+                    if apps_state.get("apps_search_q"):
+                        fetch_page = lambda p: flathub_browse.search_apps(apps_state.get("apps_search_q"), p)
+                    else:
+                        fetch_page = lambda p: flathub_browse.search_category(apps_state.get("apps_category"), p)
+                    if requested_page == 1:
+                        apps_hits, apps_total_pages = _apps_hits_page1_with_installed(
+                            fetch_page, standalone_emulators.installed_flathub_app_ids(),
+                        )
+                    else:
+                        apps_hits, apps_total_pages = fetch_page(requested_page)
+                except RuntimeError:
+                    apps_hits, apps_total_pages = [], 1
+            apps_chosen = None
+            apps_candidates = {}
+            apps_matches = []
+            apps_app_id = apps_state.get("apps_app_id")
+            if apps_app_id and apps_state.get("apps_resolved"):
+                # This is the follow-up request the apps_loading branch
+                # above's own meta-refresh chased -- a card click's own
+                # SGDB-only resolve. No real install happens here
+                # anymore: that only ever happens later, at Create-click
+                # time, inside _add_apps_shortcut.
+                # Resolves artwork by the app's real Flathub name, same
+                # _resolve_matches/_fetch_candidates pattern as every
+                # other tab -- except _resolve_matches' own top SGDB
+                # search result isn't trusted blindly the way it is for
+                # RA/Emulators/URL. Those all guess a name from a
+                # filename/URL, so SGDB's own fuzzy ranking genuinely is
+                # the best available signal for which real entry that
+                # maps to. An app's own real Flathub name is already
+                # exact, not a guess -- if SGDB's results include one
+                # that matches it exactly (ignoring its own trailing
+                # "(Program)"-style tag), that's a strictly better pick
+                # than trusting fuzzy ranking to have put it first. Only
+                # applied when nothing's been manually searched
+                # (apps_sgdb_q) -- a real user override should still win
+                # over this.
+                apps_guessed = apps_state.get("apps_app_name") or apps_app_id
+                apps_matches = _resolve_matches(
+                    apps_guessed, service_resolver.Resolved(name=apps_guessed), apps_state.get("apps_sgdb_q"),
+                )
+                if not apps_state.get("apps_sgdb_q"):
+                    exact = next(
+                        (m for m in apps_matches if sgdb.clean_sgdb_name(m["name"]).lower() == apps_guessed.lower()),
+                        None,
+                    )
+                    if exact is not None and exact is not apps_matches[0]:
+                        apps_matches = [exact] + [m for m in apps_matches if m is not exact]
+                # apps_match_index: which of apps_matches the user
+                # actually wants (see _apps_middle_column_html's own
+                # per-item selection) -- clamped, not trusted blindly,
+                # since a stale index from a previous app's own longer
+                # match list could otherwise point past the end of this
+                # one's.
+                apps_match_index = int(apps_state.get("apps_match_index") or 0)
+                apps_match_index = max(0, min(apps_match_index, len(apps_matches) - 1))
+                apps_chosen = apps_matches[apps_match_index]
+                apps_candidates = _fetch_candidates(apps_chosen["id"])
             self._send_html(render_page(
                 ra_state=ra_state, ra_candidates_by_category=ra_candidates, ra_chosen=ra_chosen,
                 em_state=em_state, em_candidates_by_category=em_candidates, em_chosen=em_chosen,
+                apps_state=apps_state, apps_hits=apps_hits, apps_total_pages=apps_total_pages,
+                apps_candidates_by_category=apps_candidates, apps_matches=apps_matches, apps_chosen=apps_chosen,
             ))
+            return
+
+        if parsed.path == "/apps/more":
+            # The Apps tab's own infinite-scroll fetch (see
+            # selfsteamAppsObserveScroll in PAGE_TAIL) -- returns just
+            # the next page's card HTML plus whether there's a page
+            # after that, appended straight into the existing grid
+            # rather than a full /new render+swap the way every other
+            # Apps action goes through. apps_state is only used for
+            # _apps_card_html's own card_link_href, so a fresh parse
+            # from apps_category/apps_page (not the full tab state) is
+            # all this needs.
+            apps_category = (params.get("apps_category") or ["game"])[0]
+            apps_page = int((params.get("apps_page") or ["1"])[0])
+            apps_search_q = (params.get("apps_search_q") or [""])[0]
+            try:
+                if apps_search_q:
+                    apps_hits, apps_total_pages = flathub_browse.search_apps(apps_search_q, apps_page)
+                else:
+                    apps_hits, apps_total_pages = flathub_browse.search_category(apps_category, apps_page)
+            except RuntimeError:
+                apps_hits, apps_total_pages = [], apps_page
+            installed_ids = standalone_emulators.installed_flathub_app_ids()
+            shortcut_app_ids = _apps_shortcut_app_ids()
+            # Installed first, same as the initial page -- see
+            # _apps_tab_panel_html's own comment on why sorted() (a
+            # stable sort, per-page only) is enough here.
+            apps_hits = sorted(apps_hits, key=lambda hit: hit.get("app_id") not in installed_ids)
+            state = {"apps_category": apps_category, "apps_page": str(apps_page), "apps_search_q": apps_search_q}
+            cards_html = "".join(
+                _apps_card_html(hit, state, apps_category, apps_page, installed_ids, shortcut_app_ids=shortcut_app_ids)
+                for hit in apps_hits
+            )
+            self._send_json({"html": cards_html, "has_more": apps_page < apps_total_pages, "next_page": apps_page + 1})
+            return
+
+        if parsed.path == "/apps/search":
+            # The Apps tab's own live-as-you-type search box (see
+            # selfsteamAppsLiveSearch in PAGE_TAIL) -- unlike /apps/more,
+            # this REPLACES the whole grid (a fresh query is a different
+            # result set, not a continuation of the current one), always
+            # page 1. Empty query short-circuits to an empty result
+            # (flathub_browse.search_apps' own contract) rather than a
+            # real request per keystroke on a box someone's still
+            # clearing out.
+            apps_search_q = (params.get("apps_search_q") or [""])[0]
+            installed_ids = standalone_emulators.installed_flathub_app_ids()
+            try:
+                apps_hits, apps_total_pages = _apps_hits_page1_with_installed(
+                    lambda p: flathub_browse.search_apps(apps_search_q, p), installed_ids,
+                )
+            except RuntimeError:
+                apps_hits, apps_total_pages = [], 1
+            shortcut_app_ids = _apps_shortcut_app_ids()
+            apps_hits = sorted(apps_hits, key=lambda hit: hit.get("app_id") not in installed_ids)
+            state = {"apps_category": (params.get("apps_category") or ["game"])[0], "apps_page": "1", "apps_search_q": apps_search_q}
+            cards_html = "".join(
+                _apps_card_html(hit, state, state["apps_category"], 1, installed_ids, shortcut_app_ids=shortcut_app_ids)
+                for hit in apps_hits
+            )
+            self._send_json({
+                "html": cards_html, "has_more": 1 < apps_total_pages, "next_page": 2,
+                "empty": not apps_hits,
+            })
             return
 
         if parsed.path.startswith("/grid-image/"):
@@ -4111,6 +5201,41 @@ class Handler(BaseHTTPRequestHandler):
             self._redirect("/login")
             return
 
+        if parsed.path == "/apps/uninstall":
+            # Fetch-only endpoint (no real navigation/non-JS fallback,
+            # unlike every other route here) -- the Apps tab's own
+            # Remove button just wants a quick "did it work" to flip its
+            # own button locally (see selfsteamAppsUninstall in
+            # PAGE_TAIL), not a full page swap the way Install's own
+            # slow, multi-step flow needs.
+            apps_app_id = (params.get("apps_app_id") or [""])[0]
+            apps_source = (params.get("apps_source") or [""])[0] or "flathub"
+            try:
+                if apps_source == "appimage":
+                    appimage_apps.uninstall(apps_app_id)
+                else:
+                    standalone_emulators.uninstall_flathub_app_id(apps_app_id)
+                # If an Apps-tab shortcut for this exact app already
+                # exists, queue its removal too, same pending_queue.
+                # add_removal mechanism the gallery's own remove flow
+                # uses, so it actually takes a Steam restart rather than
+                # pretending this is instant. Deliberately only
+                # apps_app_id-shaped shortcuts -- same reasoning as
+                # _apps_shortcut_app_ids' own checkmark (see its
+                # docstring): an em_emulator shortcut names one specific
+                # game, not this app itself, so uninstalling e.g.
+                # Dolphin here should never queue removal of an
+                # unrelated Dolphin-launched game's own shortcut.
+                shortcut_removed = False
+                for s in create_webapp.list_gridge_shortcuts():
+                    if s.get("apps_app_id") == apps_app_id:
+                        pending_queue.add_removal(str(s["appid"]), s.get("name", ""), romfile=None)
+                        shortcut_removed = True
+                self._send_json({"ok": True, "shortcut_removed": shortcut_removed})
+            except RuntimeError as e:
+                self._send_json({"ok": False, "error": str(e)}, status=500)
+            return
+
         if parsed.path == "/pending/remove":
             index = int((params.get("index") or ["-1"])[0])
             pending_queue.remove(index)
@@ -4204,6 +5329,11 @@ class Handler(BaseHTTPRequestHandler):
         em_romfile = (params.get("em_romfile") or [""])[0]
         if em_emulator and em_romfile:
             self._add_standalone_emulator_shortcut(params, em_emulator, em_romfile)
+            return
+
+        apps_app_id = (params.get("apps_app_id") or [""])[0]
+        if apps_app_id:
+            self._add_apps_shortcut(params, apps_app_id)
             return
 
         cu_target = (params.get("cu_target") or [""])[0]
@@ -4481,6 +5611,48 @@ class Handler(BaseHTTPRequestHandler):
                 "em_emulator": em_emulator, "em_install_source": em_install_source,
                 "em_rompath": em_rompath, "em_romsource": em_romsource,
             }))
+        except Exception as e:  # noqa: BLE001 -- surfaced to the user, not swallowed
+            self._send_html(render_done(match_name, ok=False, error=e))
+
+    def _add_apps_shortcut(self, params, apps_app_id):
+        # apps_match_name comes straight from the Apps tab's own Name
+        # field live value -- same reasoning as ra_match_name/
+        # em_match_name (see _add_retroarch_shortcut's own comment).
+        match_name = (params.get("apps_match_name") or [""])[0] or apps_app_id
+        try:
+            # The real (possibly slow, first-time-only) install happens
+            # right here -- Create is now clickable purely off resolved
+            # artwork (apps_ready in render_page no longer requires the
+            # app to already be installed), so this is where that
+            # actually gets done, same "install if needed, then proceed"
+            # shape as _add_standalone_emulator_shortcut's own em_ready
+            # branch.
+            apps_source = (params.get("apps_source") or [""])[0] or "flathub"
+            if not _apps_source_installed(apps_source, apps_app_id):
+                _apps_source_install(apps_source, apps_app_id)
+            launch_args = _apps_source_launch_args(apps_source, apps_app_id)
+
+            slug = create_webapp.slugify(match_name)
+            selections = {}
+            # artwork_apps_{basename} -- see _add_retroarch_shortcut's
+            # own comment on the same rename, this being the Apps tab's.
+            for basename, _title, _fetch, _w, _h in ARTWORK_CATEGORIES:
+                selection_url = (params.get(f"artwork_apps_{basename}") or [None])[0]
+                selections[basename] = {"url": selection_url} if selection_url else None
+            asset_paths = create_webapp.download_selected_assets(slug, selections)
+            _queue_edit_rename_cleanup(params, "apps", match_name)
+            pending_queue.add(match_name, None, False, asset_paths, launch_args=launch_args)
+            # Category/page carried forward, same reasoning as
+            # _add_standalone_emulator_shortcut's own em_install_source/
+            # em_rompath carry-forward -- lets someone install several
+            # apps from the same category/page in a row without losing
+            # their place. apps_app_id deliberately NOT carried forward
+            # -- a fresh /new#tab-apps should show the base "pick an
+            # app" state, not immediately re-trigger the artwork/Create
+            # flow for the app that was just queued.
+            apps_category = (params.get("apps_category") or [""])[0]
+            apps_page = (params.get("apps_page") or [""])[0]
+            self._redirect(_apps_url("/new", {"apps_category": apps_category, "apps_page": apps_page, "apps_source": apps_source}))
         except Exception as e:  # noqa: BLE001 -- surfaced to the user, not swallowed
             self._send_html(render_done(match_name, ok=False, error=e))
 

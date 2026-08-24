@@ -39,6 +39,9 @@ import host_exec
 # Public catalog/dispatch API (used by selfsteam_server.py):
 #   by_install_type(install_type) -- emulator names filtered to "flathub" or "binary".
 #   installed(name) / install(name) -- whether/how to install an entry's own app.
+#   flathub_app_id_installed(app_id) / install_flathub_app_id(app_id) -- same, for a bare Flathub app_id not in EMULATORS (the Apps tab).
+#   installed_flathub_app_ids() -- every installed Flatpak app id in one call (the Apps tab's own browse grid, avoids a subprocess per card).
+#   uninstall_flathub_app_id(app_id) -- flatpak uninstall for a bare app_id (the Apps tab's own Remove button).
 #   grant_permissions(name) -- flatpak override for an entry's own permission gap, if any.
 #   launch_args(name, romfile, zrif=None) -- argv for launching name against romfile (zrif only used for a Vita3K .pkg -- see install_vita3k_pkg).
 #   configure_game_dir(name, game_dir) -- registers game_dir as a watched ROM folder, if supported.
@@ -1665,6 +1668,110 @@ def install_binary(name):
     raise RuntimeError(f"{name}: download failed after {_INSTALL_ATTEMPTS} attempts: {last_error}")
 
 
+_INSTALL_TIMEOUT_SECONDS = 300
+
+
+def install_flathub_app_id(app_id):
+    """The actual retry-loop `flatpak install` -- factored out of
+    install() below so a generic Flathub app (not one of the curated
+    EMULATORS entries -- see the Apps tab's flathub_browse.py) can
+    install through the exact same, already-proven mechanism instead
+    of a second copy of this logic.
+
+    Timeout (not just retries) matters here -- confirmed live
+    (2026-08-24, X1): a stalled connection to Flathub's own CDN left
+    `flatpak install` sitting at "Fetching summary index file" forever,
+    genuinely zero bytes/sec (checked via /proc/<pid>/io), not just
+    slow. Without a timeout, subprocess.run waits on that forever too,
+    which is exactly what made the Apps tab's own "Installing…" button
+    (and the whole loading round-trip behind it) look permanently
+    stuck with no error, no retry, nothing -- the retry loop below
+    never even got a chance to run a second attempt."""
+    flatpak = host_exec.which("flatpak")
+    _ensure_flathub_remote(flatpak)
+
+    last_result = None
+    last_error = None
+    for attempt in range(1, _INSTALL_ATTEMPTS + 1):
+        try:
+            # capture_output (not check=True) -- CalledProcessError's
+            # own .stderr is None without this, which is exactly why
+            # the actual flatpak error ("[56] Failure when receiving
+            # data from the peer", "specified remote not found", etc.)
+            # was getting lost behind a useless bare "returned non-zero
+            # exit status 1".
+            last_result = subprocess.run(
+                host_exec.wrap([flatpak, "install", "--user", "-y", "flathub", app_id]),
+                capture_output=True, text=True, timeout=_INSTALL_TIMEOUT_SECONDS,
+            )
+            last_error = None
+        except subprocess.TimeoutExpired:
+            last_result = None
+            last_error = f"timed out after {_INSTALL_TIMEOUT_SECONDS}s (stalled network to Flathub's CDN?)"
+            continue
+        if last_result.returncode == 0:
+            return
+    raise RuntimeError(
+        f"flatpak install failed after {_INSTALL_ATTEMPTS} attempts: "
+        f"{last_error or last_result.stderr.strip() or last_result.stdout.strip()}"
+    )
+
+
+def flathub_app_id_installed(app_id):
+    """Same real `flatpak info` check as installed() above, just for a
+    bare app_id instead of a curated EMULATORS entry -- see
+    install_flathub_app_id's own docstring for why this is split out."""
+    flatpak = host_exec.which("flatpak")
+    if not flatpak:
+        return False
+    result = subprocess.run(
+        host_exec.wrap([flatpak, "info", app_id]),
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    return result.returncode == 0
+
+
+def installed_flathub_app_ids():
+    """Every installed Flatpak app id, in one `flatpak list` call --
+    the Apps tab's own browse grid (flathub_browse.py) needs an
+    installed/not-installed check per card, and a real subprocess spawn
+    (flathub_app_id_installed's own `flatpak info`) per card on a
+    24-app page would be 24 round trips through host_exec.wrap just to
+    render one page. Empty set (not an exception) if flatpak isn't
+    available at all -- same "just render as if nothing's installed"
+    fallback flathub_app_id_installed's own `if not flatpak` branch
+    already uses."""
+    flatpak = host_exec.which("flatpak")
+    if not flatpak:
+        return set()
+    result = subprocess.run(
+        host_exec.wrap([flatpak, "list", "--app", "--columns=application"]),
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        return set()
+    return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+
+
+def uninstall_flathub_app_id(app_id):
+    """`flatpak uninstall` for a bare app_id -- the Apps tab's own
+    Remove button. No retry loop the way install_flathub_app_id has
+    one: uninstall doesn't hit the network at all (nothing to download,
+    nothing to retry after a transient blip), so a real failure here is
+    a real, immediate problem (e.g. another app still depends on a
+    shared runtime it's part of) worth surfacing as-is rather than
+    silently retried."""
+    flatpak = host_exec.which("flatpak")
+    if not flatpak:
+        raise RuntimeError("flatpak isn't available on this host")
+    result = subprocess.run(
+        host_exec.wrap([flatpak, "uninstall", "--user", "-y", app_id]),
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"flatpak uninstall failed: {result.stderr.strip() or result.stdout.strip()}")
+
+
 def install(name):
     entry = EMULATORS.get(name)
     if not entry:
@@ -1674,26 +1781,7 @@ def install(name):
         return
     if entry["install_type"] != "flathub":
         raise NotImplementedError(f"install_type {entry['install_type']!r} not implemented yet")
-    flatpak = host_exec.which("flatpak")
-    _ensure_flathub_remote(flatpak)
-
-    last_result = None
-    for attempt in range(1, _INSTALL_ATTEMPTS + 1):
-        # capture_output (not check=True) -- CalledProcessError's own
-        # .stderr is None without this, which is exactly why the actual
-        # flatpak error ("[56] Failure when receiving data from the
-        # peer", "specified remote not found", etc.) was getting lost
-        # behind a useless bare "returned non-zero exit status 1".
-        last_result = subprocess.run(
-            host_exec.wrap([flatpak, "install", "--user", "-y", "flathub", entry["app_id"]]),
-            capture_output=True, text=True,
-        )
-        if last_result.returncode == 0:
-            return
-    raise RuntimeError(
-        f"flatpak install failed after {_INSTALL_ATTEMPTS} attempts: "
-        f"{last_result.stderr.strip() or last_result.stdout.strip()}"
-    )
+    install_flathub_app_id(entry["app_id"])
 
 
 def grant_permissions(name):

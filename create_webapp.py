@@ -19,6 +19,7 @@ import host_exec
 import retroarch_cores
 import sgdb_client as sgdb
 import shortcuts_vdf
+import appimage_apps
 import standalone_emulators
 import steam_paths
 
@@ -619,6 +620,34 @@ def _extract_standalone_emulator_info(launch_options):
     return None, None
 
 
+def _extract_apps_info(launch_options):
+    """Pulls (app_id, source) back out of an Apps-tab shortcut's own
+    LaunchOptions -- two shapes, matching the Apps tab's own two
+    sources (see selfsteam_server.py's _apps_source_launch_args):
+    "<flatpak> run <app_id>" for a real Flathub app_id (same shape
+    _extract_standalone_emulator_info reverses for a curated EMULATORS
+    entry -- see its own docstring on the real absolute-path-vs-bare-
+    "flatpak" gotcha -- but for an *uncurated* app_id instead), or a
+    bare AppImage path matching one of appimage_apps.APPS' own
+    binary_path()s. Neither ever has extra argv after it the way an
+    emulator's own args() does (no romfile to also recover here).
+    Checked only after _extract_standalone_emulator_info's own
+    EMULATORS match fails (see list_gridge_shortcuts' call order) so a
+    real curated emulator's shortcut is never double-claimed as a
+    generic Apps one instead. Returns (None, None) for anything else."""
+    try:
+        tokens = shlex.split(launch_options)
+    except ValueError:
+        return None, None
+    if len(tokens) == 3 and os.path.basename(tokens[0]) == "flatpak" and tokens[1] == "run":
+        return tokens[2], "flathub"
+    if len(tokens) == 1:
+        for app_id in appimage_apps.APPS:
+            if appimage_apps.binary_path(app_id) == tokens[0]:
+                return app_id, "appimage"
+    return None, None
+
+
 def find_grid_image_path(grid_dir, appid):
     """The vertical-grid image file for `appid` in `grid_dir`, whatever
     its extension actually is (SGDB candidates can be .png/.jpg/.webp) --
@@ -690,13 +719,15 @@ def list_gridge_shortcuts():
     live (2026-08-21) that filtering to only recognized-wrapper
     shortcuts hid entries a user reasonably expects to see and manage
     from here. Returns dicts with appid/name/url/ra_console/ra_romfile/
-    em_emulator/em_romfile/user_id/managed -- ra_console/ra_romfile are
-    None for anything but a RetroArch shortcut (see
+    em_emulator/em_romfile/apps_app_id/user_id/managed -- ra_console/
+    ra_romfile are None for anything but a RetroArch shortcut (see
     _extract_retroarch_info), em_emulator/em_romfile are None for
     anything but a standalone-emulator shortcut (see
-    _extract_standalone_emulator_info), url is None when LaunchOptions
-    doesn't look like a browser launch at all -- all of which
-    _poster_card_html already renders a sane generic card/edit-link
+    _extract_standalone_emulator_info), apps_app_id is None for
+    anything but an Apps-tab shortcut (see _extract_apps_info), url is
+    None when LaunchOptions doesn't look like a browser launch at all --
+    all of which _poster_card_html already renders a sane generic
+    card/edit-link
     for. managed is True only for shortcuts is_gridge_launch_wrapper
     recognizes; foreign entries still list and can be edited/removed,
     editing one just adopts it as a SelfSteam-managed shortcut going
@@ -720,6 +751,12 @@ def list_gridge_shortcuts():
             launch_options = _field(entry, "LaunchOptions", "launchoptions") or ""
             ra_console, ra_romfile = _extract_retroarch_info(launch_options)
             em_emulator, em_romfile = _extract_standalone_emulator_info(launch_options)
+            # Only checked once em_emulator's own curated-EMULATORS match
+            # fails -- see _extract_apps_info's own docstring on why
+            # that's the right order (a real emulator shortcut should
+            # never fall through and get double-claimed as a generic
+            # Apps one instead).
+            apps_app_id, apps_source = _extract_apps_info(launch_options) if em_emulator is None else (None, None)
             results.append({
                 "appid": _field(entry, "appid", "AppID"),
                 "name": _field(entry, "appname", "AppName") or "",
@@ -728,6 +765,8 @@ def list_gridge_shortcuts():
                 "ra_romfile": ra_romfile,
                 "em_emulator": em_emulator,
                 "em_romfile": em_romfile,
+                "apps_app_id": apps_app_id,
+                "apps_source": apps_source,
                 "user_id": uid,
                 "managed": is_gridge_launch_wrapper(exe),
                 # Raw fields, used to pre-fill /custom's Target/Start In/
