@@ -26,6 +26,19 @@
   </categories>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="0.1.11" date="2026-08-25">
+      <description>
+        <ul>
+          <li>Add an Apps tab: browse Flathub's real catalog (by category or search), or a small curated AppImage list, pick SteamGridDB artwork, and create a Steam shortcut -- installing the app itself happens automatically when Create is clicked</li>
+          <li>Show a checkmark next to any app that already has a Steam shortcut, and an external-link icon to its Flathub/homepage page</li>
+          <li>Removing an app that already has a Steam shortcut now also queues that shortcut's removal, applied on the next "Save changes and restart Steam" like every other queued change</li>
+          <li>Editing an Apps-tab-created shortcut now returns to the Apps tab with that app pre-selected and highlighted, instead of falling back to the URL tab</li>
+          <li>Fix the Apps tab's own "already installed" section only reflecting whichever page had been scrolled to so far, instead of showing what's actually installed right away</li>
+          <li>Add a back button to the shortcut-removal confirmation page, matching every other page</li>
+          <li>Fix dropdown menus missing their arrow indicator everywhere on the page</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.10" date="2026-08-23">
       <description>
         <ul>
