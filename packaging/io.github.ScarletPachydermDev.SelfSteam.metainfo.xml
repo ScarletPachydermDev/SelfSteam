@@ -26,6 +26,17 @@
   </categories>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="0.1.15" date="2026-08-25">
+      <description>
+        <ul>
+          <li>Auto-restart into a newer version after a flatpak update -- previously the running server kept serving the old code until manually restarted</li>
+          <li>Fix RPCS3 firmware installs hanging forever -- RPCS3 keeps its main window open indefinitely after a real install finishes rather than exiting, so completion is now detected by its own "Success!" confirmation instead of waiting for the process to exit</li>
+          <li>Fully automate RPCS3's first-time firmware setup (its "Welcome" wizard and install confirmation) -- a fresh install now completes with no controller, keyboard, or mouse interaction needed</li>
+          <li>Show the real original filename for already-installed BIOS/firmware/keys (RPCS3, Vita3K, Cemu) instead of a synthetic description</li>
+          <li>Fix the pairing-code screen's title sitting an inconsistent distance from the code depending on screen resolution</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.14" date="2026-08-25">
       <description>
         <ul>
