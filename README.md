@@ -11,7 +11,7 @@ A headless companion, a small web UI for adding Steam shortcuts (with SteamGridD
 
 - [x] Add streaming or any websites as a Steam shortcut
 - [x] Retrieve game or app artwork from [SteamGridDB](https://www.steamgriddb.com/) vast community database (you'll need to provide your own API key)
-- [ ] Install other game launchers and apps
+- [x] Install other game launchers and apps
 - [x] Upload retro games roms and SS will take care of looking for artwork and adding Steam shortcut
 - [x] Upload .isos, keys and firmware files from SS to add more modern console games.
 - [x] Add/edit your non Steam shortcuts
@@ -23,7 +23,7 @@ A headless companion, a small web UI for adding Steam shortcuts (with SteamGridD
 ## To be done
 - [ ] App icon
 - [ ] Test all emulators, around 80% of them only have been tested.
-- [ ] Add other game launchers + utilities
+- [x] Add other game launchers + utilities
 - [ ] More testing and polishing
 - [ ] Marry [preflight](https://github.com/ScarletPachydermDev/Preflight) to this project to avoid controller layout issues in emulators (if viable)
 
