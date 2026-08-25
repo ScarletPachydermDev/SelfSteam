@@ -165,7 +165,7 @@ def launch_foregrounded(argv, window_title, display=":0"):
     return proc, prior_value
 
 
-def launch_foregrounded_and_wait(argv, window_title, display=":0"):
+def launch_foregrounded_and_wait(argv, window_titles, display=":0"):
     """Same foregrounding as launch_foregrounded above, for a caller
     that needs the opposite launch/lifecycle shape: argv is launched
     exactly as given (the caller does its own host_exec.wrap if it
@@ -186,11 +186,85 @@ def launch_foregrounded_and_wait(argv, window_title, display=":0"):
     without this, a firmware install looked identically stuck to a
     real hang from the web UI's own perspective (a blocking request
     forever waiting on a dialog nobody could see or click), even
-    though the process itself was working fine underneath."""
+    though the process itself was working fine underneath.
+
+    window_titles is a str or an ordered list of them -- confirmed live
+    (2026-08-25, same day) that a single title wasn't enough: once
+    "Welcome to RPCS3" closes, RPCS3 opens a *second*, different window
+    ("RPCS3 Firmware Installer") to actually do the install, which the
+    first version of this function never looked for again after its
+    one-time startup check, leaving it just as invisible as the bug
+    this function was written to fix in the first place. Polls in a
+    loop instead of a single check-at-startup: each pass tries every
+    title in order and foregrounds whichever one is currently open
+    (skipping the xprop calls entirely if it's already the foregrounded
+    one), so a later window in the sequence gets the same treatment the
+    moment it actually appears, however many of them there turn out to
+    be. Only the *first* real foreground's own prior_value is kept
+    (subsequent ones would just be this function's own previous
+    override, not the true original state), so restore() at the end
+    always returns to whatever was actually foregrounded before any of
+    this started, not to a stale intermediate step of it."""
+    if isinstance(window_titles, str):
+        window_titles = [window_titles]
     proc = subprocess.Popen(argv, start_new_session=True)
-    win_id = _find_window_by_title(display, window_title)
-    prior_value = foreground(win_id, display) if win_id is not None else None
-    proc.wait()
+    prior_value = _foreground_while(window_titles, lambda: proc.poll() is not None, display)
     if prior_value is not None:
         restore(prior_value, display)
     return proc.returncode
+
+
+def _foreground_while(window_titles, is_done, display):
+    """Shared polling core for launch_foregrounded_and_wait above and
+    launch_foregrounded_until below -- foregrounds whichever of
+    window_titles is currently open (re-checked every pass, so a later
+    window in the sequence gets foregrounded the moment it actually
+    appears, not just whatever was open at the very start), until
+    is_done() returns true. Returns whatever prior_value should
+    eventually be passed to restore() (None if nothing was ever
+    actually foregrounded)."""
+    prior_value = None
+    foregrounded_win_id = None
+    while not is_done():
+        found = False
+        for title in window_titles:
+            win_id = _find_window_by_title(display, title)
+            if win_id is None:
+                continue
+            found = True
+            if win_id != foregrounded_win_id:
+                captured = foreground(win_id, display)
+                if prior_value is None:
+                    prior_value = captured
+                foregrounded_win_id = win_id
+            break
+        if not found:
+            time.sleep(0.5)
+    return prior_value
+
+
+def launch_foregrounded_until(argv, window_titles, is_done, display=":0"):
+    """Like launch_foregrounded_and_wait above, but for a process that
+    doesn't reliably exit on its own once its real job is finished --
+    confirmed live (2026-08-25, both on X1 and a real Steam Machine):
+    RPCS3 keeps its full main window open indefinitely after a
+    firmware install completes, rather than quitting the way
+    --installfw's own blocking-call assumption expected, so waiting on
+    the process's own exit code (launch_foregrounded_and_wait's own
+    contract) just hangs forever with nothing left for anyone to
+    click. Polls is_done() (a zero-arg callable -- e.g. "has the real
+    firmware file this install writes actually appeared on disk")
+    instead, and returns the still-running Popen once it's satisfied,
+    so the caller can decide how to actually end the process for real
+    -- a plain terminate() on this outer wrapper doesn't reliably tear
+    down a Flatpak's real sandboxed process any more than it did for
+    this app's own self-restart (see selfsteam_server.py's own
+    _watch_for_update_and_restart, which uses a real `flatpak kill`
+    instead for exactly this reason)."""
+    if isinstance(window_titles, str):
+        window_titles = [window_titles]
+    proc = subprocess.Popen(argv, start_new_session=True)
+    prior_value = _foreground_while(window_titles, lambda: is_done() or proc.poll() is not None, display)
+    if prior_value is not None:
+        restore(prior_value, display)
+    return proc

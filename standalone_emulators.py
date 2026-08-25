@@ -26,6 +26,7 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+import time
 import urllib.error
 import urllib.request
 import uuid
@@ -823,12 +824,22 @@ def rpcs3_firmware_installed(entry, slot_prefix):
     return f"firmware {version}" if version else "firmware installed"
 
 
-# RPCS3's own fixed window title for this dialog -- confirmed live
-# (2026-08-25), not documented anywhere in its own source/docs, so this
-# could in principle drift if a future RPCS3 release renames it (the
-# foregrounding below would then just silently no-op, same as any other
-# "window not found" case -- not fatal, just back to invisible).
-_RPCS3_INSTALLFW_WINDOW_TITLE = "Welcome to RPCS3"
+# RPCS3's own fixed window titles for this whole flow, in the order
+# they actually appear -- confirmed live (2026-08-25), not documented
+# anywhere in its own source/docs, so these could in principle drift if
+# a future RPCS3 release renames any of them (the foregrounding below
+# would then just silently no-op for that step, same as any other
+# "window not found" case -- not fatal, just back to invisible). Three
+# separate windows, not one: "Welcome to RPCS3" is its first-run wizard
+# (Quickstart guide/Show at startup checkboxes, Continue); once that's
+# dismissed, "RPCS3 Firmware Installer" actually runs the install; once
+# that finishes, a third, much smaller "Success!" window confirms it.
+# Each one was a real, separate gap from the previous ones' own
+# foregrounding fix -- a single one-time check at launch never looked
+# for anything past whatever it first found, leaving every later window
+# in the sequence just as invisible as the very first bug this was
+# written to fix.
+_RPCS3_INSTALLFW_WINDOW_TITLES = ["Welcome to RPCS3", "RPCS3 Firmware Installer", "Success!"]
 
 
 def install_rpcs3_firmware(entry, slot_prefix, file_path):
@@ -840,26 +851,46 @@ def install_rpcs3_firmware(entry, slot_prefix, file_path):
     it) -- run for real here rather than reimplementing PUP decryption
     ourselves. Real caveat, not swept under the rug: --installfw can't
     run in --no-gui mode (confirmed via source: report_fatal_error
-    otherwise), so this genuinely pops up RPCS3's own install dialog
-    rather than staying silent, and this call blocks until that
-    process exits (the user closing/finishing the dialog) rather than
-    us polling for completion some other way.
+    otherwise), so this genuinely pops up RPCS3's own install dialogs
+    rather than staying silent.
 
-    On a gamescope session, that dialog is foregrounded the same way
-    auth_display.py's own pairing screen is (gamescope never auto-
-    focuses a new X11 client the way a normal WM would) -- confirmed
-    live as a real, separate bug from the auth screen's own crash: the
-    dialog ("Welcome to RPCS3") opened and genuinely sat there waiting
-    for a click, just invisible behind Steam's own UI, which from the
-    web UI's own perspective looked identical to the install being
-    stuck forever. Plain desktop sessions skip this (a real WM already
-    handles focus) and just block on the process directly."""
+    Completion is detected by polling for the real firmware version
+    file this exact install writes (rpcs3_firmware_installed), not by
+    waiting for the process to exit on its own -- confirmed live
+    (2026-08-25, both on X1 and a real Steam Machine) that RPCS3 keeps
+    its full main window open indefinitely once a firmware install
+    actually finishes, rather than quitting, so the previous "block
+    until the process exits" approach just hung forever with nothing
+    left on screen for anyone to click. RPCS3 is killed outright
+    (flatpak kill, not a plain terminate() -- see
+    gamescope_splash.launch_foregrounded_until's own docstring on why)
+    once firmware is confirmed installed, since there's nothing left
+    for it to do and leaving it running only blocks whatever queued
+    behind this call (the actual shortcut creation).
+
+    On a gamescope session, each dialog in the install flow
+    ("Welcome to RPCS3", then "RPCS3 Firmware Installer", then
+    "Success!") is foregrounded the same way auth_display.py's own
+    pairing screen is (gamescope never auto-focuses a new X11 client
+    the way a normal WM would) -- confirmed live as a real, separate
+    bug from the auth screen's own crash: each one opened and
+    genuinely sat there waiting for a click, just invisible behind
+    Steam's own UI, which from the web UI's own perspective looked
+    identical to the install being stuck forever (see
+    _RPCS3_INSTALLFW_WINDOW_TITLES' own comment). Plain desktop
+    sessions skip the foregrounding (a real WM already handles focus)
+    but still poll for the same completion condition."""
     flatpak = host_exec.which("flatpak")
     argv = host_exec.wrap([flatpak, "run", entry["app_id"], "--installfw", file_path])
+    is_done = lambda: rpcs3_firmware_installed(entry, slot_prefix) is not None
     if steamos_session.is_gamescope_session():
-        gamescope_splash.launch_foregrounded_and_wait(argv, _RPCS3_INSTALLFW_WINDOW_TITLE)
+        proc = gamescope_splash.launch_foregrounded_until(argv, _RPCS3_INSTALLFW_WINDOW_TITLES, is_done)
     else:
-        subprocess.run(argv)
+        proc = subprocess.Popen(argv)
+        while not is_done() and proc.poll() is None:
+            time.sleep(1)
+    if proc.poll() is None:
+        subprocess.run(host_exec.wrap(["flatpak", "kill", entry["app_id"]]))
 
 
 def _xenia_canary_args(romfile):
