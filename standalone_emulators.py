@@ -840,6 +840,31 @@ def rpcs3_firmware_installed(entry, slot_prefix):
 # in the sequence just as invisible as the very first bug this was
 # written to fix.
 _RPCS3_INSTALLFW_WINDOW_TITLES = ["Welcome to RPCS3", "RPCS3 Firmware Installer", "Success!"]
+_RPCS3_SUCCESS_WINDOW_TITLE = "Success!"
+
+# Fully automates both real dialogs in the flow (nothing needs sending
+# to "Success!" -- its mere appearance is the completion signal
+# is_done already watches for) -- confirmed live (2026-08-25) on a
+# real Steam Machine, both individually and back-to-back start to
+# finish:
+#   "Welcome to RPCS3": real gamepad button presses did nothing at all
+#     on this window (gamescope apparently doesn't route them to
+#     whatever it considers "active" the way it does for keyboard
+#     input here), but this exact Tab/Space sequence reliably dismisses
+#     it -- its own checkboxes already default to the wanted state
+#     ("I have read the Quickstart guide" checked, "Show at startup"
+#     unchecked), so nothing needs toggling, just landing on and
+#     activating "Continue". Window closes partway through once that
+#     fires -- see send_keys' own docstring on why the remaining
+#     harmless X errors from that are expected, not a bug.
+#   "RPCS3 Firmware Installer": alt+y is Qt's own standard accelerator
+#     for a message box's "Yes" button -- confirmed instant.
+_RPCS3_INSTALLFW_AUTO_KEYS = {
+    "Welcome to RPCS3": [
+        "Tab", "Tab", "Tab", "Tab", "space", "Tab", "space", "Tab", "Tab", "Tab", "Tab", "space",
+    ],
+    "RPCS3 Firmware Installer": ["alt+y"],
+}
 
 
 def install_rpcs3_firmware(entry, slot_prefix, file_path):
@@ -854,19 +879,33 @@ def install_rpcs3_firmware(entry, slot_prefix, file_path):
     otherwise), so this genuinely pops up RPCS3's own install dialogs
     rather than staying silent.
 
-    Completion is detected by polling for the real firmware version
-    file this exact install writes (rpcs3_firmware_installed), not by
-    waiting for the process to exit on its own -- confirmed live
-    (2026-08-25, both on X1 and a real Steam Machine) that RPCS3 keeps
-    its full main window open indefinitely once a firmware install
-    actually finishes, rather than quitting, so the previous "block
-    until the process exits" approach just hung forever with nothing
-    left on screen for anyone to click. RPCS3 is killed outright
-    (flatpak kill, not a plain terminate() -- see
-    gamescope_splash.launch_foregrounded_until's own docstring on why)
-    once firmware is confirmed installed, since there's nothing left
-    for it to do and leaving it running only blocks whatever queued
-    behind this call (the actual shortcut creation).
+    Completion is detected by the "Success!" window actually appearing
+    on screen, NOT by polling for the real firmware version file this
+    same install writes (rpcs3_firmware_installed) -- confirmed live
+    (2026-08-25, real Steam Machine) that this file gets written
+    *before* all of the firmware's actual content finishes extracting,
+    so an earlier version of this function that treated the file's
+    mere existence as "done" and killed RPCS3 right then left a real,
+    genuinely invalid, partially-installed firmware behind (RPCS3's own
+    log: "PS3 firmware is not installed or the installed firmware is
+    invalid" on the very next game launch, despite the version file
+    being right there). "Success!" is RPCS3's own explicit, final
+    confirmation that the whole install actually finished -- killing it
+    the moment that appears (not waiting for it to be dismissed) is
+    safe precisely because RPCS3 itself doesn't show it until there's
+    nothing left to do.
+
+    Also not just waiting for the process to exit on its own -- RPCS3
+    keeps its full main window open indefinitely once a firmware
+    install finishes, rather than quitting, so that approach hung
+    forever with nothing left for anyone to click even once the
+    install had genuinely (and, before this fix, sometimes only
+    partially) succeeded. RPCS3 is killed outright (flatpak kill, not
+    a plain terminate() -- see gamescope_splash.
+    launch_foregrounded_until's own docstring on why) once "Success!"
+    is seen, since there's nothing left for it to do and leaving it
+    running only blocks whatever queued behind this call (the actual
+    shortcut creation).
 
     On a gamescope session, each dialog in the install flow
     ("Welcome to RPCS3", then "RPCS3 Firmware Installer", then
@@ -877,14 +916,21 @@ def install_rpcs3_firmware(entry, slot_prefix, file_path):
     genuinely sat there waiting for a click, just invisible behind
     Steam's own UI, which from the web UI's own perspective looked
     identical to the install being stuck forever (see
-    _RPCS3_INSTALLFW_WINDOW_TITLES' own comment). Plain desktop
-    sessions skip the foregrounding (a real WM already handles focus)
-    but still poll for the same completion condition."""
+    _RPCS3_INSTALLFW_WINDOW_TITLES' own comment). The first two are
+    then fully automated too (see _RPCS3_INSTALLFW_AUTO_KEYS' own
+    comment) -- confirmed live nobody needs to touch a controller,
+    keyboard, or mouse at all for a fresh RPCS3 firmware install to go
+    from launch to a real, valid, fully-extracted firmware on disk.
+    Plain desktop sessions skip both the foregrounding (a real WM
+    already handles focus) and the auto-keys (a human can just click
+    normally there) but still poll for the same completion condition."""
     flatpak = host_exec.which("flatpak")
     argv = host_exec.wrap([flatpak, "run", entry["app_id"], "--installfw", file_path])
-    is_done = lambda: rpcs3_firmware_installed(entry, slot_prefix) is not None
+    is_done = lambda: gamescope_splash.window_exists(_RPCS3_SUCCESS_WINDOW_TITLE)
     if steamos_session.is_gamescope_session():
-        proc = gamescope_splash.launch_foregrounded_until(argv, _RPCS3_INSTALLFW_WINDOW_TITLES, is_done)
+        proc = gamescope_splash.launch_foregrounded_until(
+            argv, _RPCS3_INSTALLFW_WINDOW_TITLES, is_done, auto_keys=_RPCS3_INSTALLFW_AUTO_KEYS,
+        )
     else:
         proc = subprocess.Popen(argv)
         while not is_done() and proc.poll() is None:

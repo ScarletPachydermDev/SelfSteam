@@ -102,6 +102,63 @@ def _find_window_by_title(display, title):
     return None
 
 
+def window_exists(title, display=":0"):
+    """Single, non-retrying "is this window open right now" check --
+    unlike _find_window_by_title's own 20x/4s retry loop (built for
+    "wait for a window that's about to appear"), this is for a caller
+    that's already polling in its own outer loop and just wants one
+    cheap answer per pass, e.g. using a specific window's appearance as
+    a real completion signal (see standalone_emulators.
+    install_rpcs3_firmware's own "Success!" check -- confirmed live
+    that a firmware install's own version file gets written before all
+    of its actual content finishes extracting, so treating the file's
+    mere existence as "done" and killing the process right then left a
+    real, invalid, partially-installed firmware behind)."""
+    needle = f'"{title}"'
+    result = _run(["xwininfo", "-display", display, "-root", "-tree"])
+    return any(_WINDOW_RE.match(line) and needle in line for line in result.stdout.splitlines())
+
+
+def send_keys(win_id, keys, display=":0", delay_ms=200):
+    """Sends a sequence of real key presses to win_id via xdotool --
+    used to fully automate a dialog whose interaction sequence is
+    already known (see standalone_emulators.install_rpcs3_firmware's
+    own use: a Tab/Space sequence that dismisses RPCS3's "Welcome"
+    wizard, whose checkboxes already default to the wanted state).
+    Confirmed live (2026-08-25) this genuinely works, even though real
+    gamepad button presses on that exact same window did nothing at
+    all -- gamescope apparently routes synthetic/real keyboard input
+    to a window that isn't the compositor's own "active" one (the
+    thing windowactivate/_NET_ACTIVE_WINDOW would normally control, and
+    which gamescope doesn't support -- confirmed live it errors out)
+    differently than it routes gamepad button events.
+
+    xdotool needs DISPLAY as a real environment variable, not a CLI
+    flag the way xprop/xwininfo elsewhere in this file take it --
+    host_exec.wrap_with_env's own --env= forwarding covers the
+    sandboxed case, but doesn't touch the local environment at all
+    when unsandboxed (dev-test), since its whole job there is a no-op
+    passthrough -- confirmed live (2026-08-25) that this genuinely
+    breaks when the *calling* process itself has no DISPLAY set (e.g.
+    a one-off debug script run over a plain SSH session), unlike the
+    real long-running dev-test server, which always has it. Setting
+    env explicitly here for both cases, rather than trusting either
+    branch's own ambient environment, is what actually makes this
+    reliable regardless of how the caller itself was started.
+
+    delay_ms between each key is required, not just polite -- confirmed
+    live that the target window can close partway through a sequence
+    (its own real default button activating, same as a human finishing
+    it early), and firing the rest with no gap between them all landed
+    after it was already gone, each throwing its own harmless but
+    noisy BadWindow X error."""
+    argv = ["xdotool", "key", "--window", win_id, "--delay", str(delay_ms), *keys]
+    if host_exec.IN_FLATPAK:
+        subprocess.run(host_exec.wrap_with_env(argv, {"DISPLAY": display}), capture_output=True)
+    else:
+        subprocess.run(argv, capture_output=True, env={**os.environ, "DISPLAY": display})
+
+
 def foreground(win_id, display=":0"):
     """Mark win_id as gamescope's foreground base layer."""
     _run(["xprop", "-display", display, "-id", win_id, "-f", "STEAM_GAME", "32c", "-set", "STEAM_GAME", "1"])
@@ -214,7 +271,7 @@ def launch_foregrounded_and_wait(argv, window_titles, display=":0"):
     return proc.returncode
 
 
-def _foreground_while(window_titles, is_done, display):
+def _foreground_while(window_titles, is_done, display, auto_keys=None):
     """Shared polling core for launch_foregrounded_and_wait above and
     launch_foregrounded_until below -- foregrounds whichever of
     window_titles is currently open (re-checked every pass, so a later
@@ -222,7 +279,15 @@ def _foreground_while(window_titles, is_done, display):
     appears, not just whatever was open at the very start), until
     is_done() returns true. Returns whatever prior_value should
     eventually be passed to restore() (None if nothing was ever
-    actually foregrounded)."""
+    actually foregrounded).
+
+    auto_keys is an optional {title: [keys...]} -- the moment a window
+    matching one of its titles is newly foregrounded (not on every
+    poll pass, just the first time), send_keys() fires that exact
+    sequence at it, so a dialog with an already-known interaction
+    (e.g. RPCS3's own "Welcome" wizard -- see
+    standalone_emulators.install_rpcs3_firmware) needs nobody to
+    physically touch it at all."""
     prior_value = None
     foregrounded_win_id = None
     while not is_done():
@@ -237,13 +302,15 @@ def _foreground_while(window_titles, is_done, display):
                 if prior_value is None:
                     prior_value = captured
                 foregrounded_win_id = win_id
+                if auto_keys and title in auto_keys:
+                    send_keys(win_id, auto_keys[title], display)
             break
         if not found:
             time.sleep(0.5)
     return prior_value
 
 
-def launch_foregrounded_until(argv, window_titles, is_done, display=":0"):
+def launch_foregrounded_until(argv, window_titles, is_done, display=":0", auto_keys=None):
     """Like launch_foregrounded_and_wait above, but for a process that
     doesn't reliably exit on its own once its real job is finished --
     confirmed live (2026-08-25, both on X1 and a real Steam Machine):
@@ -260,11 +327,17 @@ def launch_foregrounded_until(argv, window_titles, is_done, display=":0"):
     down a Flatpak's real sandboxed process any more than it did for
     this app's own self-restart (see selfsteam_server.py's own
     _watch_for_update_and_restart, which uses a real `flatpak kill`
-    instead for exactly this reason)."""
+    instead for exactly this reason).
+
+    auto_keys -- see _foreground_while's own docstring -- is what lets
+    install_rpcs3_firmware fully automate its own known dialogs
+    instead of needing someone to physically click through them."""
     if isinstance(window_titles, str):
         window_titles = [window_titles]
     proc = subprocess.Popen(argv, start_new_session=True)
-    prior_value = _foreground_while(window_titles, lambda: is_done() or proc.poll() is not None, display)
+    prior_value = _foreground_while(
+        window_titles, lambda: is_done() or proc.poll() is not None, display, auto_keys,
+    )
     if prior_value is not None:
         restore(prior_value, display)
     return proc
