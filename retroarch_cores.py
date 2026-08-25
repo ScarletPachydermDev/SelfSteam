@@ -39,70 +39,134 @@ _FLATHUB_REPO_URL = "https://flathub.org/repo/flathub.flatpakrepo"
 #   bios_installed(console) -- real on-disk check for that console's required BIOS file(s).
 #   install_bios(console, file_path) -- copies a picked BIOS file into RetroArch's system dir.
 #   launch_args(console, romfile) -- argv for launching console's core against romfile.
+#   default_label_for_group(group) -- the full "<group> - <core>" label for group's own recommended core.
 
 # (console group, libretro core name, needs BIOS, core's own real display
-# name). Wider than the original 7-console starter list, but still a
-# curated pick -- one or more cores per mainstream system RetroArch/
-# libretro actually ships a real, currently-published core build for
-# (every entry below confirmed against buildbot.libretro.com/nightly/
-# linux/x86_64/latest/ for the .so.zip itself, and against libretro's own
-# libretro-core-info repo for its corename field, not guessed), not the
-# full ~150-entry libretro catalog (which includes homebrew/fantasy-
-# console/engine-port cores this picker has no reason to list). BIOS
-# flags are best-effort based on each core/system's own documented
-# requirements, not individually live-tested the way PS1/mGBA were.
+# name, is_default). Wider than the original 7-console starter list, but
+# still a curated pick -- one or more cores per mainstream system
+# RetroArch/libretro actually ships a real, currently-published core
+# build for (every entry below confirmed against buildbot.libretro.com/
+# nightly/linux/x86_64/latest/ for the .so.zip itself, and against
+# libretro's own libretro-core-info repo for its corename field, not
+# guessed), not the full ~200-entry libretro catalog (which includes
+# homebrew/fantasy-console/engine-port cores this picker has no reason to
+# list). BIOS flags are best-effort based on each core/system's own
+# documented requirements, not individually live-tested the way PS1/mGBA
+# were.
 #
-# More than one core per console group is deliberate (N64 currently has
-# two) -- every core actually available gets its own picker entry rather
+# More than one core per console group is deliberate and, as of
+# 2026-08-25, the norm rather than the exception (most groups below have
+# 2-3) -- every core actually available gets its own picker entry rather
 # than this module picking a single "best" one on the user's behalf, so
 # the group name alone is NOT a unique identifier; the picker shows (and
 # state stores) "<group> - <corename>" as the real unique value instead.
+# Exactly one entry per group is marked is_default=True -- the Emulators
+# tab's own two-dropdown picker (console, then that console's own cores)
+# pre-selects it the moment a console is chosen, based on general
+# community consensus for "most accurate/most recommended" at the time
+# this list was put together (RetroHandheldHQ's own core-recommendation
+# guide, cross-checked against libretro-core-info), not a hard rule --
+# any entry in the same group can still be picked instead.
 _CONSOLE_ENTRIES = [
-    ("Atari 2600", "stella", False, "Stella"),
-    ("Atari 7800", "prosystem", True, "ProSystem"),
-    ("Nintendo (NES)", "nestopia", False, "Nestopia"),
+    ("Atari 2600", "stella", False, "Stella", True),
+    ("Atari 7800", "prosystem", True, "ProSystem", True),
+    ("Nintendo (NES)", "nestopia", False, "Nestopia", False),
     # corename confirmed via libretro-core-info's own fceumm_libretro.info
-    # ("FCEUmm") and mesen_libretro.info ("Mesen").
-    ("Nintendo (NES)", "fceumm", False, "FCEUmm"),
-    ("Nintendo (NES)", "mesen", False, "Mesen"),
+    # ("FCEUmm"), mesen_libretro.info ("Mesen"), and quicknes_libretro.info
+    # ("QuickNES").
+    ("Nintendo (NES)", "fceumm", False, "FCEUmm", False),
+    ("Nintendo (NES)", "mesen", False, "Mesen", True),
+    ("Nintendo (NES)", "quicknes", False, "QuickNES", False),
     # Confirmed real and non-experimental via libretro's own core-info
     # entry (citra_libretro.info: is_experimental="false") -- needs
     # decrypted ROMs to function per that same entry's description, not
     # a system-file/BIOS requirement this module's own needs_bios flag
-    # is meant to gate on.
-    ("Nintendo 3DS", "citra", False, "Citra"),
-    ("Super Nintendo", "snes9x", False, "Snes9x"),
+    # is meant to gate on. Azahar is the actively-maintained continuation
+    # of Citra (confirmed via its own azahar_libretro.info: corename
+    # "Azahar", systemname "3DS", same no-BIOS-needed shape) -- the
+    # default here now that Citra's own original team has moved on,
+    # Citra kept as a real alternative for anyone already set up with it.
+    ("Nintendo 3DS", "citra", False, "Citra", False),
+    ("Nintendo 3DS", "azahar", False, "Azahar", True),
+    ("Super Nintendo", "snes9x", False, "Snes9x", False),
     # corename confirmed via libretro-core-info's own bsnes_libretro.info
     # ("bsnes") and mesen-s_libretro.info ("Mesen-S").
-    ("Super Nintendo", "bsnes", False, "bsnes"),
-    ("Super Nintendo", "mesen-s", False, "Mesen-S"),
-    ("Nintendo 64", "mupen64plus_next", False, "Mupen64Plus-Next"),
-    ("Nintendo 64", "parallel_n64", False, "ParaLLEl N64"),
-    ("Game Boy", "gambatte", False, "Gambatte"),
-    ("Game Boy Color", "gambatte", False, "Gambatte"),
-    ("Game Boy Advance", "mgba", False, "mGBA"),
-    ("Nintendo DS", "melonds", False, "melonDS"),
-    ("Sega Master System", "genesis_plus_gx", False, "Genesis Plus GX"),
-    ("Sega Game Gear", "genesis_plus_gx", False, "Genesis Plus GX"),
-    ("Sega Genesis", "genesis_plus_gx", False, "Genesis Plus GX"),
-    ("Sega CD", "genesis_plus_gx", True, "Genesis Plus GX"),
-    ("Sega 32X", "picodrive", True, "PicoDrive"),
-    ("Sega Saturn", "mednafen_saturn", True, "Beetle Saturn"),
-    ("Sega Dreamcast", "flycast", True, "Flycast"),
-    ("PlayStation 1", "pcsx_rearmed", True, "PCSX-ReARMed"),
-    ("PlayStation 2", "pcsx2", True, "LRPS2"),
-    ("PSP", "ppsspp", False, "PPSSPP"),
-    ("TurboGrafx-16 / PC Engine", "mednafen_pce", False, "Beetle PCE"),
-    ("Neo Geo", "fbneo", True, "FinalBurn Neo"),
-    ("Neo Geo Pocket", "mednafen_ngp", False, "Beetle NeoPop"),
-    ("WonderSwan", "mednafen_wswan", False, "Beetle WonderSwan"),
-    ("Atari Lynx", "handy", True, "Handy"),
-    ("ColecoVision", "gearcoleco", True, "Gearcoleco"),
-    ("Intellivision", "freeintv", True, "FreeIntv"),
-    ("Vectrex", "vecx", False, "vecx"),
-    ("MSX", "bluemsx", True, "blueMSX"),
-    ("Commodore Amiga", "puae", True, "PUAE"),
-    ("Commodore 64", "vice_x64sc", False, "VICE x64sc"),
+    ("Super Nintendo", "bsnes", False, "bsnes", True),
+    ("Super Nintendo", "mesen-s", False, "Mesen-S", False),
+    ("Nintendo 64", "mupen64plus_next", False, "Mupen64Plus-Next", True),
+    ("Nintendo 64", "parallel_n64", False, "ParaLLEl N64", False),
+    ("Game Boy", "gambatte", False, "Gambatte", True),
+    ("Game Boy Color", "gambatte", False, "Gambatte", True),
+    # corename confirmed via libretro-core-info's own sameboy_libretro.info
+    # ("SameBoy") -- its two boot ROMs (dmg_boot.bin/cgb_boot.bin) are
+    # listed there as optional, not required, same as Gambatte's own
+    # needs_bios=False.
+    ("Game Boy", "sameboy", False, "SameBoy", False),
+    ("Game Boy Color", "sameboy", False, "SameBoy", False),
+    ("Game Boy Advance", "mgba", False, "mGBA", True),
+    # VBA-M, confirmed real via vbam_libretro.so.zip on the buildbot --
+    # same no-BIOS-needed shape as mGBA (GBA's own boot ROM is optional,
+    # not required, for either core).
+    ("Game Boy Advance", "vbam", False, "VBA-M", False),
+    ("Nintendo DS", "melonds", False, "melonDS", True),
+    # DeSmuME, the long-standing alternative -- real via desmume_libretro.
+    # so.zip on the buildbot.
+    ("Nintendo DS", "desmume", False, "DeSmuME", False),
+    ("Sega Master System", "genesis_plus_gx", False, "Genesis Plus GX", True),
+    ("Sega Game Gear", "genesis_plus_gx", False, "Genesis Plus GX", True),
+    ("Sega Genesis", "genesis_plus_gx", False, "Genesis Plus GX", True),
+    # BlastEm, confirmed real via blastem_libretro.so.zip on the buildbot --
+    # Genesis/Mega Drive specifically, not the wider Master System/Game
+    # Gear scope Genesis Plus GX also covers.
+    ("Sega Genesis", "blastem", False, "BlastEm", False),
+    ("Sega CD", "genesis_plus_gx", True, "Genesis Plus GX", True),
+    ("Sega 32X", "picodrive", True, "PicoDrive", True),
+    ("Sega Saturn", "mednafen_saturn", True, "Beetle Saturn", True),
+    # Kronos, confirmed real via libretro-core-info's own kronos_libretro.
+    # info (corename "Kronos", systemname "Saturn", needs the same
+    # mandatory Saturn BIOS + ST-V BIOS as Beetle Saturn) -- an actively-
+    # developed Yabause fork, kept as an alternative rather than the
+    # default since Beetle Saturn is what this app already shipped with.
+    ("Sega Saturn", "kronos", True, "Kronos", False),
+    ("Sega Dreamcast", "flycast", True, "Flycast", True),
+    ("PlayStation 1", "pcsx_rearmed", True, "PCSX-ReARMed", False),
+    # Beetle PSX HW, confirmed real via libretro-core-info's own
+    # mednafen_psx_hw_libretro.info (corename "Beetle PSX HW", needs one
+    # of the standard scph550x.bin BIOS files) -- the more accuracy-
+    # focused, hardware-accelerated pick, default here over PCSX-ReARMed
+    # (built for ARM/mobile, not this app's own target hardware).
+    # SwanStation, confirmed real via its own swanstation_libretro.info
+    # (corename "SwanStation", same BIOS requirement) -- a modern, fast
+    # alternative.
+    ("PlayStation 1", "mednafen_psx_hw", True, "Beetle PSX HW", True),
+    ("PlayStation 1", "swanstation", True, "SwanStation", False),
+    ("PlayStation 2", "pcsx2", True, "LRPS2", True),
+    ("PSP", "ppsspp", False, "PPSSPP", True),
+    ("TurboGrafx-16 / PC Engine", "mednafen_pce", False, "Beetle PCE", True),
+    # Beetle PCE Fast, confirmed real via mednafen_pce_fast_libretro.so.zip
+    # on the buildbot -- a lighter/faster variant of the same core family.
+    ("TurboGrafx-16 / PC Engine", "mednafen_pce_fast", False, "Beetle PCE Fast", False),
+    ("Neo Geo", "fbneo", True, "FinalBurn Neo", True),
+    ("Neo Geo Pocket", "mednafen_ngp", False, "Beetle NeoPop", True),
+    ("WonderSwan", "mednafen_wswan", False, "Beetle WonderSwan", True),
+    # Beetle Lynx, confirmed real via mednafen_lynx_libretro.so.zip on the
+    # buildbot -- generally considered the more accurate of the two, made
+    # the default here; Handy (already shipped) kept as the lighter
+    # alternative.
+    ("Atari Lynx", "mednafen_lynx", True, "Beetle Lynx", True),
+    ("Atari Lynx", "handy", True, "Handy", False),
+    ("ColecoVision", "gearcoleco", True, "Gearcoleco", True),
+    ("Intellivision", "freeintv", True, "FreeIntv", True),
+    ("Vectrex", "vecx", False, "vecx", True),
+    ("MSX", "bluemsx", True, "blueMSX", True),
+    # fMSX, confirmed real via fmsx_libretro.so.zip on the buildbot.
+    ("MSX", "fmsx", True, "fMSX", False),
+    ("Commodore Amiga", "puae", True, "PUAE", True),
+    ("Commodore 64", "vice_x64sc", False, "VICE x64sc", True),
+    # VICE x64, confirmed real via vice_x64_libretro.so.zip on the
+    # buildbot -- the older, non-cycle-exact (faster, less accurate)
+    # sibling of x64sc.
+    ("Commodore 64", "vice_x64", False, "VICE x64", False),
 ]
 
 # (label, core, needs_bios), sorted alphabetically by the combined
@@ -112,12 +176,45 @@ _CONSOLE_ENTRIES = [
 CONSOLES = sorted(
     (
         (f"{group} - {core_display}", core, needs_bios)
-        for group, core, needs_bios, core_display in _CONSOLE_ENTRIES
+        for group, core, needs_bios, core_display, _is_default in _CONSOLE_ENTRIES
     ),
     key=lambda entry: entry[0].lower(),
 )
 _CORE_FOR_CONSOLE = {label: core for label, core, _ in CONSOLES}
 CONSOLES_NEEDING_BIOS = {label for label, _, needs in CONSOLES if needs}
+
+# Console groups (the RetroArch tab's own first dropdown), sorted --
+# and, per group, its own real cores (the second dropdown, populated
+# once a group is picked) as (core_display, full "<group> - <core>"
+# label, is_default), sorted by core_display. Kept separate from
+# CONSOLES above (which stays the flat, already-widely-used "one
+# picker, one combined label" shape every existing consumer --
+# core_path/install_core/bios_installed/launch_args, none of which
+# needed to change) rather than replacing it -- these two only exist
+# for the picker's own two-dropdown rendering.
+CONSOLE_GROUPS = sorted({group for group, *_rest in _CONSOLE_ENTRIES})
+CORES_BY_GROUP = {}
+for _group, _core, _needs_bios, _core_display, _is_default in _CONSOLE_ENTRIES:
+    CORES_BY_GROUP.setdefault(_group, []).append((_core_display, f"{_group} - {_core_display}", _is_default))
+for _group in CORES_BY_GROUP:
+    CORES_BY_GROUP[_group].sort(key=lambda entry: entry[0].lower())
+
+
+def default_label_for_group(group):
+    """The full "<group> - <core>" label for group's own is_default
+    entry -- what the RetroArch tab's core dropdown pre-selects the
+    moment its console dropdown picks this group. Falls back to
+    group's own first (alphabetical) entry if somehow none is marked
+    default, rather than raising -- every real group here does have
+    exactly one, but an unknown/empty group (the placeholder "pick a
+    console" option) has to resolve to something rather than crash."""
+    entries = CORES_BY_GROUP.get(group)
+    if not entries:
+        return ""
+    for _core_display, label, is_default in entries:
+        if is_default:
+            return label
+    return entries[0][1]
 
 
 def _cores_dir():

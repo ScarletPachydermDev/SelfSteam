@@ -1200,11 +1200,36 @@ function selfsteamRaFormNav(form) {
 // Same reasoning as selfsteamEmEmulatorChanged's own comment -- a BIOS
 // picked for the previously-selected console/core is tied to that
 // core specifically, not the ROM, so it shouldn't show as "already
-// selected" once a different console/core is chosen.
-function selfsteamRaConsoleChanged(select) {
-  var form = select.form;
+// selected" once a different console/core is chosen. Shared by both
+// handlers below since either one can result in a genuinely different
+// core being active.
+function selfsteamRaClearBios(form) {
   var el = form.elements["ra_biosfile"];
   if (el) el.value = "";
+}
+
+// Picking a new console re-selects that console's own recommended
+// core automatically (data-default on the chosen <option>, computed
+// server-side -- see _retroarch_tab_panel_html's own comment) rather
+// than leaving the core dropdown on whatever it last showed for a
+// previous, unrelated console.
+function selfsteamRaConsoleGroupChanged(select) {
+  var form = select.form;
+  var chosen = select.options[select.selectedIndex];
+  form.elements["ra_console"].value = (chosen && chosen.dataset.default) || "";
+  selfsteamRaClearBios(form);
+  selfsteamRaFormNav(form);
+}
+
+// The core select's own options are just the bare core name (see
+// _retroarch_tab_panel_html's own comment on why) -- the real value
+// selfsteamRaFormNav needs to submit is built here by combining
+// whatever console is currently selected with the newly picked core.
+function selfsteamRaConsoleCoreChanged(select) {
+  var form = select.form;
+  var group = document.getElementById("ra-console-group-select").value;
+  form.elements["ra_console"].value = group + " - " + select.value;
+  selfsteamRaClearBios(form);
   selfsteamRaFormNav(form);
 }
 
@@ -2200,11 +2225,35 @@ def _retroarch_tab_panel_html(state, chosen=None):
     console = state.get("ra_console", "")
     needs_bios = console in retroarch_cores.CONSOLES_NEEDING_BIOS
 
-    console_options = "".join(
-        f'<option value="{html.escape(c)}"{" selected" if c == console else ""}>'
-        f'{"Pick your console" if not c else html.escape(c)}</option>'
-        for c, _core, _needs in [("", None, False)] + retroarch_cores.CONSOLES
+    # console is still the one real stored/looked-up value everywhere
+    # else (core_path/install_core/bios_installed/launch_args, none of
+    # which changed) -- split back into its own group/core halves only
+    # for rendering these two dropdowns. Matching by "starts with a
+    # known group name" rather than a plain str.split(" - ", 1) since a
+    # group name (e.g. "TurboGrafx-16 / PC Engine") could in principle
+    # itself contain a literal " - " sequence some day.
+    current_group = next((g for g in retroarch_cores.CONSOLE_GROUPS if console.startswith(g + " - ")), "")
+    current_core_display = console[len(current_group) + 3:] if current_group else ""
+
+    group_options = "".join(
+        f'<option value="{html.escape(g)}" data-default="{html.escape(retroarch_cores.default_label_for_group(g))}"'
+        f'{" selected" if g == current_group else ""}>{html.escape(g)}</option>'
+        for g in retroarch_cores.CONSOLE_GROUPS
     )
+    group_options = f'<option value="">Pick your console</option>{group_options}'
+    # Only ever populated once a console is actually picked -- disabled
+    # (not just empty) so it visibly reads as "not usable yet" rather
+    # than an active dropdown that just happens to have nothing in it.
+    if current_group:
+        core_options = "".join(
+            f'<option value="{html.escape(core_display)}"{" selected" if core_display == current_core_display else ""}>'
+            f'{html.escape(core_display)}</option>'
+            for core_display, _label, _is_default in retroarch_cores.CORES_BY_GROUP[current_group]
+        )
+        core_disabled = ""
+    else:
+        core_options = '<option value="">Pick a console first</option>'
+        core_disabled = "disabled"
     # id="ra-console-form-{k}" lets selfsteamToggleSource (PAGE_TAIL) sync
     # ra_romsource/ra_biossource here the instant they're toggled --
     # otherwise a toggle click followed immediately by a console change
@@ -2260,24 +2309,48 @@ def _retroarch_tab_panel_html(state, chosen=None):
   </div>"""
 
     return f"""
-  <div class="field-group">
-    <label class="field-label">Consoles <span class="required-asterisk">*</span> <span style="color:var(--text-dim);font-weight:400;font-size:0.85rem">Flatpak RetroArch Cores</span></label>
-    <form method="get" action="/new#tab-retroarch" style="margin:0">
-      {hidden_fields}
-      <!-- Third deliberate JS exception (after the dark-mode toggle and
-           login auto-submit) -- a <select> can't submit itself on
-           change without it, and this is what the approved/tested demo
-           used once the "Set console" button was removed. Since this
-           already depends on JS to submit at all, routing that submit
-           through selfsteamRaFormNav (fifth exception, see PAGE_TAIL) for
-           an in-place swap instead of a real navigation costs nothing
-           extra -- a JS-off browser was never going to auto-submit this
-           either way. -->
-      <select name="ra_console" onchange="selfsteamRaConsoleChanged(this)">
-        {console_options}
+  <form method="get" action="/new#tab-retroarch" style="margin:0;display:flex;flex-direction:column;gap:0.9rem">
+    {hidden_fields}
+    <input type="hidden" name="ra_console" id="ra-console-hidden" value="{html.escape(console)}">
+    <!-- Third deliberate JS exception (after the dark-mode toggle and
+         login auto-submit) -- a <select> can't submit itself on change
+         without it, and this is what the approved/tested demo used
+         once the "Set console" button was removed. Since this already
+         depends on JS to submit at all, routing that submit through
+         selfsteamRaFormNav (fifth exception, see PAGE_TAIL) for an
+         in-place swap instead of a real navigation costs nothing extra
+         -- a JS-off browser was never going to auto-submit this
+         either way.
+
+         Two selects, not one -- most consoles here now have more than
+         one real core (see _CONSOLE_ENTRIES' own comment), so a flat
+         "Console - Core" list got long enough that finding a specific
+         system meant scanning past several of its own core variants
+         first. ra_console (the hidden field above) stays the one real
+         value everything else in this app looks up by -- these two
+         selects are purely a friendlier way to build that same value,
+         never submitted under their own name, and both live inside this
+         one form so selfsteamRaFormNav can read select.form directly
+         instead of needing an explicit form="..." attribute pointing
+         elsewhere. Changing the console select re-picks that console's
+         own recommended core automatically (data-default on each
+         option, computed server-side from retroarch_cores.
+         default_label_for_group) -- the core select's own onchange
+         just swaps in whichever core was picked instead, keeping the
+         currently-selected console. -->
+    <div class="field-group">
+      <label class="field-label">Console <span class="required-asterisk">*</span> <span style="color:var(--text-dim);font-weight:400;font-size:0.85rem">Flatpak RetroArch</span></label>
+      <select id="ra-console-group-select" onchange="selfsteamRaConsoleGroupChanged(this)">
+        {group_options}
       </select>
-    </form>
-  </div>
+    </div>
+    <div class="field-group">
+      <label class="field-label" for="ra-console-core-select">Core <span class="required-asterisk">*</span></label>
+      <select id="ra-console-core-select" onchange="selfsteamRaConsoleCoreChanged(this)" {core_disabled}>
+        {core_options}
+      </select>
+    </div>
+  </form>
   {bios_block}
   {rom_block}
   <div class="selfsteam-spacer"></div>
