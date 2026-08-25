@@ -766,6 +766,53 @@ def install_pcsx2_bios_slot(entry, slot_prefix, file_path):
         cp.write(f, space_around_delimiters=True)
 
 
+def _duckstation_bios_dir():
+    # $XDG_DATA_HOME/duckstation/bios (~/.local/share/duckstation/bios
+    # unsandboxed) -- confirmed via DuckStation's own README ("User
+    # Directories": "place your BIOS images" there; "if you were using
+    # Linux, you would place your BIOS images in
+    # ~/.local/share/duckstation/bios"). Not a Flatpak install, so no
+    # _flatpak_data_dir redirect -- this is the real, plain host path,
+    # same as the AppImage's own binary_path.
+    return os.path.expanduser("~/.local/share/duckstation/bios")
+
+
+def duckstation_bios_slot_installed(entry, slot_prefix):
+    # Unlike PCSX2, DuckStation needs no ini pointer at all -- confirmed
+    # via its own README, it scans every file already sitting in
+    # bios/ itself rather than requiring one to be selected by name.
+    # So the copied-in file's own presence (any file, since a fresh
+    # install has none yet) is already the real "installed" signal.
+    bios_dir = _duckstation_bios_dir()
+    if not os.path.isdir(bios_dir):
+        return None
+    names = sorted(n for n in os.listdir(bios_dir) if os.path.isfile(os.path.join(bios_dir, n)))
+    return names[0] if names else None
+
+
+def install_duckstation_bios_slot(entry, slot_prefix, file_path):
+    """Copies the picked BIOS file into DuckStation's own bios/ folder,
+    keeping its original filename -- same "must scan its own folder"
+    reasoning as install_pcsx2_bios_slot, but with no ini/version-
+    bootstrap step needed since DuckStation has nothing else that
+    gates a fresh config on a first real launch."""
+    bios_dir = _duckstation_bios_dir()
+    os.makedirs(bios_dir, exist_ok=True)
+    shutil.copy2(file_path, os.path.join(bios_dir, os.path.basename(file_path)))
+
+
+def _duckstation_args(romfile):
+    # "-fullscreen -- <path>" -- confirmed real via DuckStation's own
+    # source (qthost.cpp's PrintCommandLineHelp: "-fullscreen: Enters
+    # fullscreen mode immediately after starting."; "--: Signals that
+    # no more arguments will follow and the remaining parameters make
+    # up the filename. Use when the filename contains spaces or starts
+    # with a dash.") -- the "--" guards against a romfile SelfSteam
+    # itself may have moved into a path DuckStation's own parser could
+    # otherwise misread.
+    return ["-fullscreen", "--", shlex.quote(romfile)]
+
+
 def _bigpemu_args(romfile):
     # Bare positional romfile -- confirmed real via BigPEmu's own user
     # manual ("BigPEmu always expects the first command line argument
@@ -1316,6 +1363,31 @@ EMULATORS = {
         # or host) -- same "file not found" crash class as gopher64/
         # RMG/M64Py before they got this same fix.
         "grant_permissions": ["--filesystem=host:ro"],
+    },
+    "DuckStation": {
+        "install_type": "binary",
+        # Real GitHub, single x64 AppImage per release (also -x64-SSE2/
+        # -arm64/-armhf builds for other CPUs, not applicable here) --
+        # confirmed live via its own releases API. Ships a rolling
+        # "latest" tag rather than numbered releases, same "newest-
+        # first list still works the same way" case as Vita3K's own
+        # "continuous" tag.
+        "release_api": "https://api.github.com/repos/stenzek/duckstation/releases?per_page=1",
+        "binary_asset_re": re.compile(r"^DuckStation-x64\.AppImage$"),
+        "consoles": "PlayStation",
+        # PS1 emulation has no HLE fallback -- confirmed via
+        # DuckStation's own README ("A PS1 or PS2 'BIOS' ROM image is
+        # required to start the emulator and to play games ... A ROM
+        # image is not provided with the emulator for legal reasons").
+        # Single slot, same "needs a real copy in its own folder"
+        # reasoning as PCSX2's own entry.
+        "needs_bios": True,
+        "bios_slots": [("bios", "Select BIOS", "BIOS")],
+        "bios_slot_installed": duckstation_bios_slot_installed,
+        "install_bios_slot": install_duckstation_bios_slot,
+        "needs_keys": False,
+        "needs_firmware": False,
+        "args": _duckstation_args,
     },
     "Azahar": {
         "install_type": "flathub",
