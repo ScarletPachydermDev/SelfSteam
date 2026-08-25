@@ -66,7 +66,15 @@ def ensure_shown():
                 args, window_titles.AUTH_SCREEN_TITLE
             )
         else:
-            _proc = subprocess.Popen(args, env={**os.environ, "DISPLAY": os.environ.get("DISPLAY", ":0")})
+            # Same XAUTHORITY gap as launch_foregrounded's own fix
+            # (see gamescope_splash.host_xauthority's docstring) --
+            # this branch is just as sandboxed, so it needs the same
+            # real auth cookie copied in, not just a DISPLAY guess.
+            env = {**os.environ, "DISPLAY": os.environ.get("DISPLAY", ":0")}
+            xauth = gamescope_splash.host_xauthority()
+            if xauth:
+                env["XAUTHORITY"] = xauth
+            _proc = subprocess.Popen(args, env=env)
             _baselayer_prior = None
         _shown_code = code
     threading.Timer(auth.CODE_TTL, dismiss).start()

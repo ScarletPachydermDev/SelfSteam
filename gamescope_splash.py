@@ -23,7 +23,57 @@ import host_exec
 #   _find_window_by_title(title) -- finds our own window by its exact title.
 #   foreground(win_id) -- marks win_id as gamescope's foreground base layer.
 #   restore(prior) -- restores whatever was foregrounded before.
+#   host_xauthority() -- copies the host's real X11 auth cookie in, for GTK apps this sandbox launches.
 #   launch_foregrounded(argv, title) -- launches argv, finds its window by title, foregrounds it.
+
+_XAUTH_COPY_PATH = os.path.join(
+    os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "selfsteam", "xauthority",
+)
+
+
+def host_xauthority():
+    """Copies the host's own X11 auth cookie into a file this sandbox
+    can actually read, and returns its path -- --socket=x11 in the
+    Flatpak manifest only grants reachability to the X server's own
+    socket, not a valid credential to authenticate against it.
+    Confirmed live (2026-08-25, real Steam Machine, gamescope session
+    launched via a systemd --user service): DISPLAY set but no
+    XAUTHORITY at all made every launch of auth_screen.py crash before
+    ever mapping a window -- "Authorization required, but no
+    authorization protocol specified" from X11 itself, then
+    Gdk.Display.get_default() coming back None and a hard crash in
+    auth_screen.py's own _screen_scale(). launch_foregrounded's own
+    DISPLAY-only fix below (2026-08-21) covers reachability but never
+    covered authentication -- this was a real gap in that fix, not a
+    new problem.
+
+    The real auth file can't just be pointed at directly either:
+    /run/user/<uid>/ isn't visible inside this sandbox at all even
+    with --filesystem=host (same exclusion the Flatpak manifest's own
+    ~/.var/app comment documents for a different directory) -- it has
+    to be read host-side via flatpak-spawn --host and its bytes copied
+    in. Tries $XAUTHORITY, then ~/.Xauthority (a plain desktop
+    session), then gamescope's own generated
+    /run/user/<uid>/xauth_<random> file last (confirmed live as what a
+    gamescope session actually uses -- neither of the first two exist
+    there). Returns None if nothing is found (silently skip
+    XAUTHORITY) rather than raising, so a DISPLAY-only connection
+    attempt can still happen instead of crashing before even trying;
+    when running unsandboxed (dev-test) this is a no-op passthrough of
+    whatever XAUTHORITY the real environment already has."""
+    if not host_exec.IN_FLATPAK:
+        return os.environ.get("XAUTHORITY")
+    cmd = (
+        'for f in "$XAUTHORITY" "$HOME/.Xauthority" /run/user/$(id -u)/xauth_*; do '
+        '[ -s "$f" ] && cat "$f" && exit 0; done; exit 1'
+    )
+    result = subprocess.run(host_exec.wrap(["sh", "-c", cmd]), capture_output=True)
+    if result.returncode != 0 or not result.stdout:
+        return None
+    os.makedirs(os.path.dirname(_XAUTH_COPY_PATH), exist_ok=True)
+    with open(_XAUTH_COPY_PATH, "wb") as f:
+        f.write(result.stdout)
+    return _XAUTH_COPY_PATH
 _WINDOW_RE = re.compile(r"^\s*(0x[0-9a-fA-F]+)\s")
 
 
@@ -100,8 +150,13 @@ def launch_foregrounded(argv, window_title, display=":0"):
     crashed in its own startup before ever mapping a window. DISPLAY
     is set explicitly below from this function's own `display` param
     (the same value already used for the xprop/xwininfo calls) so the
-    launched process can actually open a display."""
+    launched process can actually open a display -- XAUTHORITY (see
+    host_xauthority's own docstring) is what actually lets it
+    authenticate against that display, not just reach it."""
     env = {**os.environ, "DISPLAY": display}
+    xauth = host_xauthority()
+    if xauth:
+        env["XAUTHORITY"] = xauth
     proc = subprocess.Popen(argv, start_new_session=True, env=env)
     win_id = _find_window_by_title(display, window_title)
     if win_id is None:
