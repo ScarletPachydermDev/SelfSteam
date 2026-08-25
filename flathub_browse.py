@@ -36,6 +36,20 @@ CATEGORY_SLUGS = {slug for slug, _label in CATEGORIES}
 _API_BASE = "https://flathub.org/api/v2"
 _PER_PAGE = 24
 
+# Never offered as a browsable/installable app here -- SelfSteam already
+# assumes exactly one real Steam install exists on the machine it's
+# managing shortcuts for (steam_paths.py's own resolution, shortcuts.vdf
+# writes, the restart/maintenance cycle); creating a shortcut *to*
+# Steam, or letting someone install a second Steam instance through
+# this picker, both risk exactly that assumption breaking. Filtered out
+# of every hit list here (not just skipped at render time) so it also
+# never counts as a category's own installed-apps-first candidate.
+_BLOCKED_APP_IDS = {"com.valvesoftware.Steam"}
+
+
+def _drop_blocked(hits):
+    return [h for h in hits if h.get("app_id") not in _BLOCKED_APP_IDS]
+
 
 def search_category(category, page=1):
     """Returns (hits, total_pages) for one page of real Flathub apps in
@@ -57,7 +71,7 @@ def search_category(category, page=1):
             data = json.load(resp)
     except (urllib.error.URLError, OSError, json.JSONDecodeError) as e:
         raise RuntimeError(f"Flathub category browse failed: {e}")
-    return data.get("hits", []), data.get("totalPages", 1)
+    return _drop_blocked(data.get("hits", [])), data.get("totalPages", 1)
 
 
 def search_apps(query, page=1):
@@ -84,4 +98,4 @@ def search_apps(query, page=1):
             data = json.load(resp)
     except (urllib.error.URLError, OSError, json.JSONDecodeError) as e:
         raise RuntimeError(f"Flathub search failed: {e}")
-    return data.get("hits", []), data.get("totalPages", 1)
+    return _drop_blocked(data.get("hits", [])), data.get("totalPages", 1)

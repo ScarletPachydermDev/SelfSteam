@@ -32,7 +32,9 @@ import uuid
 import xml.etree.ElementTree as ET
 import zipfile
 
+import gamescope_splash
 import host_exec
+import steamos_session
 
 # Functions, grouped:
 #
@@ -821,6 +823,14 @@ def rpcs3_firmware_installed(entry, slot_prefix):
     return f"firmware {version}" if version else "firmware installed"
 
 
+# RPCS3's own fixed window title for this dialog -- confirmed live
+# (2026-08-25), not documented anywhere in its own source/docs, so this
+# could in principle drift if a future RPCS3 release renames it (the
+# foregrounding below would then just silently no-op, same as any other
+# "window not found" case -- not fatal, just back to invisible).
+_RPCS3_INSTALLFW_WINDOW_TITLE = "Welcome to RPCS3"
+
+
 def install_rpcs3_firmware(entry, slot_prefix, file_path):
     """Firmware install isn't a plain file copy the way keys/BIOS are
     elsewhere in this module -- a PS3 PUP is a signed, encrypted
@@ -833,11 +843,23 @@ def install_rpcs3_firmware(entry, slot_prefix, file_path):
     otherwise), so this genuinely pops up RPCS3's own install dialog
     rather than staying silent, and this call blocks until that
     process exits (the user closing/finishing the dialog) rather than
-    us polling for completion some other way."""
+    us polling for completion some other way.
+
+    On a gamescope session, that dialog is foregrounded the same way
+    auth_display.py's own pairing screen is (gamescope never auto-
+    focuses a new X11 client the way a normal WM would) -- confirmed
+    live as a real, separate bug from the auth screen's own crash: the
+    dialog ("Welcome to RPCS3") opened and genuinely sat there waiting
+    for a click, just invisible behind Steam's own UI, which from the
+    web UI's own perspective looked identical to the install being
+    stuck forever. Plain desktop sessions skip this (a real WM already
+    handles focus) and just block on the process directly."""
     flatpak = host_exec.which("flatpak")
-    subprocess.run(
-        host_exec.wrap([flatpak, "run", entry["app_id"], "--installfw", file_path]),
-    )
+    argv = host_exec.wrap([flatpak, "run", entry["app_id"], "--installfw", file_path])
+    if steamos_session.is_gamescope_session():
+        gamescope_splash.launch_foregrounded_and_wait(argv, _RPCS3_INSTALLFW_WINDOW_TITLE)
+    else:
+        subprocess.run(argv)
 
 
 def _xenia_canary_args(romfile):

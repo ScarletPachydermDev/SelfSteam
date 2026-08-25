@@ -120,6 +120,14 @@ REMEMBER_COOKIE = "selfsteam_remember"
 _DARKREADER_PATH = os.path.join(os.path.dirname(__file__), "vendor", "darkreader.js")
 _POSTER_FRAME_PATH = os.path.join(os.path.dirname(__file__), "vendor", "poster-frame.webp")
 _NAME_FIELD_WAND_PATH = os.path.join(os.path.dirname(__file__), "vendor", "name-field-wand.webp")
+# Real screenshots of RPCS3's own first-install dialogs (its "Welcome"
+# wizard and firmware-install confirmation) -- shown inline in the
+# Emulators tab's own RPCS3 firmware warning (see
+# _emulators_tab_panel_html's rpcs3_firmware_warning) so someone knows
+# exactly what to look for on their server's screen, rather than
+# guessing from text alone.
+_RPCS3_WELCOME_SCREENSHOT_PATH = os.path.join(os.path.dirname(__file__), "vendor", "rpcs3-welcome.png")
+_RPCS3_FIRMWARE_INSTALLER_SCREENSHOT_PATH = os.path.join(os.path.dirname(__file__), "vendor", "rpcs3-firmware-installer.png")
 _ADD_FORM_ID = "selfsteam-add-form"
 _SEARCH_ICON_SVG = (
     '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="white" '
@@ -1540,6 +1548,36 @@ def _hostname():
     return name
 
 
+def _selfsteam_version():
+    """Best-effort version string, read from the same metainfo.xml the
+    Flatpak package itself ships (its own <release> list is already the
+    single source of truth for version numbers, updated once per
+    release -- see packaging/*.metainfo.xml) rather than hardcoding a
+    second copy here that could silently drift out of sync. Two
+    different relative locations depending on how this is running: the
+    packaged Flatpak installs metainfo.xml to /app/share/metainfo/, a
+    sibling of this file's own /app/share/selfsteam/ directory; a plain
+    dev-test checkout has it under packaging/ instead, right next to
+    this file. Returns "" (rendered as nothing) if neither is found,
+    rather than raising -- a missing version number isn't worth
+    breaking the page over."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.join(here, "..", "metainfo", "io.github.ScarletPachydermDev.SelfSteam.metainfo.xml"),
+        os.path.join(here, "packaging", "io.github.ScarletPachydermDev.SelfSteam.metainfo.xml"),
+    ]
+    for path in candidates:
+        try:
+            with open(path, encoding="utf-8") as f:
+                content = f.read()
+        except OSError:
+            continue
+        match = re.search(r'<release version="([^"]+)"', content)
+        if match:
+            return match.group(1)
+    return ""
+
+
 def _steam_warning_html():
     # Sanity check, not a hard requirement -- on real SteamOS this can
     # never fire (Steam owns the machine), but SelfSteam itself is
@@ -2545,10 +2583,11 @@ def _apps_tab_panel_html(state, hits, total_pages):
     # top:-0.15rem (tuned for sitting next to plain text in a normal
     # line, elsewhere on this page) -- inside this flex-centered label
     # that reads as sitting too high relative to the text next to it.
-    # top:0.2rem here cancels that back out and nudges it slightly
-    # past neutral. Confirmed live (2026-08-25).
-    apps_appimage_tooltip_text = "AppImages are downloaded directly from the developer's own GitHub releases, or for itch.io, its own auto-updater."
-    apps_appimage_tooltip = f'<span style="position:relative;top:0.2rem">{_info_tooltip_icon_html(apps_appimage_tooltip_text)}</span>'
+    # top:0.05rem here mostly cancels that back out, just short of
+    # dead-neutral -- 0.2rem (an earlier value) overshot and read as
+    # sitting too low instead. Confirmed live (2026-08-25).
+    apps_appimage_tooltip_text = "AppImages are downloaded directly from the developer's own GitHub releases."
+    apps_appimage_tooltip = f'<span style="position:relative;top:0.05rem">{_info_tooltip_icon_html(apps_appimage_tooltip_text)}</span>'
 
     def _apps_source_toggle_link(value, text, extra=""):
         active = "source-label active" if apps_source == value else "source-label"
@@ -3040,10 +3079,10 @@ def _emulators_tab_panel_html(state, chosen=None):
         space = " " if extra else ""
         return f'<a class="{active}" href="{href}" onclick="return selfsteamEmNav(this)">{text}{space}{extra}</a>'
 
-    # Same top:0.2rem counter-nudge as the Apps tab's own
+    # Same top:0.05rem counter-nudge as the Apps tab's own
     # apps_appimage_tooltip -- see its comment for why.
     appimage_tooltip_text = "AppImages are downloaded directly from the emulator developer's own GitHub releases."
-    appimage_tooltip = f'<span style="position:relative;top:0.2rem">{_info_tooltip_icon_html(appimage_tooltip_text)}</span>'
+    appimage_tooltip = f'<span style="position:relative;top:0.05rem">{_info_tooltip_icon_html(appimage_tooltip_text)}</span>'
     source_toggle = f"""
     <div class="source-toggle" style="margin-bottom:0.6rem">
       {_source_toggle_link("flathub", "Flathub")}
@@ -3110,6 +3149,34 @@ def _emulators_tab_panel_html(state, chosen=None):
     <input type="text" name="em_zrif" id="em-zrif-field" form="{_ADD_FORM_ID}"
            value="{html.escape(state.get('em_zrif', ''))}" placeholder="Paste your zRIF key">
   </div>"""
+    # RPCS3-only, and only until its firmware is actually installed --
+    # see standalone_emulators.install_rpcs3_firmware's own docstring
+    # on why this specific emulator (unlike every other needs_bios/
+    # needs_firmware entry) genuinely pops its own on-screen dialog and
+    # blocks Create until someone finishes it there, not just uploads a
+    # file here. Without a heads up, that first Create click just looks
+    # like it hung -- see the RPCS3-Skate-3 live troubleshooting session
+    # (2026-08-25) this was written from.
+    rpcs3_firmware_warning = ""
+    if emulator == "RPCS3" and not standalone_emulators.bios_slot_installed("RPCS3", "bios"):
+        rpcs3_firmware_warning = """
+  <div class="hint-row warning" style="flex-direction:column;align-items:stretch;gap:0.6rem">
+    <div style="display:flex;align-items:flex-start;gap:0.5rem">
+      <span class="info-icon">!</span>
+      <span>Heads up! Continue shortcut creation as usual, but you must agree to the
+        firmware install at your server's screen to finish the process. This is only
+        required on RPCS3's first install, and won't be prompted again for future games.
+        <br><br>
+        Tick "I have read the Quickstart guide" and untick "Show at startup", and agree
+        to the firmware setup.</span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:0.6rem">
+      <img src="/vendor/rpcs3-welcome.png" alt="RPCS3's own Welcome dialog"
+           style="width:100%;border-radius:6px;border:1px solid var(--border)">
+      <img src="/vendor/rpcs3-firmware-installer.png" alt="RPCS3's own firmware install confirmation"
+           style="width:100%;border-radius:6px;border:1px solid var(--border)">
+    </div>
+  </div>"""
     # em_name_cleared -- see _retroarch_tab_panel_html's own comment on
     # the same flag/toggle, same reasoning here.
     name_cleared = bool(state.get("em_name_cleared"))
@@ -3148,6 +3215,7 @@ def _emulators_tab_panel_html(state, chosen=None):
   {rom_block}
   {zrif_block}
   <div class="selfsteam-spacer"></div>
+  {rpcs3_firmware_warning}
   {name_field}"""
 
 
@@ -4418,6 +4486,9 @@ def render_settings(error=None):
     <button type="submit" class="secondary" style="width:100%">Forget all remembered devices</button>
   </form>
 </div>
+<div style="width:100%;max-width:480px;margin:0 auto;text-align:right;font-size:0.75rem;color:var(--text-dim)">
+  {f"SelfSteam v{html.escape(version)}" if (version := _selfsteam_version()) else ""}
+</div>
 """, page_title=_hostname())
 
 
@@ -4795,6 +4866,20 @@ class Handler(BaseHTTPRequestHandler):
                 body = f.read()
             self.send_response(200)
             self.send_header("Content-Type", "image/webp")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        if parsed.path in ("/vendor/rpcs3-welcome.png", "/vendor/rpcs3-firmware-installer.png"):
+            path = (
+                _RPCS3_WELCOME_SCREENSHOT_PATH if parsed.path == "/vendor/rpcs3-welcome.png"
+                else _RPCS3_FIRMWARE_INSTALLER_SCREENSHOT_PATH
+            )
+            with open(path, "rb") as f:
+                body = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)

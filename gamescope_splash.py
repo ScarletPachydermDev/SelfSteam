@@ -163,3 +163,34 @@ def launch_foregrounded(argv, window_title, display=":0"):
         return proc, None
     prior_value = foreground(win_id, display)
     return proc, prior_value
+
+
+def launch_foregrounded_and_wait(argv, window_title, display=":0"):
+    """Same foregrounding as launch_foregrounded above, for a caller
+    that needs the opposite launch/lifecycle shape: argv is launched
+    exactly as given (the caller does its own host_exec.wrap if it
+    needs to run on the host at all, e.g. a real Flatpak app rather
+    than this app's own sandbox-only script -- no DISPLAY/XAUTHORITY
+    injection here either, since a normal `flatpak run` genuinely does
+    get real display access some other way, unlike launch_foregrounded's
+    own launched-directly-with-no-sandbox script), and this call
+    blocks until the process actually exits, returning its exit code,
+    instead of handing back a live Popen for the caller to manage
+    teardown on later.
+
+    Confirmed live (2026-08-25) as a real, separate bug from the auth
+    screen's own foregrounding gap: RPCS3's --installfw dialog
+    ("Welcome to RPCS3") genuinely opened and sat waiting for input,
+    just invisible behind Steam's own UI the whole time -- gamescope
+    never auto-focuses a new X11 client the way a normal WM would, so
+    without this, a firmware install looked identically stuck to a
+    real hang from the web UI's own perspective (a blocking request
+    forever waiting on a dialog nobody could see or click), even
+    though the process itself was working fine underneath."""
+    proc = subprocess.Popen(argv, start_new_session=True)
+    win_id = _find_window_by_title(display, window_title)
+    prior_value = foreground(win_id, display) if win_id is not None else None
+    proc.wait()
+    if prior_value is not None:
+        restore(prior_value, display)
+    return proc.returncode
