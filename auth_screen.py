@@ -10,10 +10,20 @@ import os
 import signal
 import sys
 
+import cairo
 import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gdk, GLib, Gtk  # noqa: E402
+gi.require_version("Pango", "1.0")
+gi.require_version("PangoCairo", "1.0")
+# Required for raw pycairo objects (cairo.ImageSurface/cairo.Context,
+# used below to measure/draw title+code) to interoperate with GI's own
+# Cairo/Pango bindings at all -- confirmed live (2026-08-25) that
+# skipping this segfaults outright (exit 139) the instant a pycairo
+# Context is passed into a PangoCairo call, not a Python-level
+# exception catchable any other way.
+gi.require_foreign("cairo")
+from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo  # noqa: E402
 
 import window_titles
 
@@ -47,13 +57,39 @@ import window_titles
 # GTK CSS has no vw/vh-style unit to do this on its own (that's a web
 # CSS thing), so the px values are computed and interpolated in Python
 # before the stylesheet is ever loaded.
+#
+# _TITLE_CODE_GAP_PX (below) is the one deliberate exception -- NOT
+# scaled by _screen_scale(). Confirmed live (2026-08-25) on two real
+# screens at once, across several attempts:
+#   - A scaled margin-top put the title way too far above the code on
+#     a 4K/1440p TV and way too close on a lower-res one -- the
+#     opposite of proportional scaling's whole point.
+#   - A ratio-based line-height (to compress the code font's own huge
+#     internal ascent/descent padding) couldn't be tuned to fix this
+#     either: the two real screens needed *opposite* corrections from
+#     the exact same ratio, meaning Pango's own line-box metrics don't
+#     scale linearly with font size the way a flat multiplier assumes.
+#   - A negative margin measured from the label's own real ink-vs-
+#     logical extents broke worse -- GTK's own size negotiation
+#     rejected it outright ("adjusted size...must not decrease below
+#     min") and the window never rendered visibly at all.
+# _TitleCodeArea below is what actually replaced all of that: title and
+# code are drawn directly via Cairo/PangoCairo at exact pixel
+# coordinates computed from their own real measured ink extents, not
+# GTK Box spacing/margins/line-height at all -- title's own bottom ink
+# edge to code's own top ink edge is always exactly _TITLE_CODE_GAP_PX
+# apart, on every resolution, because nothing else has any say in it.
 # Functions:
 #   _screen_scale() -- proportional font/margin scale factor for the real screen height.
-#   _build_css() -- builds the GTK stylesheet from _BASE_SIZES scaled by _screen_scale().
+#   _make_pango_layout(cr, text, font_px, bold, letter_spacing_px) -- a ready-to-draw PangoCairo layout.
+#   class _TitleCodeArea -- draws the title+code pair at a fixed pixel gap, sized/positioned like any other widget.
+#   _build_css() -- builds the GTK stylesheet (everything except title/code) from _BASE_SIZES scaled by _screen_scale().
 #   class AuthScreen -- the fullscreen GTK window itself, showing the code + LAN address.
 #   main() -- entrypoint: parses argv, builds and shows an AuthScreen.
+_TITLE_CODE_GAP_PX = 40
+
 _BASE_SIZES = {
-    "title_font": 90, "code_font": 420, "code_spacing": 20, "code_margin_top": 40,
+    "title_font": 90, "code_font": 420, "code_spacing": 20,
     "address_font": 46, "address_margin_top": 24, "address_margin_left": 32,
     "hint_font": 46, "hint_margin_bottom": 24,
     "timeout_bar_height": 28,
@@ -79,26 +115,76 @@ def _screen_scale():
     return geometry.height / 1080.0
 
 
+def _make_pango_layout(cr, text, font_px, bold=False, letter_spacing_px=0):
+    layout = PangoCairo.create_layout(cr)
+    desc = Pango.FontDescription()
+    desc.set_family("Helvetica")
+    desc.set_absolute_size(font_px * Pango.SCALE)
+    desc.set_weight(Pango.Weight.BOLD if bold else Pango.Weight.NORMAL)
+    layout.set_font_description(desc)
+    if letter_spacing_px:
+        attrs = Pango.AttrList()
+        attrs.insert(Pango.attr_letter_spacing_new(letter_spacing_px * Pango.SCALE))
+        layout.set_attributes(attrs)
+    layout.set_text(text, -1)
+    return layout
+
+
+class _TitleCodeArea(Gtk.DrawingArea):
+    """Draws the title and code directly via Cairo/PangoCairo at exact,
+    measured pixel positions instead of relying on GTK's own Box
+    spacing/margins/line-height for the gap between them (see this
+    file's own comment above on why that approach couldn't be made to
+    work reliably across different real screen resolutions). title's
+    own bottom ink edge to code's own top ink edge is always exactly
+    gap_px apart, everywhere -- ink extents (the real visible glyph
+    bounds), not logical extents (which include the font's own
+    ascent/descent padding), are what's measured and positioned from,
+    so no hidden per-font whitespace sneaks back into the gap."""
+
+    def __init__(self, title_text, code_text, title_font_px, code_font_px, code_spacing_px, gap_px):
+        super().__init__()
+        self._title_text = title_text
+        self._code_text = code_text
+        self._title_font_px = title_font_px
+        self._code_font_px = code_font_px
+        self._code_spacing_px = code_spacing_px
+        self._gap_px = gap_px
+        # A throwaway 1x1 surface is enough for PangoCairo to compute
+        # real font metrics -- no actual window/realization needed, so
+        # this can happen right in __init__ and the widget can report
+        # its own correct natural size to the parent's layout (via
+        # set_content_width/height below) before it's ever drawn,
+        # letting the surrounding Overlay's own valign/halign=CENTER
+        # center it exactly like any other widget would be.
+        measure_surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, 1, 1)
+        measure_cr = cairo.Context(measure_surface)
+        title_layout = _make_pango_layout(measure_cr, title_text, title_font_px)
+        code_layout = _make_pango_layout(measure_cr, code_text, code_font_px, bold=True, letter_spacing_px=code_spacing_px)
+        self._title_ink, _title_logical = title_layout.get_pixel_extents()
+        self._code_ink, _code_logical = code_layout.get_pixel_extents()
+        self.set_content_width(max(self._title_ink.width, self._code_ink.width))
+        self.set_content_height(self._title_ink.height + gap_px + self._code_ink.height)
+        self.set_draw_func(self._draw)
+
+    def _draw(self, _area, cr, width, _height):
+        cr.set_source_rgb(1, 1, 1)
+        title_layout = _make_pango_layout(cr, self._title_text, self._title_font_px)
+        cr.move_to((width - self._title_ink.width) / 2 - self._title_ink.x, -self._title_ink.y)
+        PangoCairo.show_layout(cr, title_layout)
+
+        code_layout = _make_pango_layout(
+            cr, self._code_text, self._code_font_px, bold=True, letter_spacing_px=self._code_spacing_px,
+        )
+        code_y = self._title_ink.height + self._gap_px - self._code_ink.y
+        cr.move_to((width - self._code_ink.width) / 2 - self._code_ink.x, code_y)
+        PangoCairo.show_layout(cr, code_layout)
+
+
 def _build_css(scale):
     s = {name: round(value * scale) for name, value in _BASE_SIZES.items()}
     return f"""
 window {{ background-color: #000000; color: #ffffff; }}
-label.selfsteam-auth-title {{
-  font-family: Helvetica, Arial, sans-serif; font-size: {s['title_font']}px; font-weight: 400;
-}}
-label.selfsteam-auth-code {{
-  font-family: Helvetica, Arial, sans-serif; font-weight: 700;
-  font-size: {s['code_font']}px; letter-spacing: {s['code_spacing']}px; margin-top: {s['code_margin_top']}px;
-  /* At this font-size (420px base), Pango's own line-box height is
-     dominated by the font's ascent/descent metrics, not the visible
-     glyph height -- that extra internal space above the glyphs is what
-     read as "too much gap" between title and code, not margin-top
-     itself (which is comparatively small). line-height (GTK 4.12+)
-     compresses that line-box directly instead of fighting it with a
-     larger negative margin. Needs visual confirmation on a real
-     screen -- not something verifiable from source alone. */
-  line-height: 0.75;
-}}
 label.selfsteam-auth-address {{
   font-family: Helvetica, Arial, sans-serif; font-size: {s['address_font']}px; font-weight: 400;
   margin: {s['address_margin_top']}px 0 0 {s['address_margin_left']}px;
@@ -115,7 +201,7 @@ progressbar.selfsteam-auth-timeout trough {{
 progressbar.selfsteam-auth-timeout trough progress {{
   min-height: {s['timeout_bar_height']}px; border-radius: 0; background-color: #ffffff;
 }}
-""".encode()
+""".encode(), s
 
 
 class AuthScreen(Gtk.ApplicationWindow):
@@ -125,21 +211,20 @@ class AuthScreen(Gtk.ApplicationWindow):
     # living-room device meant to be read from across the room, so
     # nothing here is a fresh design, just matching the screen users
     # already know from that flow.
-    def __init__(self, app, code, hostname, ip, port):
+    def __init__(self, app, code, hostname, ip, port, sizes):
         super().__init__(application=app)
         self.set_title(window_titles.AUTH_SCREEN_TITLE)
         self.fullscreen()
 
         overlay = Gtk.Overlay()
 
-        center_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, valign=Gtk.Align.CENTER, halign=Gtk.Align.CENTER)
-        title = Gtk.Label(label="SelfSteam authentication code")
-        title.add_css_class("selfsteam-auth-title")
-        code_label = Gtk.Label(label=code)
-        code_label.add_css_class("selfsteam-auth-code")
-        center_box.append(title)
-        center_box.append(code_label)
-        overlay.set_child(center_box)
+        title_code = _TitleCodeArea(
+            "SelfSteam authentication code", code,
+            sizes["title_font"], sizes["code_font"], sizes["code_spacing"], _TITLE_CODE_GAP_PX,
+        )
+        title_code.set_valign(Gtk.Align.CENTER)
+        title_code.set_halign(Gtk.Align.CENTER)
+        overlay.set_child(title_code)
 
         address_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, halign=Gtk.Align.START, valign=Gtk.Align.START)
         for line in (f"{hostname}:{port}", f"{ip}:{port}"):
@@ -216,12 +301,13 @@ def main():
     app = Gtk.Application(application_id=app_id)
 
     def on_activate(app):
+        css, sizes = _build_css(_screen_scale())
         provider = Gtk.CssProvider()
-        provider.load_from_data(_build_css(_screen_scale()))
+        provider.load_from_data(css)
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
-        win = AuthScreen(app, code, hostname, ip, port)
+        win = AuthScreen(app, code, hostname, ip, port, sizes)
         win.present()
         # auth_display.py tears this window down with a plain SIGTERM
         # (either a fresh code replacing this one, or the code being
