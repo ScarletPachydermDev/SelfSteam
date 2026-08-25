@@ -38,6 +38,7 @@ import json
 import os
 import re
 import socket
+import subprocess
 import threading
 import tempfile
 import time
@@ -5887,6 +5888,77 @@ class Handler(BaseHTTPRequestHandler):
 
 _FIRST_SHOW_POLL_INTERVAL = 10
 
+# Not instant on purpose -- a `flatpak update` isn't time-critical to
+# notice, and this is a real subprocess spawn (host_exec.wrap) every
+# time it fires, not just an in-memory check.
+_UPDATE_POLL_INTERVAL = 900
+_SELFSTEAM_APP_ID = "io.github.ScarletPachydermDev.SelfSteam"
+
+
+def _installed_selfsteam_version():
+    """The version of this app actually sitting on disk right now, per
+    a real `flatpak list` -- independent of whatever version THIS
+    running process itself was started from, so it reflects a
+    `flatpak update` that already finished even though this process
+    may still be serving the old deployment (Flatpak doesn't restart
+    an already-running instance on its own). None when unsandboxed
+    (dev-test has no Flatpak install to check) or the lookup fails for
+    any reason -- either way, nothing to compare against."""
+    if not host_exec.IN_FLATPAK:
+        return None
+    result = subprocess.run(
+        host_exec.wrap(["flatpak", "list", "--app", "--columns=application,version"]),
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        return None
+    for line in result.stdout.splitlines():
+        app_id, _, version = line.partition("\t")
+        if app_id == _SELFSTEAM_APP_ID:
+            return version.strip()
+    return None
+
+
+def _watch_for_update_and_restart():
+    """Restarts this app the moment `flatpak update` finishes installing
+    a newer version than the one this process is actually running --
+    without this, a completed update just sits there unused until
+    someone happens to manually restart it (or reboots the whole
+    machine), which reads as "I updated but nothing changed." Confirmed
+    live (2026-08-25) as a real, repeat point of confusion on an actual
+    Steam Machine, twice in a row across two separate releases -- not a
+    hypothetical.
+
+    Compares against _selfsteam_version()'s own bundled metainfo.xml
+    (the exact same version string every page already shows on /key)
+    rather than inventing a second notion of "current version" -- both
+    stay the one source of truth. No-ops entirely when unsandboxed
+    (dev-test has no Flatpak install to restart into).
+
+    `flatpak kill` on this exact app-id, not `systemctl --user restart
+    selfsteam.service` -- confirmed live that restart alone left the
+    real sandboxed python3 process still bound to the port (systemd's
+    own SIGTERM to the outer `flatpak run` wrapper doesn't reliably
+    tear down the bwrap sandbox underneath it), so the freshly
+    restarted unit's own new `flatpak run` immediately failed to bind
+    and fell into a crash-restart loop, taking the whole app down
+    instead of updating it. A plain `flatpak kill` genuinely ends the
+    sandboxed instance outright, and systemd's own Restart=on-failure
+    (see the unit installed by selfsteam_launcher.py) picks it back up
+    cleanly from there -- confirmed live this actually works. Fire-and-
+    forget: this call is what's about to kill this very process, so
+    there's nothing meaningful left to do with its own exit code once
+    it's issued."""
+    if not host_exec.IN_FLATPAK:
+        return
+    running_version = _selfsteam_version()
+    while True:
+        time.sleep(_UPDATE_POLL_INTERVAL)
+        installed_version = _installed_selfsteam_version()
+        if installed_version and installed_version != running_version:
+            subprocess.run(host_exec.wrap(["flatpak", "kill", _SELFSTEAM_APP_ID]))
+            return
+
 
 def _watch_for_first_gamescope_entry():
     """Shows the pairing screen exactly once on its own -- the first time
@@ -5913,6 +5985,7 @@ def _watch_for_first_gamescope_entry():
 
 def main():
     threading.Thread(target=_watch_for_first_gamescope_entry, daemon=True).start()
+    threading.Thread(target=_watch_for_update_and_restart, daemon=True).start()
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     print(f"SelfSteam listening on http://0.0.0.0:{PORT}/")
     server.serve_forever()
