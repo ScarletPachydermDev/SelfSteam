@@ -496,6 +496,10 @@ def _flycast_configure_game_dir(entry, game_dir):
         cp.write(f, space_around_delimiters=True)
 
 
+def _cemu_keys_marker_path(entry):
+    return os.path.join(os.path.dirname(_cemu_keys_path(entry)), ".selfsteam-keys-source")
+
+
 def _cemu_keys_installed(entry):
     keys_path = _cemu_keys_path(entry)
     if not os.path.isfile(keys_path):
@@ -504,7 +508,7 @@ def _cemu_keys_installed(entry):
         for line in f:
             line = line.split("#", 1)[0].strip()
             if line and line.lower() != _CEMU_EXAMPLE_KEY.lower():
-                return "keys.txt"
+                return _read_source_filename_marker(_cemu_keys_marker_path(entry)) or "keys.txt"
     return None
 
 
@@ -518,6 +522,7 @@ def _cemu_install_keys(entry, keys_path):
     dest = _cemu_keys_path(entry)
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     shutil.copy2(keys_path, dest)
+    _write_source_filename_marker(_cemu_keys_marker_path(entry), keys_path)
     return [dest]
 
 
@@ -811,6 +816,13 @@ def _rpcs3_dev_flash_dir(entry):
     return _flatpak_config_dir(entry["app_id"], "rpcs3", "dev_flash")
 
 
+def _rpcs3_firmware_marker_path(entry):
+    # Sibling of dev_flash itself, not inside it -- dev_flash is RPCS3's
+    # own real, entirely-managed content, not somewhere this app should
+    # be leaving extra files it might trip over.
+    return os.path.join(os.path.dirname(_rpcs3_dev_flash_dir(entry)), ".selfsteam-firmware-source")
+
+
 def rpcs3_firmware_installed(entry, slot_prefix):
     # vsh/etc/version.txt only exists once a real firmware install has
     # actually completed -- confirmed via source (util/sysinfo.cpp's
@@ -819,9 +831,7 @@ def rpcs3_firmware_installed(entry, slot_prefix):
     version_path = os.path.join(_rpcs3_dev_flash_dir(entry), "vsh", "etc", "version.txt")
     if not os.path.isfile(version_path):
         return None
-    with open(version_path) as f:
-        version = f.read().strip()
-    return f"firmware {version}" if version else "firmware installed"
+    return _read_source_filename_marker(_rpcs3_firmware_marker_path(entry)) or "firmware installed"
 
 
 # RPCS3's own fixed window titles for this whole flow, in the order
@@ -935,8 +945,14 @@ def install_rpcs3_firmware(entry, slot_prefix, file_path):
         proc = subprocess.Popen(argv)
         while not is_done() and proc.poll() is None:
             time.sleep(1)
+    # Captured before the kill below -- "Success!" is RPCS3's own
+    # window, so it vanishes the instant RPCS3 itself is killed, and
+    # checking is_done() again afterward would always read as false.
+    succeeded = is_done()
     if proc.poll() is None:
         subprocess.run(host_exec.wrap(["flatpak", "kill", entry["app_id"]]))
+    if succeeded:
+        _write_source_filename_marker(_rpcs3_firmware_marker_path(entry), file_path)
 
 
 def _xenia_canary_args(romfile):
@@ -967,15 +983,21 @@ def _vita3k_fs_dir():
     return _xdg_data_dir("Vita3K", "Vita3K")
 
 
+def _vita3k_firmware_marker_path(slot_prefix):
+    suffix = "-bios2" if slot_prefix == "bios2" else ""
+    return os.path.join(_vita3k_fs_dir(), f".selfsteam-firmware-source{suffix}")
+
+
 def vita3k_firmware_installed(entry, slot_prefix):
     # vs0/ is the Vita OS system partition -- only populated once a real
     # firmware .pup has actually been installed, same "real content
     # exists" check RPCS3's own firmware-installed check uses (though
     # unlike RPCS3, no single sentinel file with a version string inside
     # it is confirmed here, so this only reports a count, not a real
-    # version number). sa0/ is the separate font-package partition (see
-    # the Vita3K EMULATORS entry's own comment on bios2) -- checked the
-    # same way, independently of vs0/, matching Vita3K's own source
+    # version number, as a fallback for firmware installed before the
+    # marker below existed). sa0/ is the separate font-package partition
+    # (see the Vita3K EMULATORS entry's own comment on bios2) -- checked
+    # the same way, independently of vs0/, matching Vita3K's own source
     # (app.cpp's get_firmware_state checks each partition separately).
     subdir = "sa0" if slot_prefix == "bios2" else "vs0"
     label = "font package" if slot_prefix == "bios2" else "firmware"
@@ -983,7 +1005,9 @@ def vita3k_firmware_installed(entry, slot_prefix):
     if not os.path.isdir(part_dir):
         return None
     count = len(os.listdir(part_dir))
-    return f"{label} ({count} items)" if count else None
+    if not count:
+        return None
+    return _read_source_filename_marker(_vita3k_firmware_marker_path(slot_prefix)) or f"{label} ({count} items)"
 
 
 def install_vita3k_firmware(entry, slot_prefix, file_path):
@@ -1001,6 +1025,7 @@ def install_vita3k_firmware(entry, slot_prefix, file_path):
     differs."""
     path = _binary_path("Vita3K", EMULATORS["Vita3K"])
     subprocess.run(host_exec.wrap([path, "--firmware", file_path]))
+    _write_source_filename_marker(_vita3k_firmware_marker_path(slot_prefix), file_path)
 
 
 def install_vita3k_pkg(pkg_path, zrif):
@@ -2084,6 +2109,30 @@ def _old_firmware_marker_path(contents_dir):
     # and losing it would silently regress firmware_installed()'s real-
     # filename display back to the generic "N titles" count-based label.
     return os.path.join(contents_dir, ".gridge-firmware-source")
+
+
+def _write_source_filename_marker(marker_path, original_path):
+    """Generic version of the Ryujinx-family firmware marker above, for
+    every other keys/firmware/BIOS install that extracts or copies into
+    a directory/config layout with no filename of its own to show back
+    (RPCS3's own dev_flash, Vita3K's vs0/sa0 partitions, Cemu's fixed
+    keys.txt) -- confirmed live (2026-08-25) that showing each of these
+    already-installed pickers' own synthetic description ("firmware
+    release:04.9300:...", "font package (3 items)") instead of the real
+    file someone actually picked read as wrong/confusing, not just less
+    specific. Overwritten on every real install, so picking a different
+    file later naturally replaces it."""
+    os.makedirs(os.path.dirname(marker_path), exist_ok=True)
+    with open(marker_path, "w") as f:
+        f.write(os.path.basename(original_path))
+
+
+def _read_source_filename_marker(marker_path):
+    if not os.path.isfile(marker_path):
+        return None
+    with open(marker_path) as f:
+        name = f.read().strip()
+    return name or None
 
 
 def firmware_installed(name):
