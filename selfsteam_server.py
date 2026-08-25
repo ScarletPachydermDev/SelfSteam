@@ -3237,12 +3237,9 @@ def _emulators_tab_panel_html(state, chosen=None):
   <div class="hint-row warning" style="flex-direction:column;align-items:stretch;gap:0.6rem">
     <div style="display:flex;align-items:flex-start;gap:0.5rem">
       <span class="info-icon">!</span>
-      <span>Heads up! Continue shortcut creation as usual, but you must agree to the
-        firmware install at your server's screen to finish the process. This is only
-        required on RPCS3's first install, and won't be prompted again for future games.
-        <br><br>
-        Tick "I have read the Quickstart guide" and untick "Show at startup", and agree
-        to the firmware setup.</span>
+      <span>Heads up! SelfSteam automates first RPCS3 install prompt but if fails to do
+        so please just finish setup at your server screen so shortcut creation finish.
+        This is a one time process and wont show up on future game installs.</span>
     </div>
     <div style="display:flex;flex-direction:column;gap:0.6rem">
       <img src="/vendor/rpcs3-welcome.png" alt="RPCS3's own Welcome dialog"
