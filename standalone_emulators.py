@@ -838,15 +838,24 @@ def _openmsx_args(romfile):
 
 
 def _shadps4_args(romfile):
-    # --fullscreen true plus a bare positional game path (its CLI11
-    # option name is "guest_arg", aliased -g/--game) -- confirmed real
-    # via shadPS4's own source (src/main.cpp:
-    # app.add_option("guest_arg", gamePath, "Game path or ID") and
-    # app.add_option("-f,--fullscreen", fullscreenStr, "Fullscreen mode
-    # (true|false)")). romfile is always a real eboot.bin path by the
-    # time this runs -- see extract_shadps4_pkg's own docstring for why
-    # a raw .pkg never reaches here.
-    return ["--fullscreen", "true", shlex.quote(romfile)]
+    # NOT the raw shadps4 binary's own CLI (src/main.cpp's "guest_arg"
+    # positional + "-f,--fullscreen") -- that's what a from-source build
+    # accepts, but the real Flathub app_id (net.shadps4.shadPS4) wraps
+    # it in a separate launcher/version-manager binary with its own,
+    # different CLI (confirmed live on real hardware: the raw form
+    # above fails outright with "Unknown argument: --fullscreen, see
+    # --help for info", which is exactly why a real shadPS4 shortcut
+    # never actually launched a game before this fix -- the wrapper
+    # silently ate the launch attempt). Its own --help: "-d" is short
+    # for "-e default" (use the config's selected emulator version),
+    # "-g,--game <ID|path>" is the game, and "-- ..." forwards
+    # everything after it verbatim to the real core binary ("Needs to
+    # be at the end of the line") -- confirmed live, the exact
+    # "-d -g <path> -- --fullscreen true" invocation below actually
+    # boots a real game (verified against a genuine Bloodborne PKG on
+    # the Steam Machine, past its FromSoftware/PS logo splash and into
+    # real asset loading).
+    return ["-d", "-g", shlex.quote(romfile), "--", "--fullscreen", "true"]
 
 
 # PS4 .pkg extraction for shadPS4 (real-repo release, downloaded and
