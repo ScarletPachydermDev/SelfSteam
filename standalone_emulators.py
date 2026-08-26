@@ -813,6 +813,44 @@ def _duckstation_args(romfile):
     return ["-fullscreen", "--", shlex.quote(romfile)]
 
 
+def _duckstation_settings_path():
+    # $XDG_DATA_HOME/duckstation/settings.ini -- same DataRoot as
+    # _duckstation_bios_dir's own bios/ subfolder (confirmed via
+    # DuckStation's own source: Core::GetBaseSettingsPath() is
+    # Path::Combine(EmuFolders::DataRoot, "settings.ini")).
+    return os.path.join(_xdg_data_dir("duckstation"), "settings.ini")
+
+
+def _duckstation_bootstrap_config(entry):
+    """Pre-stamps DuckStation's own settings.ini so its first-run Setup
+    Wizard (language, BIOS search directory, optional ROM search
+    directories, resolution scale, preferred UI) never shows at all --
+    confirmed via its own source: qthost.cpp's InitializeConfig sets
+    run_setup_wizard whenever [Main]/SetupWizardIncomplete is true (the
+    default it stamps on a genuinely fresh settings.ini) or absent
+    alongside a missing [Main]/SettingsVersion, and the wizard itself,
+    on completion, only ever clears that one flag -- nothing else it
+    collects (BIOS dir, ROM dirs, scale, UI mode) is required to boot a
+    game, only offered. Unlike PCSX2's own ini bootstrap, no
+    SettingsVersion stamp is needed alongside it -- confirmed via
+    source, DuckStation has no settings-version-mismatch reset
+    mechanism to trip. Additive only: an existing settings.ini (already
+    configured, wizard already dismissed for real) is left untouched
+    beyond adding this one key if it's somehow missing."""
+    settings_path = _duckstation_settings_path()
+    os.makedirs(os.path.dirname(settings_path), exist_ok=True)
+    cp = configparser.ConfigParser(interpolation=None)
+    cp.optionxform = str
+    if os.path.isfile(settings_path):
+        cp.read(settings_path)
+    if not cp.has_section("Main"):
+        cp.add_section("Main")
+    if not cp.has_option("Main", "SetupWizardIncomplete"):
+        cp.set("Main", "SetupWizardIncomplete", "false")
+    with open(settings_path, "w") as f:
+        cp.write(f, space_around_delimiters=True)
+
+
 def _bigpemu_args(romfile):
     # Bare positional romfile -- confirmed real via BigPEmu's own user
     # manual ("BigPEmu always expects the first command line argument
@@ -1512,6 +1550,9 @@ EMULATORS = {
         "needs_keys": False,
         "needs_firmware": False,
         "args": _duckstation_args,
+        # Skips its own first-run Setup Wizard entirely -- see
+        # _duckstation_bootstrap_config's own docstring.
+        "bootstrap_config": _duckstation_bootstrap_config,
     },
     "Azahar": {
         "install_type": "flathub",
