@@ -26,6 +26,15 @@
   </categories>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="0.1.17" date="2026-08-26">
+      <description>
+        <ul>
+          <li>Extract PS4 .pkg files for shadPS4, which has no PKG-install path of its own -- picking a .pkg as the ROM now extracts it automatically, with "Extracting PKG" shown on the Create button while that runs</li>
+          <li>Fix shadPS4 shortcuts never actually launching a game -- the real Flathub app wraps a separate launcher CLI with different arguments than shadPS4's own, so every shortcut silently failed to boot until now</li>
+          <li>Skip DuckStation's first-run Setup Wizard so a freshly-created shortcut boots straight into the game instead of stopping on a config dialog</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.16" date="2026-08-25">
       <description>
         <ul>
