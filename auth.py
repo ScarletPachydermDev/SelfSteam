@@ -59,9 +59,13 @@ def _load_remembered():
 
 
 def _save_remembered(data):
-    os.makedirs(config.CONFIG_DIR, exist_ok=True)
-    with open(_REMEMBERED_FILE, "w") as f:
-        json.dump(data, f, indent=2)
+    # atomic_write_json, not a plain open(...)+json.dump -- see its own
+    # docstring for why: this exact file, rewritten on every
+    # authenticated request via is_remembered's sliding-expiry renewal,
+    # was the real one confirmed corrupted by a kill-mid-write from the
+    # auto-restart-on-update feature, discarding every remembered
+    # device and forcing a fresh pairing-code login.
+    config.atomic_write_json(_REMEMBERED_FILE, data)
 
 
 def remember_device():

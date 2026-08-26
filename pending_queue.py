@@ -40,9 +40,12 @@ def _load():
 
 
 def _save(items):
-    os.makedirs(config.CONFIG_DIR, exist_ok=True)
-    with open(_QUEUE_FILE, "w") as f:
-        json.dump(items, f, indent=2)
+    # atomic_write_json, not a plain open(...)+json.dump -- see its own
+    # docstring: this file is exactly as vulnerable as auth.py's
+    # remembered-devices one to a kill-mid-write from the auto-restart-
+    # on-update feature, which would silently discard a staged shortcut
+    # someone hadn't committed yet.
+    config.atomic_write_json(_QUEUE_FILE, items)
 
 
 def add(name, url, couch_mode, asset_paths, browser_app_id=None, launch_args=None):

@@ -6,6 +6,7 @@ dev-only convenience for running the CLI directly.
 import json
 import os
 import shutil
+import tempfile
 
 _CONFIG_HOME = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
 CONFIG_DIR = os.path.join(_CONFIG_HOME, "selfsteam")
@@ -55,12 +56,41 @@ def load():
         return json.load(f)
 
 
+def atomic_write_json(path, data):
+    """Writes JSON to path atomically -- a temp file in the same
+    directory, flushed and fsynced, then renamed over the real path --
+    instead of a plain open(path, "w") + json.dump, which leaves a
+    truncated/corrupt file behind if the process dies mid-write.
+    Confirmed live as a real bug, not a hypothetical: selfsteam_server.
+    py's own auto-restart-on-update calls `flatpak kill` on this app
+    (a hard kill, not a graceful shutdown -- see its own docstring for
+    why a graceful one doesn't reliably work here), and auth.py's own
+    remembered-device file gets rewritten on every authenticated
+    request (a sliding-expiry renewal) -- landing that kill mid-write
+    silently discarded every remembered device, forcing a fresh pairing-
+    code login the next time, even though "remember this device" had
+    been used. Shared here (not duplicated per file) since
+    pending_queue.json and this module's own config.json are written
+    just as often and are exactly as vulnerable to the same kill."""
+    directory = os.path.dirname(path)
+    os.makedirs(directory, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(dir=directory, prefix=".tmp-", suffix=".json")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+    except BaseException:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise
+
+
 def save(**updates):
     data = load()
     data.update(updates)
-    os.makedirs(CONFIG_DIR, exist_ok=True)
-    with open(CONFIG_FILE, "w") as f:
-        json.dump(data, f, indent=2)
+    atomic_write_json(CONFIG_FILE, data)
 
 
 def get_sgdb_api_key():
