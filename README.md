@@ -13,7 +13,7 @@ A headless companion, a small web UI for adding Steam shortcuts (with SteamGridD
 - [x] Retrieve game or app artwork from [SteamGridDB](https://www.steamgriddb.com/) vast community database (you'll need to provide your own API key)
 - [x] Install other game launchers and apps
 - [x] Upload retro games roms and SS will take care of looking for artwork and adding Steam shortcut
-- [x] Upload .isos, keys and firmware files from SS to add more modern console games.
+- [x] Upload .isos, keys and firmware files from SS for modern console games.
 - [x] Add/edit your non Steam shortcuts
 - [x] Web UI running from your Steam Deck / Steam Machine in game mode, desktop mode is only needed to install app
 - [x] Screen code authentication
@@ -25,7 +25,7 @@ A headless companion, a small web UI for adding Steam shortcuts (with SteamGridD
 - [ ] Test all emulators, around 80% of them only have been tested.
 - [x] Add other game launchers + utilities
 - [ ] More testing and polishing
-- [ ] Marry [preflight](https://github.com/ScarletPachydermDev/Preflight) to this project to avoid controller layout issues in emulators (if viable)
+- [ ] Marry [preflight](https://github.com/ScarletPachydermDev/Preflight) to this project to avoid controller layout issues in emulators (if viable). At the moment games set up from the Emulators tab, controllers wont work from the get go unless controller set up was done at the emulator app, making the feature of setting up games from the Emulators tab useless.
 
 ## How to install
 Run on your terminal
@@ -52,4 +52,4 @@ monero: 89GucTETmNEUVdbF3HYWYC8Gi3mFdUFvyEaa545E4S8ahq2MfXmGgMzS5q9Kx6k3DG943gXF
 
 ## License
 
-[FSL-1.1-MIT](LICENSE) -- free for any non-competing use (personal use, internal use, non-commercial education/research); converts automatically to plain MIT two years after each version is released.
+[FSL-1.1-MIT](LICENSE)
