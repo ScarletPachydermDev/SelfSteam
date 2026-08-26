@@ -96,7 +96,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           version="${GITHUB_REF_NAME#v}"
-          gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" ||
-            gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" \
-              --title "SelfSteam ${version}" --generate-notes
+          # Release notes always come from this version's own <description>
+          # in metainfo.xml -- the single source of truth kept up to date
+          # with every release -- instead of --generate-notes' raw commit
+          # list, so the GitHub release itself always shows the same
+          # human-written bullets.
+          python3 src/packaging/extract_release_notes.py "$version" > notes.md
+          gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" \
+            && gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --notes-file notes.md \
+            || gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" \
+              --title "SelfSteam ${version}" --notes-file notes.md
           gh release upload "${GITHUB_REF_NAME}" "selfsteam-${version}-x86_64.flatpak" --repo "${GITHUB_REPOSITORY}" --clobber
