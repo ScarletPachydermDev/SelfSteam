@@ -843,8 +843,111 @@ def _shadps4_args(romfile):
     # via shadPS4's own source (src/main.cpp:
     # app.add_option("guest_arg", gamePath, "Game path or ID") and
     # app.add_option("-f,--fullscreen", fullscreenStr, "Fullscreen mode
-    # (true|false)")).
+    # (true|false)")). romfile is always a real eboot.bin path by the
+    # time this runs -- see extract_shadps4_pkg's own docstring for why
+    # a raw .pkg never reaches here.
     return ["--fullscreen", "true", shlex.quote(romfile)]
+
+
+# PS4 .pkg extraction for shadPS4 (real-repo release, downloaded and
+# cached the same on-demand way as every AppImage emulator's own
+# install_binary): shadPS4's CLI has no PKG-install path at all
+# (confirmed via its own source -- src/main.cpp's gamePath resolution
+# only ever accepts an existing eboot-like file/path, or a Game ID
+# looked up against directories registered with --add-game-folder,
+# never a raw .pkg -- the only place shadPS4 itself understands PKG
+# files is its Qt GUI's own installer, which SelfSteam's headless
+# Create flow never runs). paulomanrique/ps4-pkg-extractor's own
+# "pkgextract" CLI is a thin wrapper around the orbis-pkg-util crate,
+# whose own README documents real PFS/AES decryption (not just outer-
+# metadata extraction) -- benchmarked there against a genuine ~30GB
+# Bloodborne PKG (CUSA03173_01), and built with shadPS4's own (since-
+# removed) PKG-install code as its initial reference. Public domain
+# (Unlicense).
+_PKGEXTRACT_RELEASE_API = "https://api.github.com/repos/paulomanrique/ps4-pkg-extractor/releases?per_page=1"
+_PKGEXTRACT_ASSET_RE = re.compile(r"^pkgextract-x86_64-unknown-linux-gnu\.zip$")
+
+
+def _pkgextract_dir():
+    return _xdg_data_dir("selfsteam", "tools", "pkgextract")
+
+
+def _pkgextract_bin_path():
+    return os.path.join(_pkgextract_dir(), "pkgextract")
+
+
+def _ensure_pkgextract():
+    """Downloads and unpacks the pkgextract CLI the first time a .pkg
+    needs extracting, caching it at _pkgextract_bin_path() afterward --
+    same "cheap once already done" convention as every other install_*
+    helper here. Its own GitHub Releases ship one .zip per platform
+    (not a bare executable, unlike every AppImage emulator's own single-
+    file release asset), so this can't just reuse install_binary."""
+    bin_path = _pkgextract_bin_path()
+    if os.path.isfile(bin_path) and os.access(bin_path, os.X_OK):
+        return bin_path
+
+    req = urllib.request.Request(_PKGEXTRACT_RELEASE_API, headers={"User-Agent": "SelfSteam"})
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        releases = json.load(resp)
+    if not releases:
+        raise RuntimeError("pkgextract: release API returned no releases")
+    release = releases[0]
+    match = next((a for a in release["assets"] if _PKGEXTRACT_ASSET_RE.match(a["name"])), None)
+    if not match:
+        raise RuntimeError(f"pkgextract {release.get('tag_name', '?')}: no asset matching {_PKGEXTRACT_ASSET_RE.pattern!r}")
+
+    os.makedirs(_pkgextract_dir(), exist_ok=True)
+    dl_req = urllib.request.Request(match["browser_download_url"], headers={"User-Agent": "SelfSteam"})
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        zip_path = os.path.join(tmp_dir, "pkgextract.zip")
+        with urllib.request.urlopen(dl_req, timeout=120) as resp, open(zip_path, "wb") as f:
+            shutil.copyfileobj(resp, f)
+        with zipfile.ZipFile(zip_path) as z:
+            z.extractall(tmp_dir)
+        extracted = next(
+            (os.path.join(root, fname) for root, _dirs, files in os.walk(tmp_dir) for fname in files if fname == "pkgextract"),
+            None,
+        )
+        if not extracted:
+            raise RuntimeError("pkgextract: downloaded zip didn't contain a 'pkgextract' binary")
+        shutil.copy2(extracted, bin_path)
+    os.chmod(bin_path, 0o755)
+    return bin_path
+
+
+def _shadps4_pkg_dir():
+    # Own persistent extraction dir, unrelated to shadPS4's own --add-
+    # game-folder mechanism -- SelfSteam always launches by passing the
+    # extracted eboot.bin's own direct path, so shadPS4 never needs to
+    # be told this directory exists at all.
+    return _xdg_data_dir("selfsteam", "shadps4-pkgs")
+
+
+def extract_shadps4_pkg(pkg_path):
+    """Extracts a PS4 .pkg into its own folder under _shadps4_pkg_dir()
+    via pkgextract, returning the extracted eboot.bin's path -- a real
+    install directory always has eboot.bin sitting directly at its own
+    root next to sce_sys/param.sfo, confirmed via shadPS4's own source
+    (common/path_util.cpp's FindGameByID). Skips re-extracting a pkg
+    that's already been extracted, same "cheap once already done"
+    convention as install_keys/install_firmware_zip elsewhere in this
+    file."""
+    pkgextract = _ensure_pkgextract()
+    out_dir = os.path.join(_shadps4_pkg_dir(), os.path.splitext(os.path.basename(pkg_path))[0])
+    eboot_path = os.path.join(out_dir, "eboot.bin")
+    if os.path.isfile(eboot_path):
+        return eboot_path
+    os.makedirs(_shadps4_pkg_dir(), exist_ok=True)
+    result = subprocess.run(
+        [pkgextract, pkg_path, "-o", out_dir, "-f"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0 or not os.path.isfile(eboot_path):
+        raise RuntimeError(
+            f"PS4 .pkg extraction failed: {result.stderr.strip() or result.stdout.strip() or 'no eboot.bin in extracted output'}"
+        )
+    return eboot_path
 
 
 def _rpcs3_args(romfile):
@@ -2045,6 +2148,13 @@ def launch_args(name, romfile, zrif=None):
     flatpak = host_exec.which("flatpak")
     if not flatpak:
         return None
+    # shadPS4 .pkg -- see extract_shadps4_pkg's own docstring for why a
+    # raw .pkg is never a valid boot path on its own; this swaps it for
+    # the real extracted eboot.bin before building the launch args,
+    # same "real content-path substitution" shape as Vita3K's own .pkg
+    # case above, just without a title-id round trip.
+    if name == "shadPS4" and romfile.lower().endswith(".pkg"):
+        romfile = extract_shadps4_pkg(romfile)
     return [flatpak, "run", entry["app_id"], *entry["args"](romfile)]
 
 
