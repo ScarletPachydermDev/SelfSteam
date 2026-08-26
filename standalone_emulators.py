@@ -950,6 +950,18 @@ def extract_shadps4_pkg(pkg_path):
     return eboot_path
 
 
+def shadps4_pkg_extraction_needed(romfile):
+    """True if Create would actually run extract_shadps4_pkg's own
+    extraction step for this romfile -- lets the UI show "Extracting
+    PKG" ahead of time (a real, sometimes-multi-minute blocking wait
+    for a large game) without duplicating extract_shadps4_pkg's own
+    eboot.bin-already-there short-circuit logic here."""
+    if not romfile.lower().endswith(".pkg"):
+        return False
+    out_dir = os.path.join(_shadps4_pkg_dir(), os.path.splitext(os.path.basename(romfile))[0])
+    return not os.path.isfile(os.path.join(out_dir, "eboot.bin"))
+
+
 def _rpcs3_args(romfile):
     # --no-gui --fullscreen plus a bare positional romfile -- confirmed
     # real via RPCS3's own source (rpcs3/rpcs3.cpp: arg_no_gui/

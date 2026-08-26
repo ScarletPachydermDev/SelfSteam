@@ -1060,6 +1060,8 @@ function selfsteamShowCreating(form) {
   button.disabled = true;
   if (form.dataset.emulator && !form.dataset.installed) {
     button.innerHTML = "Downloading " + form.dataset.emulator + '<span class="spinner"></span>';
+  } else if (form.dataset.pkgExtract) {
+    button.innerHTML = "Extracting PKG" + '<span class="spinner"></span>';
   } else if (form.dataset.appName && !form.dataset.installed) {
     button.innerHTML = "Installing " + form.dataset.appName + '<span class="spinner"></span>';
   } else {
@@ -4143,9 +4145,18 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
         # this says.
         em_already_installed = standalone_emulators.installed(em_emulator)
         em_edit_appid = em_state.get("em_edit_appid", "")
+        # shadPS4-only: a .pkg romfile that hasn't been extracted yet is
+        # a real, sometimes-multi-minute blocking step inside /add (see
+        # standalone_emulators.extract_shadps4_pkg) -- same "give real
+        # feedback for a real slow step" reasoning as data-emulator's
+        # own "Downloading <emulator>" case above, just a separate flag
+        # since both can apply on a shadPS4 game's very first shortcut
+        # (not yet installed AND not yet extracted).
+        em_pkg_extract_needed = em_emulator == "shadPS4" and standalone_emulators.shadps4_pkg_extraction_needed(em_state.get("em_romfile", ""))
         add_form = f"""
 <form id="{_ADD_FORM_ID}" action="/add" method="post" onsubmit="selfsteamShowCreating(this)"
-      data-emulator="{html.escape(em_emulator)}" data-installed="{"1" if em_already_installed else ""}">
+      data-emulator="{html.escape(em_emulator)}" data-installed="{"1" if em_already_installed else ""}"
+      data-pkg-extract="{"1" if em_pkg_extract_needed else ""}">
   <input type="hidden" name="em_emulator" value="{html.escape(em_emulator)}">
   <input type="hidden" name="em_romfile" value="{html.escape(em_state.get('em_romfile', ''))}">
   <input type="hidden" name="em_biosfile" value="{html.escape(em_state.get('em_biosfile', ''))}">
