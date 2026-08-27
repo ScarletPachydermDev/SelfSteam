@@ -133,6 +133,9 @@ _RPCS3_FIRMWARE_INSTALLER_SCREENSHOT_PATH = os.path.join(os.path.dirname(__file_
 # own explicit route), since there are 31 of them; served generically
 # below with a basename-only (no path traversal) + real-file check.
 _CONSOLE_ICONS_DIR = os.path.join(os.path.dirname(__file__), "vendor", "console-icons")
+# Emulators tab's own picker icons (standalone_emulators.EMULATOR_ICON_SLUGS)
+# -- same generic-directory-route reasoning as _CONSOLE_ICONS_DIR above.
+_EMULATOR_ICONS_DIR = os.path.join(os.path.dirname(__file__), "vendor", "emulator-icons")
 _ADD_FORM_ID = "selfsteam-add-form"
 _SEARCH_ICON_SVG = (
     '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="white" '
@@ -1247,7 +1250,7 @@ function selfsteamRaFormNav(form) {
   selfsteamRaFetch(action + "?" + qs + "#tab-retroarch");
 }
 
-// Same reasoning as selfsteamEmEmulatorChanged's own comment -- a BIOS
+// Same reasoning as selfsteamEmEmulatorPicked's own comment -- a BIOS
 // picked for the previously-selected console/core is tied to that
 // core specifically, not the ROM, so it shouldn't show as "already
 // selected" once a different console/core is chosen. Shared by both
@@ -1435,14 +1438,37 @@ function selfsteamAppsUninstall(btn) {
 // engines for the same already-picked game is the common case this is
 // for, unlike the BIOS/keys/firmware picks, which really are tied to
 // the specific emulator, not the game.
-function selfsteamEmEmulatorChanged(select) {
-  var form = select.form;
+// Emulator picker: the same click-to-open dropdown as the RA tab's own
+// console picker (selfsteamRaConsolePickerToggle/selfsteamRaConsolePicked
+// -- see their own comments) instead of a native <select>, so each row
+// can show a real icon + console-target description. Picking a row
+// still clears every BIOS/keys/firmware pick the same way this
+// function always did (they're tied to the specific emulator, not the
+// game), then reuses the exact same selfsteamEmFormNav round-trip.
+function selfsteamEmEmulatorPickerToggle(event) {
+  event.stopPropagation();
+  var panel = document.getElementById("em-emulator-panel");
+  if (panel) panel.hidden = !panel.hidden;
+}
+
+function selfsteamEmEmulatorPicked(row) {
+  var form = row.closest("form");
+  form.elements["em_emulator"].value = row.dataset.value || "";
   ["em_biosfile", "em_bios2file", "em_bios3file", "em_bios4file", "em_keysfile", "em_firmwarefile"].forEach(function (name) {
     var el = form.elements[name];
     if (el) el.value = "";
   });
+  var panel = document.getElementById("em-emulator-panel");
+  if (panel) panel.hidden = true;
   selfsteamEmFormNav(form);
 }
+
+document.addEventListener("click", function (event) {
+  var panel = document.getElementById("em-emulator-panel");
+  if (!panel || panel.hidden) return;
+  var picker = document.getElementById("em-emulator-picker");
+  if (picker && !picker.contains(event.target)) panel.hidden = true;
+});
 
 // Initial pass on real page load (not just after an AJAX swap, which
 // selfsteamApplySwap's own call already covers), plus on resize since
@@ -3257,6 +3283,54 @@ def _em_picker_section(prefix, label, state, already_installed=None, info_toolti
   </div>"""
 
 
+def _emulator_picker_html(names, current_emulator):
+    """Emulators tab's own picker -- same click-to-open dropdown as the
+    RA tab's console picker (_console_picker_html), showing each
+    emulator's own real icon and its console target(s) as the
+    description, instead of a native <select>'s plain-text-only
+    options. names is already filtered to the active Flathub/AppImage
+    install source and sorted by display name (see its own caller)."""
+    def _display_name(name):
+        # display_name overrides the catalog's own (dict-key-unique)
+        # name for what's actually shown -- e.g. "Ryubing (AppImage)"
+        # displays as just "Ryubing" since the AppImage/Flathub toggle
+        # already disambiguates it from the Flathub "Ryubing" entry.
+        return standalone_emulators.EMULATORS.get(name, {}).get("display_name", name)
+
+    def _row(name):
+        icon_url = standalone_emulators.emulator_icon_url(name)
+        consoles = standalone_emulators.EMULATORS.get(name, {}).get("consoles", "")
+        return f"""
+      <div class="apps-card console-picker-row" data-value="{html.escape(name)}" onclick="selfsteamEmEmulatorPicked(this)">
+        <img class="apps-card-icon" src="{html.escape(icon_url)}" alt="" loading="lazy">
+        <div class="apps-card-text">
+          <div class="apps-card-name">{html.escape(_display_name(name))}</div>
+          <div class="apps-card-summary">{html.escape(consoles)}</div>
+        </div>
+      </div>"""
+
+    rows = "".join(_row(n) for n in names)
+
+    if current_emulator:
+        icon_url = standalone_emulators.emulator_icon_url(current_emulator)
+        trigger_inner = f"""
+        <img class="apps-card-icon" src="{html.escape(icon_url)}" alt="" loading="lazy">
+        <span class="console-picker-name">{html.escape(_display_name(current_emulator))}</span>"""
+    else:
+        trigger_inner = '<span class="console-picker-placeholder">Pick your emulator</span>'
+
+    return f"""
+    <div class="console-picker" id="em-emulator-picker">
+      <button type="button" class="console-picker-trigger" id="em-emulator-trigger" onclick="selfsteamEmEmulatorPickerToggle(event)">
+        {trigger_inner}
+        <span class="console-picker-caret">&#9662;</span>
+      </button>
+      <div class="console-picker-panel" id="em-emulator-panel" hidden>
+        {rows}
+      </div>
+    </div>"""
+
+
 def _emulators_tab_panel_html(state, chosen=None):
     install_source = state.get("em_install_source") or "flathub"
     emulator = state.get("em_emulator", "")
@@ -3270,19 +3344,6 @@ def _emulators_tab_panel_html(state, chosen=None):
     # AppImage), it's simply not a valid option in this dropdown --
     # shows "Pick your emulator" instead of a stale/wrong selection.
     # "<emulator> - <consoles>" as one plain-text label -- native
-    # <option> elements can't mix two text colors/weights inside a
-    # single option, so a separate grey "consoles" line was the other
-    # option; this is what was actually asked for instead.
-    def _emulator_option_label(name):
-        e = standalone_emulators.EMULATORS.get(name, {})
-        # display_name overrides the catalog's own (dict-key-unique)
-        # name for what's actually shown -- e.g. "Ryubing (AppImage)"
-        # displays as just "Ryubing" since the AppImage/Flathub toggle
-        # already disambiguates it from the Flathub "Ryubing" entry.
-        display = e.get("display_name", name)
-        consoles = e.get("consoles")
-        return f"{display} - {consoles}" if consoles else display
-
     # Sorted by emulator name -- unlike the RA tab's own "console - core"
     # picker (retroarch_cores.CONSOLES), where console is the meaningful
     # grouping, this tab's own label is "EmulatorName - Console", so
@@ -3291,12 +3352,7 @@ def _emulators_tab_panel_html(state, chosen=None):
         standalone_emulators.by_install_type(install_source),
         key=lambda n: n.lower(),
     )
-
-    emulator_options = "".join(
-        f'<option value="{html.escape(e)}"{" selected" if e == emulator else ""}>'
-        f'{"Pick your emulator" if not e else html.escape(_emulator_option_label(e))}</option>'
-        for e in [""] + names
-    )
+    emulator_picker_html = _emulator_picker_html(names, emulator)
 
     # id="em-console-form-{k}" mirrors the RA tab's own "ra-console-
     # form-{k}" -- see selfsteamToggleSource's own comment on why its
@@ -3443,9 +3499,8 @@ def _emulators_tab_panel_html(state, chosen=None):
     {source_toggle}
     <form method="get" action="/new#tab-emulators" style="margin:0">
       {hidden_fields}
-      <select name="em_emulator" onchange="selfsteamEmEmulatorChanged(this)">
-        {emulator_options}
-      </select>
+      <input type="hidden" name="em_emulator" id="em-emulator-hidden" value="{html.escape(emulator)}">
+      {emulator_picker_html}
     </form>
   </div>
   {bios_block}
@@ -5139,6 +5194,21 @@ class Handler(BaseHTTPRequestHandler):
             # what parsed.path actually contains.
             filename = os.path.basename(parsed.path)
             icon_path = os.path.join(_CONSOLE_ICONS_DIR, filename)
+            if filename.endswith(".png") and os.path.isfile(icon_path):
+                with open(icon_path, "rb") as f:
+                    body = f.read()
+                self.send_response(200)
+                self.send_header("Content-Type", "image/png")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            else:
+                self._send_html(render("<p>Not found</p>"), status=404)
+            return
+
+        if parsed.path.startswith("/vendor/emulator-icons/"):
+            filename = os.path.basename(parsed.path)
+            icon_path = os.path.join(_EMULATOR_ICONS_DIR, filename)
             if filename.endswith(".png") and os.path.isfile(icon_path):
                 with open(icon_path, "rb") as f:
                     body = f.read()

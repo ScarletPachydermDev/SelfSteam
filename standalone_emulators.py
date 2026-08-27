@@ -1887,6 +1887,57 @@ def by_install_type(install_type):
     return [name for name, entry in EMULATORS.items() if entry["install_type"] == install_type]
 
 
+# Real per-emulator icons for the Emulators tab's own picker (see
+# selfsteam_server._emulator_picker_html) -- Flathub's own appstream
+# icon for every flathub-install entry (flathub.org/api/v2/appstream/
+# <app_id>), and each AppImage-install project's own real packaging
+# icon for the rest (confirmed via each project's own repo, not
+# guessed: DuckStation ships on Flathub too even though it's installed
+# here as an AppImage, so its icon comes from there same as any other
+# Flathub entry; Eden's dist/dev.eden_emu.eden.svg and Vita3K's own
+# dist/image/org.vita3k.vita3k.svg are each project's own .desktop
+# icon; Xenia Canary's assets/icon/128.png is its own packaged app
+# icon). Every Eden/Ryubing-family variant here is the same underlying
+# project under a different CPU-target/channel name, so they
+# deliberately share one slug rather than needing a separate icon per
+# variant.
+EMULATOR_ICON_SLUGS = {
+    "Dolphin": "dolphin",
+    "Ryubing": "ryujinx",
+    "Cemu": "cemu",
+    "Flycast": "flycast",
+    "gopher64": "gopher64",
+    "Rosalie's Mupen GUI": "rmg",
+    "M64Py": "m64py",
+    "melonDS": "melonds",
+    "xemu": "xemu",
+    "PCSX2": "pcsx2",
+    "DuckStation": "duckstation",
+    "Azahar": "azahar",
+    "RPCS3": "rpcs3",
+    "PPSSPP": "ppsspp",
+    "Play!": "play",
+    "shadPS4": "shadps4",
+    "BigPEmu": "bigpemu",
+    "Eden (amd64 — Intel/AMD desktop)": "eden",
+    "Eden (Legacy amd64 — pre-Ryzen/pre-Haswell CPUs)": "eden",
+    "Eden (Zen 2 — Steam Deck)": "eden",
+    "Eden (Zen 4 — AMD Z1/Z2, ROG Ally X, Legion Go S, Steam Machine)": "eden",
+    "Ryubing (AppImage)": "ryujinx",
+    "Ryubing Canary (AppImage)": "ryujinx",
+    "Vita3K": "vita3k",
+    "Xenia Canary (AppImage)": "xenia",
+    "openMSX": "openmsx",
+}
+
+
+def emulator_icon_url(name):
+    """The /vendor/emulator-icons/ URL for name's own icon, or "" for an
+    unknown/future entry rather than a broken <img> src."""
+    slug = EMULATOR_ICON_SLUGS.get(name)
+    return f"/vendor/emulator-icons/{slug}.png" if slug else ""
+
+
 def _binary_dir_name(name):
     # Catalog names are free-form display text (e.g. "Eden (Steam
     # Machine/Zen4)") -- "/" would otherwise be read as a real path
