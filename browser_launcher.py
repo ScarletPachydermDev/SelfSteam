@@ -2,8 +2,9 @@
 
 edge_launcher.py already handles Edge's own first-run/onboarding
 suppression quirks separately and stays untouched -- this module only
-covers the *other* Flatpak browsers browser_picker.py can detect.
-Confirmed live this session (LibreWolf, Zen; Chromium family inferred
+covers the *other* Flatpak browsers (browser_catalog.py's curated
+list, plus a few others already covered here from before that list
+existed). Confirmed live this session (LibreWolf, Zen; Chromium family inferred
 from Edge's own proven flags, which are standard Chromium behavior
 shared across derivatives, not Edge-specific):
 
@@ -12,6 +13,16 @@ shared across derivatives, not Edge-specific):
   --no-default-browser-check), no persistent state needed -- kiosk
   mode is entirely a launch-time flag, so the user's regular browsing
   in that same browser/profile is completely unaffected either way.
+- Opera specifically (real Chromium family, but NOT this same recipe):
+  confirmed live, repeatedly, that "--app=<url>" is silently ignored --
+  it always opens Opera's own Speed Dial regardless of --kiosk, on a
+  fresh profile AND an already-onboarded one. The fix is passing the
+  URL as a bare positional argument instead (no --app= at all)
+  alongside the same --kiosk/--start-fullscreen/etc. flags -- confirmed
+  live this navigates correctly to the target URL, in a real fullscreen
+  chromeless window, and --no-first-run alone (no Edge-style profile/
+  Local State seeding needed) is enough to skip Opera's own "Opera One"
+  onboarding tab too.
 - Plain Firefox-family (LibreWolf confirmed): --kiosk --new-instance
   plus the URL is enough on its own, same "flag-only" property as
   Chromium.
@@ -46,6 +57,14 @@ CHROMIUM_APP_IDS = {
     "io.github.ungoogled_software.ungoogled_chromium",
     "com.brave.Browser",
     "com.vivaldi.Vivaldi",
+}
+
+# Opera-family: real Chromium derivatives, but --app= doesn't work on
+# either -- see module docstring. opera-gx is the same underlying
+# browser (a themed fork sharing Opera's own Chromium base), so the
+# same recipe is extended to it too, though only plain Opera has
+# actually been tested live.
+OPERA_APP_IDS = {
     "com.opera.Opera",
     "com.opera.opera-gx",
 }
@@ -157,6 +176,20 @@ def kiosk_launch_args(browser_app_id, url, couch_mode, youtube_tv_user_agent=Non
             # and the TV user-agent has spaces/parens/semicolons in it --
             # unquoted, it gets word-split into several bogus arguments.
             args.append(shlex.quote(f"--user-agent={youtube_tv_user_agent}"))
+        return args
+
+    if browser_app_id in OPERA_APP_IDS:
+        # No "--app=<url>" -- see module docstring's own Opera entry for
+        # why. Every other flag here is the same as the Chromium-family
+        # branch above; only how the URL itself gets passed differs.
+        args = [
+            flatpak, "run", browser_app_id,
+            "--kiosk", "--start-fullscreen", "--hide-scrollbars",
+            "--no-first-run", "--no-default-browser-check",
+        ]
+        if couch_mode and youtube_tv_user_agent:
+            args.append(shlex.quote(f"--user-agent={youtube_tv_user_agent}"))
+        args.append(shlex.quote(url))
         return args
 
     if browser_app_id == ZEN_APP_ID:

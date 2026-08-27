@@ -19,18 +19,17 @@ always shown). Styling mirrors the GTK desktop app's own MainWindow
 isn't importable here -- it requires libadwaita at module level, not
 available for this headless server's native Python on the host.
 
-Browser picker note: the <select> is real and populated from actually
-installed Flatpak browsers (browser_picker.py, detected via each
-app's exported .desktop Categories=WebBrowser / MimeType=x-scheme-
-handler/https). The selection threads through the request, but doesn't
-change the shortcut's actual launch command yet -- that needs
-generalizing create_webapp.py's Edge-only kiosk-arg construction to
-handle other browsers' very different kiosk syntax (Firefox-based
-browsers like LibreWolf use "-kiosk", not "--app="/"--kiosk", and have
-no direct equivalent to Chromium's --app= at all), which is the
-separately-scoped "browser-picker rework" -- not attempted here to
-avoid silently shipping a selector that produces a broken shortcut for
-non-Chromium browsers.
+Browser picker note: a small curated list of Flathub browsers
+(browser_catalog.py), not whatever happens to already be installed --
+a machine with zero Flatpak browsers had nothing to offer at all under
+the old "detect installed ones" approach. Installed on demand (the
+same way Apps/Emulators-tab entries are) the moment a shortcut using
+it is actually created. Each browser's own real kiosk-mode launch
+syntax is resolved via create_webapp.build_browser_launch_args, which
+dispatches to edge_launcher.py (Edge's own extra first-run/onboarding
+suppression) or browser_launcher.py (everything else confirmed working
+in kiosk mode -- see its own docstring, including Opera's different-
+from-Chromium flag recipe).
 """
 import html
 import http.cookies
@@ -47,7 +46,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import auth
 import auth_display
-import browser_picker
+import browser_catalog
 import config
 import create_webapp
 import appimage_apps
@@ -656,6 +655,15 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
 .apps-card-extras { flex: 0 0 auto; display: flex; align-items: center; gap: 0.5rem; margin-right: 0.5rem; }
 .apps-card-homepage { display: inline-flex; color: var(--text-dim); }
 .apps-card-shortcut-check { display: inline-flex; }
+/* URL tab's own curated browser picker -- same .apps-card row markup
+   as the Apps tab (see _url_browser_picker_html), just stacked as a
+   plain vertical list instead of a grid, plus a real native radio
+   circle (not a whole-card click) in .apps-card-extras. */
+.browser-list { display: flex; flex-direction: column; gap: 0.4rem; }
+.browser-row input[type=radio] { width: 18px; height: 18px; flex: 0 0 auto; cursor: pointer; }
+/* Separates Opera from the other four -- see browser_catalog.OPERA's
+   own docstring for why it's kept visually apart. */
+.browser-separator { border-top: 1px solid var(--border); margin: 0.3rem 0.2rem; }
 /* .apps-grid-list, not .boxed-list -- .boxed-list's own "a" rule
    (background/padding, meant for its plain <a> rows elsewhere on this
    page) is a class+type selector, higher specificity than a single
@@ -1058,10 +1066,19 @@ function selfsteamShowCreating(form) {
   var button = document.getElementById("selfsteam-add-button");
   if (!button) return;
   button.disabled = true;
+  // URL tab's own browser radios live outside this form (form="..."
+  // association, same as the artwork radios) -- form.querySelector
+  // only searches real DOM descendants, so this needs a page-wide
+  // lookup instead. Reads whichever radio is ACTUALLY checked right
+  // now, not a server-rendered default frozen at page-render time --
+  // the user may have picked a different browser client-side since.
+  var browserRadio = document.querySelector('input[name="browser"]:checked');
   if (form.dataset.emulator && !form.dataset.installed) {
     button.innerHTML = "Downloading " + form.dataset.emulator + '<span class="spinner"></span>';
   } else if (form.dataset.pkgExtract) {
     button.innerHTML = "Extracting PKG" + '<span class="spinner"></span>';
+  } else if (browserRadio && !browserRadio.dataset.installed) {
+    button.innerHTML = "Downloading " + browserRadio.dataset.name + '<span class="spinner"></span>';
   } else if (form.dataset.appName && !form.dataset.installed) {
     button.innerHTML = "Installing " + form.dataset.appName + '<span class="spinner"></span>';
   } else {
@@ -1726,31 +1743,66 @@ def _default_browser(browser_param):
     # Explicit param (threaded through the current request) wins; failing
     # that, whatever browser was used for the last shortcut actually
     # created (config.py, shared with the desktop app's own config.json
-    # but under a server-only key); failing that, just the first detected
-    # browser so the select always has a real, launchable choice selected
-    # rather than an inert "System default" placeholder.
+    # but under a server-only key); failing that, just the first curated
+    # browser so a radio is always pre-selected rather than none at all.
     if browser_param:
         return browser_param
     remembered = config.get_last_browser()
     if remembered:
         return remembered
-    browsers = browser_picker.list_installed_browsers()
-    return browsers[0][0] if browsers else ""
+    return browser_catalog.ALL_BROWSERS[0]["app_id"]
 
 
-def _browser_select_html(selected_browser):
-    browsers = browser_picker.list_installed_browsers()
-    if not browsers:
-        return ""
+def _url_browser_picker_html(selected_browser):
+    """The URL tab's curated Flathub browser list -- same apps-card
+    markup/classes as the Apps tab (icon, name, description) per the
+    explicit design ask, just rendered as a vertical list instead of a
+    grid, with a real native radio circle (not a whole-card click) at
+    the right of each row so exactly one is always the actual submitted
+    value. Opera is visually separated from the other four (a
+    .browser-separator rule) -- see browser_catalog.OPERA's own
+    docstring for why it's the odd one out."""
+    installed_ids = standalone_emulators.installed_flathub_app_ids()
     default = _default_browser(selected_browser)
-    options = []
-    for app_id, name in browsers:
-        sel = " selected" if app_id == default else ""
-        options.append(f'<option value="{html.escape(app_id)}"{sel}>{html.escape(name)}</option>')
+
+    def _row(entry):
+        app_id = entry["app_id"]
+        radio_id = "browser-" + re.sub(r"[^a-zA-Z0-9]+", "-", app_id).strip("-").lower()
+        checked = " checked" if app_id == default else ""
+        already_installed = app_id in installed_ids
+        check_html = (
+            f'<span class="apps-card-shortcut-check" title="Already installed">{_CHECK_ICON_SVG}</span>'
+            if already_installed else ""
+        )
+        homepage = f"https://flathub.org/apps/{app_id}"
+        return f"""
+    <div class="apps-card browser-row">
+      <label class="apps-card-link" for="{radio_id}">
+        <img class="apps-card-icon" src="{html.escape(entry['icon'])}" alt="" loading="lazy">
+        <div class="apps-card-text">
+          <div class="apps-card-name">{html.escape(entry['name'])}</div>
+          <div class="apps-card-summary" style="white-space:normal">{html.escape(entry['summary'])}</div>
+        </div>
+      </label>
+      <div class="apps-card-extras">
+        {check_html}
+        <a class="apps-card-homepage" href="{html.escape(homepage)}" target="_blank" rel="noopener" title="Open its Flathub page">{_EXTERNAL_LINK_ICON_SVG}</a>
+        <input type="radio" name="browser" id="{radio_id}" value="{html.escape(app_id)}" form="{_ADD_FORM_ID}"
+               data-name="{html.escape(entry['name'])}" data-installed="{"1" if already_installed else ""}"{checked}>
+      </div>
+    </div>"""
+
+    rows = "".join(_row(entry) for entry in browser_catalog.BROWSERS)
+    opera_row = _row(browser_catalog.OPERA)
+    tooltip = "Not installed yet? SelfSteam installs it from Flathub automatically when the shortcut is created."
     return f"""
   <div class="field-group">
-    <label class="field-label" for="selfsteam-browser-select">Browser <span style="color:var(--text-dim);font-weight:400;font-size:0.85rem">Flatpak</span></label>
-    <select name="browser" id="selfsteam-browser-select">{''.join(options)}</select>
+    <label class="field-label">Browser {_info_tooltip_icon_html(tooltip)}</label>
+    <div class="browser-list">
+      {rows}
+      <div class="browser-separator"></div>
+      {opera_row}
+    </div>
   </div>"""
 
 
@@ -1830,7 +1882,7 @@ def _url_tab_panel_html(query="", couch_mode=False, browser="", chosen=None, nam
   </div>
   {couch_row}
   {hint}
-  {_browser_select_html(browser)}
+  {_url_browser_picker_html(browser)}
   <div class="selfsteam-spacer"></div>
   {name_field}"""
 
@@ -4206,7 +4258,6 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
 <form id="{_ADD_FORM_ID}" action="/add" method="post" onsubmit="selfsteamShowCreating(this)">
   <input type="hidden" name="query" value="{html.escape(query)}">
   <input type="hidden" name="resolved_url" value="{html.escape(resolved_url or '')}">
-  <input type="hidden" name="browser" value="{html.escape(_default_browser(browser))}">
   <input type="hidden" name="url_edit_appid" value="{html.escape(url_edit_appid)}">
   <input type="hidden" name="url_edit_name" value="{html.escape(url_edit_name)}">
   {couch_field}
@@ -5526,6 +5577,27 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         try:
+            # Installing the browser itself is a one-time cost (same
+            # deliberate tradeoff as every other tab's own "install if
+            # needed, then proceed" shape) -- a curated browser picked
+            # here may not be installed yet at all (unlike the old
+            # dropdown, which only ever listed already-installed ones),
+            # so this has to happen before Create can succeed, not
+            # deferred to the next "Save Changes and Restart Steam"
+            # commit the way a plain browser_app_id passthrough used to.
+            if browser and not standalone_emulators.flathub_app_id_installed(browser):
+                standalone_emulators.install_flathub_app_id(browser)
+
+            # Resolved here (not left to register_steam_shortcut's own
+            # launch_args=None fallback at commit time) so a browser
+            # that fails to install, or has no real kiosk-mode support
+            # (edge_launcher.EdgeNotFoundError / browser_launcher.
+            # UnsupportedBrowserError), surfaces right here at Create
+            # time instead of silently failing the next Steam-restart
+            # commit -- same "resolve now, not later" reasoning as
+            # standalone_emulators.launch_args's own callers.
+            launch_args = create_webapp.build_browser_launch_args(url, couch_mode, browser or None)
+
             # Downloading/saving artwork doesn't touch Steam or
             # shortcuts.vdf at all, so it doesn't need a maintenance
             # window -- only actually queues the shortcut (name, url,
@@ -5542,7 +5614,7 @@ class Handler(BaseHTTPRequestHandler):
                 selections[basename] = {"url": selection_url} if selection_url else None
             asset_paths = create_webapp.download_selected_assets(slug, selections)
             _queue_edit_rename_cleanup(params, "url", match_name)
-            pending_queue.add(match_name, url, couch_mode, asset_paths, browser_app_id=browser or None)
+            pending_queue.add(match_name, None, False, asset_paths, launch_args=launch_args)
             self._redirect("/new#tab-url")
         except Exception as e:  # noqa: BLE001 -- surfaced to the user, not swallowed
             self._send_html(render_done(match_name, ok=False, error=e))
