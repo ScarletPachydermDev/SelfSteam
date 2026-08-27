@@ -688,6 +688,12 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
   border-radius: 8px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18); padding: 0.4rem;
   display: flex; flex-direction: column; gap: 0.3rem;
 }
+/* This class's own "display: flex" above otherwise wins over the
+   [hidden] attribute's browser-default "display: none" (an author
+   style always beats a UA-stylesheet one, regardless of the order
+   either rule is written in) -- confirmed live, the panel never
+   actually collapsed at all without this explicit override. */
+.console-picker-panel[hidden] { display: none; }
 .console-picker-row { cursor: pointer; }
 /* .apps-grid-list, not .boxed-list -- .boxed-list's own "a" rule
    (background/padding, meant for its plain <a> rows elsewhere on this
