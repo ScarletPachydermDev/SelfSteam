@@ -8,21 +8,20 @@ A headless companion, a small web UI for adding Steam shortcuts (with SteamGridD
 > Flathub repo is needed for the GNOME runtime dependency, RetroArch and emulators.
 
 ## Feaures
-
-- [x] Add streaming or any websites as a Steam shortcut
-- [x] Retrieve game or app artwork from [SteamGridDB](https://www.steamgriddb.com/) vast community database (you'll need to provide your own API key)
-- [x] Install other game launchers and apps
-- [x] Upload retro games roms and SS will take care of looking for artwork and adding Steam shortcut
-- [x] Upload .isos, keys and firmware files from SS for modern console games.
-- [x] Add/edit your non Steam shortcuts
-- [x] Web UI running from your Steam Deck / Steam Machine in game mode, desktop mode is only needed to install app
-- [x] Screen code authentication
-- [x] Install emulators from flathub and appimages from developers source
-- [x] Auto update flatpak
++ Add streaming or any websites as a Steam shortcut
++ Retrieve game or app artwork from [SteamGridDB](https://www.steamgriddb.com/) vast community database (you'll need to provide your own API key)
++ Install other game launchers and apps
++ Upload retro games roms and SS will take care of looking for artwork and adding Steam shortcut
++ Upload .isos, keys and firmware files from SS for modern console games.
++ Add/edit your non Steam shortcuts
++ Web UI running from your Steam Deck / Steam Machine in game mode, desktop mode is only needed to install app
++ Screen code authentication
++ Install emulators from flathub and appimages from developers source
++ Auto update flatpak
 
 ## To be done
 - [ ] App icon
-- [ ] Test all emulators, around 80% of them only have been tested.
+- [x] Test all emulators from Emulators tab, ~~around 80%~~ 100% of them only have been tested.
 - [x] Add other game launchers + utilities
 - [ ] More testing and polishing
 - [ ] Marry [preflight](https://github.com/ScarletPachydermDev/Preflight) to this project to avoid controller layout issues in emulators (if viable). At the moment games set up from the Emulators tab, controllers wont work from the get go unless controller set up was done at the emulator app, making the feature of setting up games from the Emulators tab useless.
