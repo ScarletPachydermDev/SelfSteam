@@ -26,6 +26,17 @@
   </categories>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="0.1.18" date="2026-08-27">
+      <description>
+        <ul>
+          <li>Replace the URL tab's browser picker with a curated list (Chrome, Edge, Vivaldi, Firefox, Opera) showing each one's real icon and installing it from Flathub automatically if needed, instead of only ever offering whatever was already installed</li>
+          <li>Fix Chromium-based browser shortcuts (Edge, Opera) silently never opening under a Flatpak Steam install -- an empty WAYLAND_DISPLAY value was being forwarded and made them try Wayland, fail, and exit instead of falling back to X11</li>
+          <li>Suggest installing VacuumTube (a dedicated YouTube TV client) right under Couch Mode whenever a YouTube shortcut is being created</li>
+          <li>Redesign the RetroArch tab's console picker and the Emulators tab's emulator picker with real icons and descriptions (core count / console target) instead of plain dropdown text</li>
+          <li>Fix a bug where a hard restart (from the auto-update-restart feature) could corrupt the remembered-devices file, silently discarding "remember this device" logins and forcing a fresh pairing-code entry</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.17" date="2026-08-26">
       <description>
         <ul>
