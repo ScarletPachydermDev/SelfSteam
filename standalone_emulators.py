@@ -1847,8 +1847,12 @@ EMULATORS = {
         # (weekly, tracking upstream canary commits) AppImage repackaging
         # by pkgforge-dev/Samueru-sama instead, per explicit user choice
         # over building new tarball-extraction handling for the official
-        # one. "(AppImage)" kept in the display name specifically to
-        # keep that distinction visible, not just buried in a comment.
+        # one. Dict key keeps "(AppImage)" for internal uniqueness (same
+        # reasoning as the Ryubing/Ryubing Canary entries below) but
+        # display_name drops it from what's actually shown -- the
+        # install-source toggle (Flathub/AppImage) already makes that
+        # distinction visible on its own.
+        "display_name": "Xenia Canary",
         "release_api": "https://api.github.com/repos/pkgforge-dev/xenia-canary-AppImage/releases?per_page=1",
         "binary_asset_re": re.compile(r"^Xenia_Canary-.+-anylinux-x86_64\.AppImage$"),
         "consoles": "Xbox 360",
