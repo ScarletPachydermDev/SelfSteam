@@ -1816,9 +1816,20 @@ def _url_tab_panel_html(query="", couch_mode=False, browser="", chosen=None, nam
     is_youtube = bool(resolved and resolved.url and resolved.url.removeprefix("https://").removeprefix("http://").removeprefix("www.") == "youtube.com")
     if is_youtube:
         checked = "checked" if couch_mode else ""
+        # VacuumTube is a real, dedicated YouTube TV client (not just
+        # another browser tab) -- a better fit for a couch/Big Picture
+        # setup than Couch Mode's own browser-UA-spoof trick, so it's
+        # offered right alongside it. Links straight into the Apps tab
+        # with VacuumTube already resolved (same query shape a real
+        # Apps-tab card click produces), a relative URL since this page
+        # is served from wherever SelfSteam itself is running.
         couch_row = f"""
     <div class="switch-row">
       <label><input type="checkbox" name="couch_mode" {checked}> Couch Mode (YouTube TV interface)</label>
+    </div>
+    <div class="hint-row">
+      <span class="info-icon">i</span>
+      <span><a href="/new?apps_category=audiovideo&apps_page=1&apps_source=flathub&apps_app_id=rocks.shy.VacuumTube&apps_app_name=VacuumTube&apps_preview=1&apps_resolved=1#tab-apps">Install VacuumTube (recommended)</a></span>
     </div>"""
 
     hint = ""
