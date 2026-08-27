@@ -1827,9 +1827,8 @@ def _url_tab_panel_html(query="", couch_mode=False, browser="", chosen=None, nam
     <div class="switch-row">
       <label><input type="checkbox" name="couch_mode" {checked}> Couch Mode (YouTube TV interface)</label>
     </div>
-    <div class="hint-row">
-      <span class="info-icon">i</span>
-      <span><a href="/new?apps_category=audiovideo&apps_page=1&apps_source=flathub&apps_app_id=rocks.shy.VacuumTube&apps_app_name=VacuumTube&apps_preview=1&apps_resolved=1#tab-apps">Install VacuumTube (recommended)</a></span>
+    <div class="switch-row">
+      <a href="/new?apps_category=audiovideo&apps_page=1&apps_source=flathub&apps_app_id=rocks.shy.VacuumTube&apps_app_name=VacuumTube&apps_preview=1&apps_resolved=1#tab-apps">Install VacuumTube (recommended)</a>
     </div>"""
 
     hint = ""
