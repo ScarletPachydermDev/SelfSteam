@@ -128,6 +128,11 @@ _NAME_FIELD_WAND_PATH = os.path.join(os.path.dirname(__file__), "vendor", "name-
 # guessing from text alone.
 _RPCS3_WELCOME_SCREENSHOT_PATH = os.path.join(os.path.dirname(__file__), "vendor", "rpcs3-welcome.png")
 _RPCS3_FIRMWARE_INSTALLER_SCREENSHOT_PATH = os.path.join(os.path.dirname(__file__), "vendor", "rpcs3-firmware-installer.png")
+# RA tab's own console picker icons (retroarch_cores.CONSOLE_ICON_SLUGS)
+# -- one directory, unlike every other /vendor/ file above (each its
+# own explicit route), since there are 31 of them; served generically
+# below with a basename-only (no path traversal) + real-file check.
+_CONSOLE_ICONS_DIR = os.path.join(os.path.dirname(__file__), "vendor", "console-icons")
 _ADD_FORM_ID = "selfsteam-add-form"
 _SEARCH_ICON_SVG = (
     '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="white" '
@@ -661,6 +666,29 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
    circle (not a whole-card click) in .apps-card-extras. */
 .browser-list { display: flex; flex-direction: column; gap: 0.4rem; }
 .browser-row input[type=radio] { width: 18px; height: 18px; flex: 0 0 auto; cursor: pointer; }
+/* RA tab's own console picker -- a dropdown (click trigger, pick from
+   an opened panel) rather than a whole-card click, but each row inside
+   the panel is the same .apps-card markup as the Apps/URL-tab pickers
+   above. The trigger's own fixed height (matching one .apps-card-icon
+   row) never changes between the placeholder and a picked state --
+   picking a console swaps its *content*, not its size. */
+.console-picker { position: relative; }
+.console-picker-trigger {
+  width: 100%; display: flex; align-items: center; gap: 0.7rem; min-height: 56px;
+  padding: 0.4rem 0.8rem; border: 1px solid var(--border); border-radius: 8px;
+  background: #fff; cursor: pointer; font: inherit; text-align: left; color: inherit;
+}
+.console-picker-trigger .apps-card-icon { width: 40px; height: 40px; flex: 0 0 auto; }
+.console-picker-placeholder { color: var(--text-dim); }
+.console-picker-name { font-weight: 600; font-size: 0.9rem; flex: 1; min-width: 0; }
+.console-picker-caret { flex: 0 0 auto; color: var(--text-dim); }
+.console-picker-panel {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 20; margin-top: 0.3rem;
+  max-height: 340px; overflow-y: auto; background: #fff; border: 1px solid var(--border);
+  border-radius: 8px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18); padding: 0.4rem;
+  display: flex; flex-direction: column; gap: 0.3rem;
+}
+.console-picker-row { cursor: pointer; }
 /* .apps-grid-list, not .boxed-list -- .boxed-list's own "a" rule
    (background/padding, meant for its plain <a> rows elsewhere on this
    page) is a class+type selector, higher specificity than a single
@@ -1229,13 +1257,41 @@ function selfsteamRaClearBios(form) {
 // server-side -- see _retroarch_tab_panel_html's own comment) rather
 // than leaving the core dropdown on whatever it last showed for a
 // previous, unrelated console.
-function selfsteamRaConsoleGroupChanged(select) {
-  var form = select.form;
-  var chosen = select.options[select.selectedIndex];
-  form.elements["ra_console"].value = (chosen && chosen.dataset.default) || "";
+// Console picker: a click-to-open dropdown (see _console_picker_html)
+// instead of a native <select>, so each option can show a real icon +
+// "N cores" description like an Apps-tab card -- native <option>
+// elements can't render anything but plain text. Picking a row sets
+// the same ra_console value a native select's own onchange used to
+// (that group's own recommended default core, via data-default),
+// clears any stale BIOS pick, and re-uses the exact same
+// selfsteamRaFormNav round-trip -- the swapped-in response re-renders
+// the trigger itself from server state, so there's no separate client-
+// side "update the trigger's icon/name" step needed here.
+function selfsteamRaConsolePickerToggle(event) {
+  event.stopPropagation();
+  var panel = document.getElementById("ra-console-panel");
+  if (panel) panel.hidden = !panel.hidden;
+}
+
+function selfsteamRaConsolePicked(row) {
+  var form = row.closest("form");
+  form.elements["ra_console"].value = row.dataset.default || "";
   selfsteamRaClearBios(form);
+  var panel = document.getElementById("ra-console-panel");
+  if (panel) panel.hidden = true;
   selfsteamRaFormNav(form);
 }
+
+// Closes the panel on any click outside it -- standard dropdown
+// behavior. Safe to register once globally: a no-op on every other
+// tab, since #ra-console-panel/#ra-console-picker simply don't exist
+// there.
+document.addEventListener("click", function (event) {
+  var panel = document.getElementById("ra-console-panel");
+  if (!panel || panel.hidden) return;
+  var picker = document.getElementById("ra-console-picker");
+  if (picker && !picker.contains(event.target)) panel.hidden = true;
+});
 
 // The core select's own options are just the bare core name (see
 // _retroarch_tab_panel_html's own comment on why) -- the real value
@@ -1243,7 +1299,11 @@ function selfsteamRaConsoleGroupChanged(select) {
 // whatever console is currently selected with the newly picked core.
 function selfsteamRaConsoleCoreChanged(select) {
   var form = select.form;
-  var group = document.getElementById("ra-console-group-select").value;
+  // data-group on the picker container itself, not a native select's
+  // own .value -- see selfsteamRaConsolePickerToggle's own comment on
+  // why the console picker isn't a <select> anymore.
+  var picker = document.getElementById("ra-console-picker");
+  var group = picker ? picker.dataset.group : "";
   form.elements["ra_console"].value = group + " - " + select.value;
   selfsteamRaClearBios(form);
   selfsteamRaFormNav(form);
@@ -2284,6 +2344,52 @@ def _ra_guess_name_from_filename(rel_path):
     return " ".join(titled)
 
 
+def _console_picker_html(current_group):
+    """RA tab's own console picker -- a click-to-open dropdown instead
+    of a native <select>, since a native <option> can't render an icon
+    or a description, only plain text (see retroarch_cores.
+    CONSOLE_ICON_SLUGS for where the icons themselves come from). The
+    trigger's own markup always includes the same icon+name structure
+    (just empty/placeholder text when nothing's picked yet) so its
+    height never changes between states -- picking a console swaps
+    content, not size. data-group on the outer container is read back
+    by selfsteamRaConsoleCoreChanged (PAGE_TAIL) since there's no
+    native <select>.value for it to read anymore."""
+    def _row(group):
+        icon_url = retroarch_cores.console_icon_url(group)
+        core_count = len(retroarch_cores.CORES_BY_GROUP.get(group, []))
+        default_label = retroarch_cores.default_label_for_group(group)
+        return f"""
+      <div class="apps-card console-picker-row" data-default="{html.escape(default_label)}" onclick="selfsteamRaConsolePicked(this)">
+        <img class="apps-card-icon" src="{html.escape(icon_url)}" alt="" loading="lazy">
+        <div class="apps-card-text">
+          <div class="apps-card-name">{html.escape(group)}</div>
+          <div class="apps-card-summary">{core_count} core{"" if core_count == 1 else "s"}</div>
+        </div>
+      </div>"""
+
+    rows = "".join(_row(g) for g in retroarch_cores.CONSOLE_GROUPS)
+
+    if current_group:
+        icon_url = retroarch_cores.console_icon_url(current_group)
+        trigger_inner = f"""
+        <img class="apps-card-icon" src="{html.escape(icon_url)}" alt="" loading="lazy">
+        <span class="console-picker-name">{html.escape(current_group)}</span>"""
+    else:
+        trigger_inner = '<span class="console-picker-placeholder">Pick your console</span>'
+
+    return f"""
+    <div class="console-picker" id="ra-console-picker" data-group="{html.escape(current_group)}">
+      <button type="button" class="console-picker-trigger" id="ra-console-trigger" onclick="selfsteamRaConsolePickerToggle(event)">
+        {trigger_inner}
+        <span class="console-picker-caret">&#9662;</span>
+      </button>
+      <div class="console-picker-panel" id="ra-console-panel" hidden>
+        {rows}
+      </div>
+    </div>"""
+
+
 def _retroarch_tab_panel_html(state, chosen=None):
     console = state.get("ra_console", "")
     needs_bios = console in retroarch_cores.CONSOLES_NEEDING_BIOS
@@ -2298,12 +2404,7 @@ def _retroarch_tab_panel_html(state, chosen=None):
     current_group = next((g for g in retroarch_cores.CONSOLE_GROUPS if console.startswith(g + " - ")), "")
     current_core_display = console[len(current_group) + 3:] if current_group else ""
 
-    group_options = "".join(
-        f'<option value="{html.escape(g)}" data-default="{html.escape(retroarch_cores.default_label_for_group(g))}"'
-        f'{" selected" if g == current_group else ""}>{html.escape(g)}</option>'
-        for g in retroarch_cores.CONSOLE_GROUPS
-    )
-    group_options = f'<option value="">Pick your console</option>{group_options}'
+    console_picker_html = _console_picker_html(current_group)
     # Only ever populated once a console is actually picked -- disabled
     # (not just empty) so it visibly reads as "not usable yet" rather
     # than an active dropdown that just happens to have nothing in it.
@@ -2403,9 +2504,7 @@ def _retroarch_tab_panel_html(state, chosen=None):
          currently-selected console. -->
     <div class="field-group">
       <label class="field-label">Console <span class="required-asterisk">*</span> <span style="color:var(--text-dim);font-weight:400;font-size:0.85rem">Flatpak RetroArch</span></label>
-      <select id="ra-console-group-select" onchange="selfsteamRaConsoleGroupChanged(this)">
-        {group_options}
-      </select>
+      {console_picker_html}
     </div>
     <div class="field-group">
       <label class="field-label" for="ra-console-core-select">Core <span class="required-asterisk">*</span></label>
@@ -5025,6 +5124,25 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+            return
+
+        if parsed.path.startswith("/vendor/console-icons/"):
+            # basename only -- os.path.basename strips any "../" a
+            # crafted path might try to smuggle in, so the join below
+            # can never resolve outside _CONSOLE_ICONS_DIR regardless of
+            # what parsed.path actually contains.
+            filename = os.path.basename(parsed.path)
+            icon_path = os.path.join(_CONSOLE_ICONS_DIR, filename)
+            if filename.endswith(".png") and os.path.isfile(icon_path):
+                with open(icon_path, "rb") as f:
+                    body = f.read()
+                self.send_response(200)
+                self.send_header("Content-Type", "image/png")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            else:
+                self._send_html(render("<p>Not found</p>"), status=404)
             return
 
         if parsed.path == "/":

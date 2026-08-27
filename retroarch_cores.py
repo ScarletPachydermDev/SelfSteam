@@ -40,6 +40,7 @@ _FLATHUB_REPO_URL = "https://flathub.org/repo/flathub.flatpakrepo"
 #   install_bios(console, file_path) -- copies a picked BIOS file into RetroArch's system dir.
 #   launch_args(console, romfile) -- argv for launching console's core against romfile.
 #   default_label_for_group(group) -- the full "<group> - <core>" label for group's own recommended core.
+#   console_icon_url(group) -- the /vendor/console-icons/ URL for group's own icon.
 
 # (console group, libretro core name, needs BIOS, core's own real display
 # name, is_default). Wider than the original 7-console starter list, but
@@ -198,6 +199,59 @@ for _group, _core, _needs_bios, _core_display, _is_default in _CONSOLE_ENTRIES:
     CORES_BY_GROUP.setdefault(_group, []).append((_core_display, f"{_group} - {_core_display}", _is_default))
 for _group in CORES_BY_GROUP:
     CORES_BY_GROUP[_group].sort(key=lambda entry: entry[0].lower())
+
+
+# Real per-console icons for the RA tab's own console picker (see
+# selfsteam_server._console_picker_html) -- libretro's own
+# retroarch-assets repo, xmb/retrosystem theme (real, colorful per-
+# platform icons used in RetroArch's own XMB menu, not a generic/
+# guessed icon set), downloaded once and bundled under
+# vendor/console-icons/<slug>.png rather than hotlinked from GitHub's
+# raw content host on every page load. Every CONSOLE_GROUPS entry has
+# a real match here -- confirmed by cross-checking the full file
+# listing at github.com/libretro/retroarch-assets/tree/master/xmb/
+# retrosystem/png, not guessed.
+CONSOLE_ICON_SLUGS = {
+    "Atari 2600": "atari-2600",
+    "Atari 7800": "atari-7800",
+    "Atari Lynx": "atari-lynx",
+    "ColecoVision": "colecovision",
+    "Commodore 64": "commodore-64",
+    "Commodore Amiga": "commodore-amiga",
+    "Game Boy": "game-boy",
+    "Game Boy Advance": "game-boy-advance",
+    "Game Boy Color": "game-boy-color",
+    "Intellivision": "intellivision",
+    "MSX": "msx",
+    "Neo Geo": "neo-geo",
+    "Neo Geo Pocket": "neo-geo-pocket",
+    "Nintendo (NES)": "nintendo-nes",
+    "Nintendo 3DS": "nintendo-3ds",
+    "Nintendo 64": "nintendo-64",
+    "Nintendo DS": "nintendo-ds",
+    "PSP": "psp",
+    "PlayStation 1": "playstation-1",
+    "PlayStation 2": "playstation-2",
+    "Sega 32X": "sega-32x",
+    "Sega CD": "sega-cd",
+    "Sega Dreamcast": "sega-dreamcast",
+    "Sega Game Gear": "sega-game-gear",
+    "Sega Genesis": "sega-genesis",
+    "Sega Master System": "sega-master-system",
+    "Sega Saturn": "sega-saturn",
+    "Super Nintendo": "super-nintendo",
+    "TurboGrafx-16 / PC Engine": "turbografx-16-pc-engine",
+    "Vectrex": "vectrex",
+    "WonderSwan": "wonderswan",
+}
+
+
+def console_icon_url(group):
+    """The /vendor/console-icons/ URL for group's own icon, or "" for an
+    unknown group (the placeholder state) rather than a broken <img>
+    src."""
+    slug = CONSOLE_ICON_SLUGS.get(group)
+    return f"/vendor/console-icons/{slug}.png" if slug else ""
 
 
 def default_label_for_group(group):
