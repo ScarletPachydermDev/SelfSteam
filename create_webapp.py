@@ -121,7 +121,23 @@ sleep 0.3
 # guaranteed to carry them across every Flatpak version -- getting this
 # wrong reproduces the exact silent "nothing happens" failure this
 # whole wrapper exists to avoid.
-exec flatpak-spawn --host --env=DISPLAY="$DISPLAY" --env=WAYLAND_DISPLAY="$WAYLAND_DISPLAY" "$@"
+#
+# WAYLAND_DISPLAY only forwarded when actually set -- confirmed live
+# (2026-08-27) that Flatpak Steam's own process has DISPLAY set but no
+# WAYLAND_DISPLAY at all, and forwarding it anyway as a literal empty
+# string (not simply omitting it) makes a Chromium-based browser's own
+# ozone-platform auto-detection think Wayland IS available, try to
+# connect, fail ("Connection refused"), and exit outright instead of
+# falling back to X11 -- "The platform failed to initialize. Exiting.",
+# no window, no error visible to the user, exactly the silent failure
+# this wrapper exists to avoid. Firefox's own GTK backend tolerates the
+# empty value fine, which is why this only ever showed up on Chromium-
+# family browsers (Edge, Opera), not Firefox.
+if [ -n "$WAYLAND_DISPLAY" ]; then
+    exec flatpak-spawn --host --env=DISPLAY="$DISPLAY" --env=WAYLAND_DISPLAY="$WAYLAND_DISPLAY" "$@"
+else
+    exec flatpak-spawn --host --env=DISPLAY="$DISPLAY" "$@"
+fi
 """
 
 
