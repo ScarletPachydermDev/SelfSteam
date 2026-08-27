@@ -661,9 +661,6 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
    circle (not a whole-card click) in .apps-card-extras. */
 .browser-list { display: flex; flex-direction: column; gap: 0.4rem; }
 .browser-row input[type=radio] { width: 18px; height: 18px; flex: 0 0 auto; cursor: pointer; }
-/* Separates Opera from the other four -- see browser_catalog.OPERA's
-   own docstring for why it's kept visually apart. */
-.browser-separator { border-top: 1px solid var(--border); margin: 0.3rem 0.2rem; }
 /* .apps-grid-list, not .boxed-list -- .boxed-list's own "a" rule
    (background/padding, meant for its plain <a> rows elsewhere on this
    page) is a class+type selector, higher specificity than a single
@@ -1755,17 +1752,16 @@ def _default_browser(browser_param):
 
 def _url_browser_picker_html(selected_browser):
     """The URL tab's curated Flathub browser list -- same apps-card
-    markup/classes as the Apps tab (icon, name, description) per the
-    explicit design ask, just rendered as a vertical list instead of a
-    grid, with a real native radio circle (not a whole-card click) at
-    the right of each row so exactly one is always the actual submitted
-    value. Opera is visually separated from the other four (a
-    .browser-separator rule) -- see browser_catalog.OPERA's own
-    docstring for why it's the odd one out."""
+    markup/classes as the Apps tab (icon, name) per the explicit design
+    ask, just rendered as a vertical list instead of a grid, with a
+    real native radio circle (not a whole-card click) at the right of
+    each row so exactly one is always the actual submitted value. Only
+    Opera shows a description -- see browser_catalog.OPERA's own
+    docstring for why it's the one with something distinctive to say."""
     installed_ids = standalone_emulators.installed_flathub_app_ids()
     default = _default_browser(selected_browser)
 
-    def _row(entry):
+    def _row(entry, show_summary=False):
         app_id = entry["app_id"]
         radio_id = "browser-" + re.sub(r"[^a-zA-Z0-9]+", "-", app_id).strip("-").lower()
         checked = " checked" if app_id == default else ""
@@ -1775,13 +1771,17 @@ def _url_browser_picker_html(selected_browser):
             if already_installed else ""
         )
         homepage = f"https://flathub.org/apps/{app_id}"
+        summary_html = (
+            f'<div class="apps-card-summary" style="white-space:normal">{html.escape(entry["summary"])}</div>'
+            if show_summary else ""
+        )
         return f"""
     <div class="apps-card browser-row">
       <label class="apps-card-link" for="{radio_id}">
         <img class="apps-card-icon" src="{html.escape(entry['icon'])}" alt="" loading="lazy">
         <div class="apps-card-text">
           <div class="apps-card-name">{html.escape(entry['name'])}</div>
-          <div class="apps-card-summary" style="white-space:normal">{html.escape(entry['summary'])}</div>
+          {summary_html}
         </div>
       </label>
       <div class="apps-card-extras">
@@ -1793,14 +1793,13 @@ def _url_browser_picker_html(selected_browser):
     </div>"""
 
     rows = "".join(_row(entry) for entry in browser_catalog.BROWSERS)
-    opera_row = _row(browser_catalog.OPERA)
-    tooltip = "Not installed yet? SelfSteam installs it from Flathub automatically when the shortcut is created."
+    opera_row = _row(browser_catalog.OPERA, show_summary=True)
+    tooltip = "SelfSteam installs it from Flathub automatically when the shortcut is created."
     return f"""
   <div class="field-group">
-    <label class="field-label">Browser {_info_tooltip_icon_html(tooltip)}</label>
+    <label class="field-label">Browsers with Widevine {_info_tooltip_icon_html(tooltip)}</label>
     <div class="browser-list">
       {rows}
-      <div class="browser-separator"></div>
       {opera_row}
     </div>
   </div>"""

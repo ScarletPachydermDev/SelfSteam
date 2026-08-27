@@ -12,9 +12,10 @@ installed_flathub_app_ids), not duplicated here.
 Icon URLs and summaries confirmed live against Flathub's own appstream
 API (flathub.org/api/v2/appstream/<app_id>), not guessed.
 
-BROWSERS is the main list; OPERA is kept separate (see
-selfsteam_server._url_browser_picker_html's own rendering) since it's
-the standout pick for one specific, narrow reason -- not a general
+BROWSERS is the main list; OPERA is kept separate since it's the only
+one with a real, distinctive summary shown in the UI (see
+selfsteam_server._url_browser_picker_html's own rendering) -- a
+standout pick for one specific, narrow reason, not a general
 recommendation like the other four.
 """
 
@@ -62,7 +63,7 @@ BROWSERS = [
 OPERA = {
     "app_id": "com.opera.Opera",
     "name": "Opera",
-    "summary": "The only browser here confirmed to stream Netflix at full 1080p on Linux -- every other one is capped at 720p.",
+    "summary": "The only browser confirmed to stream Netflix at full 1080p on Linux -- every other one is capped at 720p.",
     "icon": "https://dl.flathub.org/media/com/opera/Opera/5f5b53cca0cfb8318927f085c8dbe6e4/icons/128x128/com.opera.Opera.png",
 }
 
