@@ -201,16 +201,19 @@ for _group in CORES_BY_GROUP:
     CORES_BY_GROUP[_group].sort(key=lambda entry: entry[0].lower())
 
 
-# Real per-console icons for the RA tab's own console picker (see
-# selfsteam_server._console_picker_html) -- libretro's own
-# retroarch-assets repo, xmb/retrosystem theme (real, colorful per-
-# platform icons used in RetroArch's own XMB menu, not a generic/
-# guessed icon set), downloaded once and bundled under
-# vendor/console-icons/<slug>.png rather than hotlinked from GitHub's
-# raw content host on every page load. Every CONSOLE_GROUPS entry has
-# a real match here -- confirmed by cross-checking the full file
-# listing at github.com/libretro/retroarch-assets/tree/master/xmb/
-# retrosystem/png, not guessed.
+# Real per-console *brand logos* for the RA tab's own console picker
+# (see selfsteam_server._console_picker_html) -- PRO100BYTE/console-
+# logos (MIT, see vendor/CONSOLE-ICONS-LICENSE.txt), "Recommended
+# Versions (Normal) (1 Per Platform) v2.1" / "Dark - Color" set. Not
+# libretro's own XMB theme icons (tried first) -- those are console/
+# controller silhouettes, not logos, confirmed live to be the wrong
+# style for what was actually asked for (e.g. the N64's own stylized
+# "N" mark, not a picture of an N64 controller). Downloaded once and
+# bundled under vendor/console-icons/<slug>.png rather than hotlinked
+# on every page load. Super Nintendo intentionally uses this pack's
+# "Nintendo Super Famicom" file, not the plain US wordmark one -- its
+# colored-circles mark is the more iconic of the two real logo
+# variants this pack ships for that same console/brand.
 CONSOLE_ICON_SLUGS = {
     "Atari 2600": "atari-2600",
     "Atari 7800": "atari-7800",
