@@ -2598,32 +2598,31 @@ _EM_STATE_KEYS = [
     "em_resolved", "em_sgdb_q", "em_sgdb_cleared", "em_name_cleared",
     # DLC+updates picker (Switch-family emulators only, see
     # standalone_emulators.SWITCH_DLC_UPDATE_EMULATORS) -- em_dlc_paths
-    # is every uploaded file's path (relative to _RA_ROOT), joined by
-    # _EM_DLC_SEP, accumulated across as many separate multi-select
+    # is every added file's path (relative to _RA_ROOT), joined by
+    # _EM_DLC_SEP, accumulated across as many separate uploads/local
     # picks as the user makes rather than replaced by each one (see
-    # _handle_em_dlc_upload). em_dlc_disabled is the same shape, holding
-    # just the subset the user unchecked -- everything not listed there
-    # is enabled by default, same as Ryujinx's own dlc_nca_list/
-    # TitleUpdateModel "is enabled" default.
-    "em_dlc_paths", "em_dlc_disabled",
+    # _handle_em_dlc_upload/_em_dlc_list_rows). Every accumulated path
+    # is applied at Create -- no per-file enable/disable, the only
+    # control is adding or removing a file outright (see
+    # _em_dlc_picker_section's own row rendering). em_dlcpath/
+    # em_dlcsource are this picker's own breadcrumb-path/upload-vs-
+    # local-browse state, same shape as every other picker's own
+    # em_<prefix>path/em_<prefix>source, just without a single
+    # em_dlcfile slot since this one accumulates instead of replacing.
+    "em_dlc_paths", "em_dlcpath", "em_dlcsource",
     # Same reasoning as _RA_STATE_KEYS' own ra_edit_appid/ra_edit_name.
     "em_edit_appid", "em_edit_name",
 ]
 
-# Separator for the two joined-list state fields above -- not a comma
-# (a real uploaded filename could contain one) and not URL-unsafe, so
-# it survives _em_qs's own urllib.parse.quote round-trip unremarkable.
+# Separator for the joined-list state field above -- not a comma (a
+# real uploaded filename could contain one) and not URL-unsafe, so it
+# survives _em_qs's own urllib.parse.quote round-trip unremarkable.
 _EM_DLC_SEP = "\x1f"
 
 
 def _em_dlc_paths_list(state):
     raw = state.get("em_dlc_paths", "")
     return [p for p in raw.split(_EM_DLC_SEP) if p]
-
-
-def _em_dlc_disabled_set(state):
-    raw = state.get("em_dlc_disabled", "")
-    return {p for p in raw.split(_EM_DLC_SEP) if p}
 
 
 def _em_dlc_join(paths):
@@ -2654,34 +2653,29 @@ def _em_dlc_classify(state):
     files (see nsp_metadata.py's own module docstring history).
 
     Returns (rom_title_id_base_or_None, rows, header_key_error) where
-    each row is {"path", "filename", "kind", "detail", "enabled"} and
-    kind is one of "update"/"dlc"/"mismatch"/"unknown"/"error".
-    header_key_error is a page-level message when prod.keys isn't
-    installed at all yet (nothing here can be classified without it) --
-    distinct from a per-file "error" row, which still lets every other
-    file in the same batch classify normally."""
+    each row is {"path", "filename", "kind", "detail"} (plus "title_id"
+    once a real NSP has been read -- see below) and kind is one of
+    "update"/"dlc"/"mismatch"/"unknown"/"error". Every listed row is
+    implicitly applied at Create -- no separate enable/disable, only
+    adding or removing a file outright (see _em_dlc_picker_section's
+    own row rendering). header_key_error is a page-level message when
+    prod.keys isn't installed at all yet (nothing here can be
+    classified without it) -- distinct from a per-file "error" row,
+    which still lets every other file in the same batch classify
+    normally."""
     romfile = state.get("em_romfile", "")
     rom_abs = _ra_safe_join(romfile) if romfile else None
-    disabled = _em_dlc_disabled_set(state)
     paths = _em_dlc_paths_list(state)
 
     header_key_path = standalone_emulators.switch_prod_keys_path()
     if header_key_path is None:
-        rows = [
-            {"path": p, "filename": os.path.basename(p), "kind": "error",
-             "detail": "Waiting on Keys", "enabled": p not in disabled}
-            for p in paths
-        ]
+        rows = [{"path": p, "filename": os.path.basename(p), "kind": "error", "detail": "Waiting on Keys"} for p in paths]
         return None, rows, "Install Keys above first -- DLC/updates can't be identified without prod.keys."
 
     try:
         header_key = nsp_metadata.read_header_key(header_key_path)
     except nsp_metadata.NspParseError:
-        rows = [
-            {"path": p, "filename": os.path.basename(p), "kind": "error",
-             "detail": "Waiting on Keys", "enabled": p not in disabled}
-            for p in paths
-        ]
+        rows = [{"path": p, "filename": os.path.basename(p), "kind": "error", "detail": "Waiting on Keys"} for p in paths]
         return None, rows, "prod.keys is missing its header_key -- please re-pick a real key dump above."
 
     rom_title_id_base = None
@@ -2695,20 +2689,19 @@ def _em_dlc_classify(state):
     for p in paths:
         abs_path = _ra_safe_join(p)
         filename = os.path.basename(p)
-        enabled = p not in disabled
         if abs_path is None or not os.path.isfile(abs_path):
-            rows.append({"path": p, "filename": filename, "kind": "error", "detail": "File not found", "enabled": enabled})
+            rows.append({"path": p, "filename": filename, "kind": "error", "detail": "File not found"})
             continue
         try:
             info = nsp_metadata.read_title_id(abs_path, header_key)
         except Exception:  # noqa: BLE001 -- one bad/unsupported file shouldn't block classifying the rest of the batch
-            rows.append({"path": p, "filename": filename, "kind": "error", "detail": "Couldn't be read", "enabled": enabled})
+            rows.append({"path": p, "filename": filename, "kind": "error", "detail": "Couldn't be read"})
             continue
         if rom_title_id_base is None:
-            rows.append({"path": p, "filename": filename, "kind": "unknown", "detail": "Pick a ROM first", "enabled": enabled})
+            rows.append({"path": p, "filename": filename, "kind": "unknown", "detail": "Pick a ROM first"})
             continue
         if info.title_id_base != rom_title_id_base:
-            rows.append({"path": p, "filename": filename, "kind": "mismatch", "detail": "Doesn't match this game", "enabled": enabled})
+            rows.append({"path": p, "filename": filename, "kind": "mismatch", "detail": "Doesn't match this game"})
             continue
         offset = info.title_id - info.title_id_base
         # title_id (the DLC/update file's own, not the base game's) is
@@ -2717,15 +2710,53 @@ def _em_dlc_classify(state):
         # dlc_nca_list entries store it, see install_switch_dlc's own
         # docstring) without having to re-parse the file a second time.
         if offset == 0:
-            rows.append({"path": p, "filename": filename, "kind": "mismatch", "detail": "This is the base game, not DLC/an update", "enabled": enabled, "title_id": info.title_id})
+            rows.append({"path": p, "filename": filename, "kind": "mismatch", "detail": "This is the base game, not DLC/an update", "title_id": info.title_id})
         elif offset == 0x800:
-            rows.append({"path": p, "filename": filename, "kind": "update", "detail": "Update", "enabled": enabled, "title_id": info.title_id})
+            rows.append({"path": p, "filename": filename, "kind": "update", "detail": "Update", "title_id": info.title_id})
         elif 0x1000 <= offset <= 0x1FFF:
-            rows.append({"path": p, "filename": filename, "kind": "dlc", "detail": f"DLC #{offset - 0x1000 + 1}", "enabled": enabled, "title_id": info.title_id})
+            rows.append({"path": p, "filename": filename, "kind": "dlc", "detail": f"DLC #{offset - 0x1000 + 1}", "title_id": info.title_id})
         else:
-            rows.append({"path": p, "filename": filename, "kind": "mismatch", "detail": "Unrecognized content type", "enabled": enabled, "title_id": info.title_id})
+            rows.append({"path": p, "filename": filename, "kind": "mismatch", "detail": "Unrecognized content type", "title_id": info.title_id})
 
     return rom_title_id_base, rows, None
+
+
+def _em_dlc_seed_state(state):
+    """If em_dlc_paths is empty but the picked ROM already has real
+    dlc.json/updates.json entries -- editing a previously-created
+    shortcut for this game, or re-creating one after deleting it --
+    seeds the picker with those paths instead of starting blank. Not
+    edit-specific on purpose: "this ROM already has registrations" is
+    the real condition that matters, not how the page was reached.
+
+    A no-op (returns state as-is) once the user has touched the picker
+    at all this session, including down to zero files -- a genuinely-
+    emptied em_dlc_paths is indistinguishable from "never seeded" here,
+    the same accepted tradeoff every other picker's own plain-string
+    state already has for a cleared-vs-never-set field."""
+    emulator = state.get("em_emulator", "")
+    if emulator not in standalone_emulators.SWITCH_DLC_UPDATE_EMULATORS or state.get("em_dlc_paths"):
+        return state
+    romfile = state.get("em_romfile", "")
+    rom_abs = _ra_safe_join(romfile) if romfile else None
+    if not rom_abs or not os.path.isfile(rom_abs):
+        return state
+    header_key_path = standalone_emulators.switch_prod_keys_path()
+    if not header_key_path:
+        return state
+    try:
+        header_key = nsp_metadata.read_header_key(header_key_path)
+        rom_title_id_base = nsp_metadata.read_title_id(rom_abs, header_key).title_id_base
+    except Exception:  # noqa: BLE001 -- can't resolve a title ID yet just means nothing to seed
+        return state
+    entry = standalone_emulators.EMULATORS.get(emulator)
+    registered_abs = standalone_emulators.switch_registered_dlc_and_updates(entry, f"{rom_title_id_base:016x}")
+    rel_paths = [os.path.relpath(p, _RA_ROOT) for p in registered_abs if os.path.isfile(p)]
+    if not rel_paths:
+        return state
+    new_state = dict(state)
+    new_state["em_dlc_paths"] = _em_dlc_join(rel_paths)
+    return new_state
 
 
 # apps_app_id/apps_app_name: the Flathub/AppImage app currently
@@ -3429,23 +3460,65 @@ _EM_DLC_KIND_STYLE = {
 }
 
 
+def _em_dlc_list_rows(abs_path, rel_path, state):
+    """Local-browse rows for the DLC+updates picker -- unlike every
+    other picker's own _em_list_rows, clicking a file here *adds* it to
+    em_dlc_paths and stays on this same folder listing (path_key stays
+    rel_path, not the clicked file's own dir) rather than replacing a
+    single file slot and moving on -- lets someone add several files
+    from the same folder one click at a time. A file already in
+    em_dlc_paths renders greyed out/unclickable instead of as a normal
+    link, so it's obvious re-clicking it wouldn't do anything (it'd
+    just add a second, indistinguishable entry pointing at the same
+    real path)."""
+    try:
+        entries = sorted(os.scandir(abs_path), key=lambda e: (not e.is_dir(), e.name.lower()))
+    except PermissionError:
+        return '<div class="row" style="color:var(--text-dim)">Permission denied</div>'
+    entries = [e for e in entries if not e.name.startswith(".")]
+    if not entries:
+        return '<div class="row" style="color:var(--text-dim)">Nothing here.</div>'
+    already_added = set(_em_dlc_paths_list(state))
+    rows = []
+    for entry in entries:
+        entry_rel = f"{rel_path}/{entry.name}".lstrip("/")
+        if entry.is_dir():
+            href = _em_url("/new", state, em_dlcpath=entry_rel)
+            rows.append(f'<a href="{href}" onclick="return selfsteamEmNav(this)"><span class="folder-icon">&#128193;</span>{html.escape(entry.name)}</a>')
+        elif entry_rel in already_added:
+            rows.append(
+                f'<span class="row" style="opacity:0.4;cursor:default">'
+                f'<span class="file-icon">&#128190;</span>{html.escape(entry.name)} &#10003;</span>'
+            )
+        else:
+            overrides = {"em_dlcpath": rel_path, "em_dlc_paths": _em_dlc_join(_em_dlc_paths_list(state) + [entry_rel])}
+            href = _em_url("/new", state, **overrides)
+            rows.append(f'<a href="{href}" onclick="return selfsteamEmNav(this)"><span class="file-icon">&#128190;</span>{html.escape(entry.name)}</a>')
+    return "".join(rows)
+
+
 def _em_dlc_picker_section(state):
     """DLC+updates picker -- Switch-family emulators only (see
     standalone_emulators.SWITCH_DLC_UPDATE_EMULATORS), always visible
-    for one of those (same as every other Emulators-tab picker, not
-    gated behind a ROM being picked first -- classification just has
-    less to say yet without one). Each accumulated file (see
-    em_dlc_paths/_handle_em_dlc_upload) gets a checkbox -- an <a>-driven
-    toggle styled as one, same "real link, real href fallback, JS just
-    skips the round trip" pattern as every other picker's own controls
-    -- and a real-time count next to the label (see
-    selfsteamEmDlcPreviewCount) so picking from a second folder after
-    an already-uploaded batch is obviously additive, not a replacement,
-    before the upload it triggers even finishes."""
+    for one of those but greyed out/inert until a ROM is actually
+    picked (classification has nothing to compare against yet, so
+    letting someone add files before that just invites confusion about
+    why everything shows "Pick a ROM first"). Same Upload/local-browse
+    toggle every other picker has, except the local browser here adds
+    to em_dlc_paths one click at a time and stays on the same folder
+    (see _em_dlc_list_rows) instead of replacing a single file slot.
+    Every accumulated file gets a real-time count next to the label
+    (see selfsteamEmDlcPreviewCount) so picking from a second folder
+    after an already-uploaded batch is obviously additive, not a
+    replacement, before the upload it triggers even finishes -- and a
+    remove (x) button, the only per-file control now (no more enable/
+    disable checkbox -- every listed file is simply applied at
+    Create)."""
     emulator = state.get("em_emulator", "")
     if emulator not in standalone_emulators.SWITCH_DLC_UPDATE_EMULATORS:
         return ""
 
+    has_rom = bool(state.get("em_romfile"))
     _rom_title_id_base, rows, header_key_error = _em_dlc_classify(state)
 
     count = len(rows)
@@ -3466,24 +3539,10 @@ def _em_dlc_picker_section(state):
 
     def _row_html(row):
         color, bg, border = _EM_DLC_KIND_STYLE.get(row["kind"], _EM_DLC_KIND_STYLE["unknown"])
-        toggle_overrides = {
-            "em_dlc_disabled": _em_dlc_join(
-                (_em_dlc_disabled_set(state) - {row["path"]})
-                if not row["enabled"] else (_em_dlc_disabled_set(state) | {row["path"]})
-            )
-        }
-        toggle_href = _em_url("/new", state, **toggle_overrides)
-        remove_overrides = {
-            "em_dlc_paths": _em_dlc_join([p for p in _em_dlc_paths_list(state) if p != row["path"]]),
-            "em_dlc_disabled": _em_dlc_join(_em_dlc_disabled_set(state) - {row["path"]}),
-        }
+        remove_overrides = {"em_dlc_paths": _em_dlc_join([p for p in _em_dlc_paths_list(state) if p != row["path"]])}
         remove_href = _em_url("/new", state, **remove_overrides)
-        check_glyph = "&#10003;" if row["enabled"] else ""
         return f"""
       <div class="boxed-list-row" style="display:flex;align-items:center;gap:0.6rem">
-        <a href="{toggle_href}" onclick="return selfsteamEmNav(this)" title="Enable/disable"
-           style="flex:0 0 auto;width:1.3rem;height:1.3rem;border-radius:4px;border:1px solid var(--input-border);
-                  display:flex;align-items:center;justify-content:center;color:var(--accent);text-decoration:none">{check_glyph}</a>
         <span style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{html.escape(row["filename"])}</span>
         <span style="flex:0 0 auto;padding:0.15rem 0.6rem;border-radius:10px;font-size:0.75rem;font-weight:700;
                      color:{color};background:{bg};border:1px solid {border}">{html.escape(row["detail"])}</span>
@@ -3493,19 +3552,51 @@ def _em_dlc_picker_section(state):
     rows_html = "".join(_row_html(r) for r in rows)
     rows_block = f'<div class="picker-list"><div class="boxed-list">{rows_html}</div></div>' if rows else ""
 
+    dom_prefix = "em-dlc-source"
+    source = state.get("em_dlcsource") or "local"
     upload_action = f"/new/upload-em-dlc?{_em_qs(state)}#tab-emulators"
+    upload_panel = f"""
+    <form method="post" enctype="multipart/form-data" action="{upload_action}">
+      <input type="file" name="file" multiple
+             onchange="selfsteamEmDlcPreviewCount(this); selfsteamShowUploading('em-dlc'); selfsteamUploadFetch(this, SELFSTEAM_EM_SWAP_IDS)">
+    </form>"""
+
+    dlc_rel_path = _ra_resolve_relpath(state.get("em_dlcpath", ""))
+    dlc_abs_path = _ra_safe_join(dlc_rel_path)
+    if dlc_abs_path is None or not os.path.isdir(dlc_abs_path):
+        dlc_rel_path = _RA_DEFAULT_RELPATH
+        dlc_abs_path = _ra_safe_join(dlc_rel_path) or _RA_ROOT
+    local_panel = (
+        f'<div class="breadcrumbs">{_em_breadcrumbs_html(dlc_rel_path, state, "em_dlcpath")}</div>'
+        f'<div class="picker-list"><div class="boxed-list">{_em_dlc_list_rows(dlc_abs_path, dlc_rel_path, state)}</div></div>'
+    )
+
+    upload_display = "" if source == "upload" else "none"
+    local_display = "none" if source == "upload" else ""
+    upload_active = "source-label active" if source == "upload" else "source-label"
+    local_active = "source-label" if source == "upload" else "source-label active"
+    picker_ui = f"""
+    <div class="source-toggle">
+      <a class="{upload_active}" href="javascript:void(0)" id="{dom_prefix}-upload-label" onclick="selfsteamToggleSource('{dom_prefix}', 'upload', 'em_dlcsource')">Upload</a>
+      <a class="{local_active}" href="javascript:void(0)" id="{dom_prefix}-local-label" onclick="selfsteamToggleSource('{dom_prefix}', 'local', 'em_dlcsource')">{html.escape(_hostname())}</a>
+    </div>
+    <div id="{dom_prefix}-upload-panel" style="display:{upload_display};margin-top:0.6rem">{upload_panel}</div>
+    <div id="{dom_prefix}-local-panel" style="display:{local_display}">{local_panel}</div>"""
+
+    body = f"""
+    {warning_html}
+    {rows_block}
+    {picker_ui}"""
+    if not has_rom:
+        body = f'<div style="opacity:0.5;pointer-events:none">{body}</div>'
+
     return f"""
   <div class="field-group">
     <label class="field-label" style="display:flex;align-items:center;gap:0.4rem;min-width:0">
       <span style="flex:0 1 auto;min-width:0">{label_text}</span>
       <span id="em-dlc-upload-status" class="upload-status" style="display:none">Reading<span class="spinner"></span></span>
     </label>
-    {warning_html}
-    {rows_block}
-    <form method="post" enctype="multipart/form-data" action="{upload_action}">
-      <input type="file" name="file" multiple
-             onchange="selfsteamEmDlcPreviewCount(this); selfsteamShowUploading('em-dlc'); selfsteamUploadFetch(this, SELFSTEAM_EM_SWAP_IDS)">
-    </form>
+    {body}
   </div>"""
 
 
@@ -3558,6 +3649,11 @@ def _emulator_picker_html(names, current_emulator):
 
 
 def _emulators_tab_panel_html(state, chosen=None):
+    # Seeds em_dlc_paths from any already-registered dlc.json/
+    # updates.json for the picked ROM before anything else below reads
+    # state -- both the hidden_fields carry-forward and the dlc_block
+    # itself need to see the seeded value, not just the picker.
+    state = _em_dlc_seed_state(state)
     install_source = state.get("em_install_source") or "flathub"
     emulator = state.get("em_emulator", "")
     entry = standalone_emulators.EMULATORS.get(emulator)
@@ -6281,7 +6377,7 @@ class Handler(BaseHTTPRequestHandler):
                 if rom_title_id_base is not None:
                     update_abs_paths = [
                         _ra_safe_join(row["path"]) for row in dlc_rows
-                        if row["kind"] == "update" and row["enabled"]
+                        if row["kind"] == "update"
                     ]
                     update_abs_paths = [p for p in update_abs_paths if p]
                     standalone_emulators.install_switch_title_updates(
@@ -6292,7 +6388,7 @@ class Handler(BaseHTTPRequestHandler):
                     header_key_path = standalone_emulators.switch_prod_keys_path()
                     dlc_entries = []
                     for row in dlc_rows:
-                        if row["kind"] != "dlc" or not row["enabled"]:
+                        if row["kind"] != "dlc":
                             continue
                         dlc_abs = _ra_safe_join(row["path"])
                         if not dlc_abs or not header_key_path:

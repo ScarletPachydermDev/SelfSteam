@@ -452,6 +452,45 @@ def install_switch_dlc(entry, title_id_base_hex, dlc_entries):
         json.dump(data, f, indent=2)
 
 
+def switch_registered_dlc_and_updates(entry, title_id_base_hex):
+    """Every real container path already registered in this title's own
+    dlc.json/updates.json (see install_switch_dlc/install_switch_title_
+    updates' own docstrings for the exact schemas) -- used to seed the
+    DLC+updates picker with what's already there instead of starting
+    blank, e.g. Edit reopening a shortcut for a game that already has
+    DLC/updates from a previous Create. Container paths only (not the
+    internal per-nca paths dlc.json also stores) -- the picker
+    re-derives everything else itself once these paths are back in
+    em_dlc_paths, the same as any freshly re-added file.
+
+    Malformed/missing files are treated as "nothing registered" rather
+    than raised -- this is a best-effort convenience seed, not
+    something Create itself depends on."""
+    games_dir = _switch_games_dir(entry)
+    title_dir = os.path.join(games_dir, title_id_base_hex.lower())
+    paths = []
+
+    updates_path = os.path.join(title_dir, "updates.json")
+    if os.path.isfile(updates_path):
+        try:
+            with open(updates_path, encoding="utf-8") as f:
+                data = json.load(f)
+            paths.extend(data.get("paths") or [])
+        except (OSError, ValueError):
+            pass
+
+    dlc_path = os.path.join(title_dir, "dlc.json")
+    if os.path.isfile(dlc_path):
+        try:
+            with open(dlc_path, encoding="utf-8") as f:
+                data = json.load(f)
+            paths.extend(container["path"] for container in data if container.get("path"))
+        except (OSError, ValueError):
+            pass
+
+    return paths
+
+
 def _azahar_args(romfile):
     # -f/--fullscreen plus a bare positional romfile -- both confirmed
     # real via Azahar's own source (src/citra_qt/citra_qt.cpp's
