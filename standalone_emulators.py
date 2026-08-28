@@ -331,6 +331,82 @@ def _switch_install_keys(entry, keys_path):
     return copied
 
 
+def switch_prod_keys_path():
+    """The first real prod.keys found across every Switch-family keys
+    directory (see _switch_keys_dirs) -- used by nsp_metadata's
+    header-key read for DLC/update title-ID parsing (selfsteam_server.
+    py's own DLC+updates picker), so that doesn't need to re-derive
+    these directories a second way. None if no keys are installed yet
+    anywhere in the family."""
+    for keys_dir in _switch_keys_dirs():
+        path = os.path.join(keys_dir, "prod.keys")
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+# Emulators this DLC+updates picker is wired up for -- deliberately not
+# every "Nintendo Switch" entry in EMULATORS (Eden is a separate
+# codebase forked from Ryujinx, and its own on-disk dlc.json/
+# updates.json format hasn't been confirmed against its real source the
+# way Ryubing's has -- see standalone_emulators.py's own needs_keys/
+# _ryubing_configure_game_dir comments on always confirming this kind
+# of format from source rather than assuming a fork kept it identical).
+SWITCH_DLC_UPDATE_EMULATORS = {"Ryubing", "Ryubing (AppImage)", "Ryubing Canary (AppImage)"}
+
+
+def _switch_games_dir(entry):
+    """Real per-title games/ directory Ryujinx/Ryubing keeps dlc.json
+    and updates.json under (AppDataManager.GamesDirPath in its own
+    source) -- same Flathub-sandboxed-vs-real-host-path split every
+    other Switch-family helper here already makes (see
+    _ryubing_configure_game_dir's own app_id check): the Flathub build
+    only ever sees its own sandboxed ~/.var/app/.../config/Ryujinx, the
+    AppImage builds (no app_id at all -- install_type "binary") read
+    the real ~/.config/Ryujinx directly."""
+    app_id = entry.get("app_id")
+    if app_id:
+        return _flatpak_config_dir(app_id, "Ryujinx", "games")
+    return _xdg_config_dir("Ryujinx", "games")
+
+
+def install_switch_title_updates(entry, title_id_base_hex, update_abs_paths):
+    """Writes this title's updates.json -- confirmed real schema from
+    Ryubing's own source (TitleUpdatesHelper.SaveTitleUpdatesJson):
+    {"selected": "<path>", "paths": ["<path>", ...]}. update_abs_paths
+    is every *enabled* update NSP's absolute path (already classified
+    and validated against this title by selfsteam_server.py's own
+    _em_dlc_classify -- this function trusts that list as-is, same
+    division of labor install_keys/install_firmware_zip already have
+    with their own callers).
+
+    Deliberately a full overwrite of this title's updates.json, not a
+    merge with whatever was there before -- the picker's own state
+    (accumulated across every upload this session, see em_dlc_paths) is
+    already meant to be the complete current set for this shortcut, the
+    same way re-picking a BIOS file replaces the old one rather than
+    keeping both. The first path becomes "selected" (Ryujinx only ever
+    applies one update at a time regardless of how many are listed) --
+    picking the highest version isn't attempted here since that needs
+    actually re-parsing each one's Cnmt version field, not just its
+    title ID; in practice a title only ever has one real update file
+    picked at once anyway.
+
+    No-op (returns without writing) if update_abs_paths is empty --
+    leaves any existing updates.json untouched rather than clearing a
+    previously-registered update just because this particular Create
+    didn't have one re-picked."""
+    if not update_abs_paths:
+        return
+    games_dir = _switch_games_dir(entry)
+    title_dir = os.path.join(games_dir, title_id_base_hex.lower())
+    os.makedirs(title_dir, exist_ok=True)
+    path = os.path.join(title_dir, "updates.json")
+    data = {"selected": update_abs_paths[0], "paths": list(update_abs_paths)}
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+
 def _azahar_args(romfile):
     # -f/--fullscreen plus a bare positional romfile -- both confirmed
     # real via Azahar's own source (src/citra_qt/citra_qt.cpp's
