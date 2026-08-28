@@ -482,6 +482,22 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
    off by that clip instead of following it. */
 .boxed-list a:first-child { border-top-left-radius: 8px; border-top-right-radius: 8px; }
 .boxed-list a:last-child { border-bottom-left-radius: 8px; border-bottom-right-radius: 8px; }
+/* DLC+updates picker's own added-files list -- deliberately NOT
+   .boxed-list (see _em_dlc_picker_section's own row-building comment):
+   that class's own "a" rule matches any nested <a> regardless of
+   depth, which silently clobbered .remove-file-btn's red-circle-with-X
+   styling with a flat grey nth-child stripe and invisible-ish text
+   color once it ended up nested a level deeper than a folder/file
+   browser row ever is. Striping applied to the row div itself here,
+   not to whatever anchor happens to be inside it. */
+.dlc-added-list { border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; gap: 2px; }
+.dlc-added-row {
+  display: flex; align-items: center; gap: 0.6rem; height: 2.3rem; padding: 0 0.9rem; font-size: 0.9rem;
+}
+.dlc-added-row:nth-child(odd) { background: #ececec; }
+.dlc-added-row:nth-child(even) { background: #f3f3f3; }
+.dlc-added-row:first-child { border-top-left-radius: 8px; border-top-right-radius: 8px; }
+.dlc-added-row:last-child { border-bottom-left-radius: 8px; border-bottom-right-radius: 8px; }
 /* Placeholder rows before any search -- reserves the middle column's
    space instead of it looking like an empty gap. */
 .placeholder-row { flex: 0 0 auto; height: 2.3rem; }
@@ -1472,23 +1488,6 @@ document.addEventListener("click", function (event) {
   var picker = document.getElementById("em-emulator-picker");
   if (picker && !picker.contains(event.target)) panel.hidden = true;
 });
-
-// Instant client-side "(N selected)" bump the moment files are picked
-// in the DLC+updates multi-select, before selfsteamUploadFetch's own
-// round trip even starts -- otherwise picking from a second folder
-// after an already-uploaded batch shows nothing changed until the
-// upload finishes, which reads as "did it forget the first batch?"
-// data-existing (set server-side to the already-accumulated count,
-// see _em_dlc_picker_section) plus this input's own .files.length is
-// the true post-upload total, since uploads here accumulate rather
-// than replace (see em_dlc_paths/_handle_em_dlc_upload).
-function selfsteamEmDlcPreviewCount(input) {
-  var span = document.getElementById("em-dlc-count");
-  if (!span) return;
-  var existing = parseInt(span.dataset.existing || "0", 10);
-  var total = existing + input.files.length;
-  span.textContent = "(" + total + " selected)";
-}
 
 // Initial pass on real page load (not just after an AJAX swap, which
 // selfsteamApplySwap's own call already covers), plus on resize since
@@ -3507,13 +3506,11 @@ def _em_dlc_picker_section(state):
     toggle every other picker has, except the local browser here adds
     to em_dlc_paths one click at a time and stays on the same folder
     (see _em_dlc_list_rows) instead of replacing a single file slot.
-    Every accumulated file gets a real-time count next to the label
-    (see selfsteamEmDlcPreviewCount) so picking from a second folder
-    after an already-uploaded batch is obviously additive, not a
-    replacement, before the upload it triggers even finishes -- and a
-    remove (x) button, the only per-file control now (no more enable/
-    disable checkbox -- every listed file is simply applied at
-    Create)."""
+    Each accumulated file shows its own remove (x) button, the only
+    per-file control now (no more enable/disable checkbox -- every
+    listed file is simply applied at Create). Marked "(optional)", not
+    a required asterisk -- unlike Keys/Firmware/ROM, a shortcut is
+    perfectly valid with no DLC/updates at all."""
     emulator = state.get("em_emulator", "")
     if emulator not in standalone_emulators.SWITCH_DLC_UPDATE_EMULATORS:
         return ""
@@ -3521,13 +3518,7 @@ def _em_dlc_picker_section(state):
     has_rom = bool(state.get("em_romfile"))
     _rom_title_id_base, rows, header_key_error = _em_dlc_classify(state)
 
-    count = len(rows)
-    tooltip = (
-        "Pick any DLC and/or update NSPs for this game -- SelfSteam reads each one's "
-        "title ID to tell it apart from an unrelated game's files, and to tell DLC from "
-        "an update."
-    )
-    label_text = f'DLC &amp; Updates <span id="em-dlc-count" data-existing="{count}">({count} selected)</span> {_info_tooltip_icon_html(tooltip)}'
+    label_text = "DLC &amp; Updates (optional)"
 
     warning_html = ""
     if header_key_error:
@@ -3542,7 +3533,7 @@ def _em_dlc_picker_section(state):
         remove_overrides = {"em_dlc_paths": _em_dlc_join([p for p in _em_dlc_paths_list(state) if p != row["path"]])}
         remove_href = _em_url("/new", state, **remove_overrides)
         return f"""
-      <div class="boxed-list-row" style="display:flex;align-items:center;gap:0.6rem">
+      <div class="dlc-added-row">
         <span style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{html.escape(row["filename"])}</span>
         <span style="flex:0 0 auto;padding:0.15rem 0.6rem;border-radius:10px;font-size:0.75rem;font-weight:700;
                      color:{color};background:{bg};border:1px solid {border}">{html.escape(row["detail"])}</span>
@@ -3550,7 +3541,15 @@ def _em_dlc_picker_section(state):
       </div>"""
 
     rows_html = "".join(_row_html(r) for r in rows)
-    rows_block = f'<div class="picker-list"><div class="boxed-list">{rows_html}</div></div>' if rows else ""
+    # A dedicated class, not .boxed-list -- .boxed-list's own "a" rule
+    # (see the Apps-tab-list comment on the exact same pitfall) matches
+    # *any* nested <a> regardless of depth, including this row's own
+    # .remove-file-btn -- confirmed live: that collapsed the button's
+    # real red-circle-with-X into a flat grey nth-child stripe with no
+    # visible X at all, since .boxed-list a's higher specificity (a
+    # class+element selector beats .remove-file-btn's plain class one)
+    # silently won over its color/sizing.
+    rows_block = f'<div class="picker-list"><div class="dlc-added-list">{rows_html}</div></div>' if rows else ""
 
     dom_prefix = "em-dlc-source"
     source = state.get("em_dlcsource") or "local"
@@ -3558,7 +3557,7 @@ def _em_dlc_picker_section(state):
     upload_panel = f"""
     <form method="post" enctype="multipart/form-data" action="{upload_action}">
       <input type="file" name="file" multiple
-             onchange="selfsteamEmDlcPreviewCount(this); selfsteamShowUploading('em-dlc'); selfsteamUploadFetch(this, SELFSTEAM_EM_SWAP_IDS)">
+             onchange="selfsteamShowUploading('em-dlc'); selfsteamUploadFetch(this, SELFSTEAM_EM_SWAP_IDS)">
     </form>"""
 
     dlc_rel_path = _ra_resolve_relpath(state.get("em_dlcpath", ""))
@@ -4710,6 +4709,7 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
   <input type="hidden" name="em_bios4file" value="{html.escape(em_state.get('em_bios4file', ''))}">
   <input type="hidden" name="em_keysfile" value="{html.escape(em_state.get('em_keysfile', ''))}">
   <input type="hidden" name="em_firmwarefile" value="{html.escape(em_state.get('em_firmwarefile', ''))}">
+  <input type="hidden" name="em_dlc_paths" value="{html.escape(em_state.get('em_dlc_paths', ''))}">
   <input type="hidden" name="em_edit_appid" value="{html.escape(em_edit_appid)}">
   <input type="hidden" name="em_edit_name" value="{html.escape(em_state.get('em_edit_name', ''))}">
 </form>
