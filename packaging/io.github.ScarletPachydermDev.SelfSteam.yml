@@ -43,6 +43,42 @@ finish-args:
   - --filesystem=~/.var/app
 
 modules:
+  - name: python3-cryptography
+    # Needed by nsp_metadata.py (Switch DLC/update NSP title-ID
+    # parsing -- AES-128-XTS over an NCA header). Prebuilt manylinux
+    # wheels, not built from source: `cryptography` has required a
+    # real Rust toolchain (its OpenSSL bindings are Rust, not C) since
+    # 3.4, which would mean vendoring a Rust SDK extension plus a full
+    # `cargo vendor` dependency tree just for this one narrow use --
+    # a maintenance burden completely out of proportion to what this
+    # app actually needs from the package. Pinned wheel URLs + sha256
+    # (fetched up front by flatpak-builder like any other source, then
+    # installed with pip3 --no-index so no network touches the actual
+    # build sandbox) is the same pattern most Flathub Python apps that
+    # need `cryptography` already use for this exact reason.
+    #
+    # x86_64 only, matching this manifest's only real build target
+    # (see .github/workflows/flatpak.yml's selfsteam-x86_64.flatpak) --
+    # cryptography's own wheel is cp39-abi3 (works unchanged on
+    # org.gnome.Platform//50's Python 3.13), cffi's is not (a real
+    # per-version C extension), pinned here to cp313 to match.
+    buildsystem: simple
+    build-commands:
+      - pip3 install --no-index --no-deps --prefix=/app
+          cffi-2.1.1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
+          pycparser-3.0-py3-none-any.whl
+          cryptography-50.0.1-cp39-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
+    sources:
+      - type: file
+        url: https://files.pythonhosted.org/packages/95/95/86342356ff5953b3fb06f7ef7c5bee212d45e770abc7218d451b9148313c/cffi-2.1.1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
+        sha256: a931079504ecc49efed7744c476a5c343a92fabf66dec2db95edb1b2fdc770e2
+      - type: file
+        url: https://files.pythonhosted.org/packages/0c/c3/44f3fbbfa403ea2a7c779186dc20772604442dde72947e7d01069cbe98e3/pycparser-3.0-py3-none-any.whl
+        sha256: b727414169a36b7d524c1c3e31839a521725078d7b2ff038656844266160a992
+      - type: file
+        url: https://files.pythonhosted.org/packages/7e/3c/0e77bd5ffcf078e9dd27d3074aad6c030d9b10d0bf69329d573c927a188c/cryptography-50.0.1-cp39-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
+        sha256: e22dfed744bd4002e909464cb23d2f0b05c6f3113a79ef2e9864a53db737c733
+
   - name: selfsteam
     buildsystem: simple
     build-commands:
