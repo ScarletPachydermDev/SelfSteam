@@ -407,6 +407,51 @@ def install_switch_title_updates(entry, title_id_base_hex, update_abs_paths):
         json.dump(data, f, indent=2)
 
 
+def install_switch_dlc(entry, title_id_base_hex, dlc_entries):
+    """Writes this title's dlc.json -- confirmed real schema from
+    Ryubing's own source (DownloadableContentsHelper.
+    SaveDownloadableContentsJson / DownloadableContentContainer/Nca):
+    a list of {"path": <container path>, "dlc_nca_list":
+    [{"path": "/<nca id>.nca", "title_id": <int>, "is_enabled": bool}]}
+    -- one container entry per DLC .nsp, one nca entry per container
+    (the real, overwhelmingly common shape; this doesn't attempt
+    multi-nca-per-container DLC, which isn't something any real file
+    seen so far actually does). The internal "/<nca id>.nca" path
+    (not just the container's own path) is what makes this different
+    from install_switch_title_updates -- Ryujinx opens that path
+    *inside* the DLC's own PFS0 at load time, it doesn't just re-scan
+    the whole container the way it does for updates.
+
+    dlc_entries is [{"container_path", "content_nca_id", "title_id",
+    "enabled"}, ...] -- container_path is the DLC .nsp's own absolute
+    path, content_nca_id is nsp_metadata.read_dlc_content_nca_id's own
+    return value (a hex string, no ".nca"/leading slash), title_id is
+    that same content NCA's own real title ID (nsp_metadata.
+    read_title_id's own .title_id on that DLC file, not the base
+    game's) -- all already resolved by selfsteam_server.py's own
+    caller, this function just writes them in the confirmed shape.
+
+    Same full-overwrite-if-non-empty policy as install_switch_title_
+    updates -- see its own docstring for why."""
+    if not dlc_entries:
+        return
+    games_dir = _switch_games_dir(entry)
+    title_dir = os.path.join(games_dir, title_id_base_hex.lower())
+    os.makedirs(title_dir, exist_ok=True)
+    path = os.path.join(title_dir, "dlc.json")
+    data = [
+        {
+            "path": e["container_path"],
+            "dlc_nca_list": [
+                {"path": f"/{e['content_nca_id']}.nca", "title_id": e["title_id"], "is_enabled": e["enabled"]}
+            ],
+        }
+        for e in dlc_entries
+    ]
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+
 def _azahar_args(romfile):
     # -f/--fullscreen plus a bare positional romfile -- both confirmed
     # real via Azahar's own source (src/citra_qt/citra_qt.cpp's

@@ -2711,14 +2711,19 @@ def _em_dlc_classify(state):
             rows.append({"path": p, "filename": filename, "kind": "mismatch", "detail": "Doesn't match this game", "enabled": enabled})
             continue
         offset = info.title_id - info.title_id_base
+        # title_id (the DLC/update file's own, not the base game's) is
+        # carried in every row from here on -- _add_standalone_emulator_
+        # shortcut's own Create-time writer needs it (dlc.json's own
+        # dlc_nca_list entries store it, see install_switch_dlc's own
+        # docstring) without having to re-parse the file a second time.
         if offset == 0:
-            rows.append({"path": p, "filename": filename, "kind": "mismatch", "detail": "This is the base game, not DLC/an update", "enabled": enabled})
+            rows.append({"path": p, "filename": filename, "kind": "mismatch", "detail": "This is the base game, not DLC/an update", "enabled": enabled, "title_id": info.title_id})
         elif offset == 0x800:
-            rows.append({"path": p, "filename": filename, "kind": "update", "detail": "Update", "enabled": enabled})
+            rows.append({"path": p, "filename": filename, "kind": "update", "detail": "Update", "enabled": enabled, "title_id": info.title_id})
         elif 0x1000 <= offset <= 0x1FFF:
-            rows.append({"path": p, "filename": filename, "kind": "dlc", "detail": f"DLC #{offset - 0x1000 + 1}", "enabled": enabled})
+            rows.append({"path": p, "filename": filename, "kind": "dlc", "detail": f"DLC #{offset - 0x1000 + 1}", "enabled": enabled, "title_id": info.title_id})
         else:
-            rows.append({"path": p, "filename": filename, "kind": "mismatch", "detail": "Unrecognized content type", "enabled": enabled})
+            rows.append({"path": p, "filename": filename, "kind": "mismatch", "detail": "Unrecognized content type", "enabled": enabled, "title_id": info.title_id})
 
     return rom_title_id_base, rows, None
 
@@ -3447,8 +3452,7 @@ def _em_dlc_picker_section(state):
     tooltip = (
         "Pick any DLC and/or update NSPs for this game -- SelfSteam reads each one's "
         "title ID to tell it apart from an unrelated game's files, and to tell DLC from "
-        "an update. DLC support is still upload-and-identify only for now; only updates "
-        "are actually applied to the shortcut."
+        "an update."
     )
     label_text = f'DLC &amp; Updates <span id="em-dlc-count" data-existing="{count}">({count} selected)</span> {_info_tooltip_icon_html(tooltip)}'
 
@@ -6263,13 +6267,14 @@ class Handler(BaseHTTPRequestHandler):
                 standalone_emulators.install_bios_slot(em_emulator, prefix, bios_abs)
 
             # DLC+updates picker (Switch-family only, see
-            # standalone_emulators.SWITCH_DLC_UPDATE_EMULATORS) -- only
-            # "update"-classified, enabled files are actually applied
-            # right now (see install_switch_title_updates' own
-            # docstring on why DLC itself isn't registered into
-            # dlc.json yet: that needs a titlekey-area decrypt this
-            # codebase doesn't implement, not just the header-only read
-            # nsp_metadata.py does today).
+            # standalone_emulators.SWITCH_DLC_UPDATE_EMULATORS).
+            # Updates just need their own container path (Ryujinx re-
+            # scans the whole file at load time); DLC needs the actual
+            # payload content NCA's id *inside* its own PFS0, which
+            # needs a real decrypt (nsp_metadata.read_dlc_content_nca_id
+            # -- ported from LibHac's own real source, see its own
+            # module docstring), so that's only ever done here at
+            # Create time, not on every picker render.
             if em_emulator in standalone_emulators.SWITCH_DLC_UPDATE_EMULATORS:
                 em_dlc_state = _em_state_from_params(params)
                 rom_title_id_base, dlc_rows, _header_key_error = _em_dlc_classify(em_dlc_state)
@@ -6282,6 +6287,28 @@ class Handler(BaseHTTPRequestHandler):
                     standalone_emulators.install_switch_title_updates(
                         standalone_emulators.EMULATORS[em_emulator],
                         f"{rom_title_id_base:016x}", update_abs_paths,
+                    )
+
+                    header_key_path = standalone_emulators.switch_prod_keys_path()
+                    dlc_entries = []
+                    for row in dlc_rows:
+                        if row["kind"] != "dlc" or not row["enabled"]:
+                            continue
+                        dlc_abs = _ra_safe_join(row["path"])
+                        if not dlc_abs or not header_key_path:
+                            continue
+                        try:
+                            header_key = nsp_metadata.read_header_key(header_key_path)
+                            content_nca_id = nsp_metadata.read_dlc_content_nca_id(dlc_abs, header_key, header_key_path)
+                        except Exception:  # noqa: BLE001 -- one bad/unsupported DLC file shouldn't block Create or the rest of the batch
+                            continue
+                        dlc_entries.append({
+                            "container_path": dlc_abs, "content_nca_id": content_nca_id,
+                            "title_id": row["title_id"], "enabled": True,
+                        })
+                    standalone_emulators.install_switch_dlc(
+                        standalone_emulators.EMULATORS[em_emulator],
+                        f"{rom_title_id_base:016x}", dlc_entries,
                     )
 
             args = standalone_emulators.launch_args(em_emulator, romfile_abs, zrif=em_zrif or None)

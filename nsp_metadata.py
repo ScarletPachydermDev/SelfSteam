@@ -13,14 +13,43 @@ own already-installed prod.keys (see standalone_emulators.py's
 needs_keys/install_keys flow) rather than hardcoding Nintendo's crypto
 constant directly in this repo's source.
 
+Also reads a DLC's actual payload content NCA id (read_dlc_content_nca_id)
+-- the one piece Ryubing's own dlc.json needs beyond a title ID, since it
+points at a path *inside* the DLC's own PFS0, not just the container's
+path (see standalone_emulators.py's own docstring on that). Getting that
+id means actually decrypting NCA section 0 (AES-128-CTR, a per-title-
+generation key unwrapped from the NCA's own key area) to reach the real
+Cnmt content-entry table -- unlike the header-only title-ID read above,
+which needs no section decryption at all. The exact byte offsets, key
+derivation, and counter construction here are ported from LibHac's own
+real source (git.ryujinx.app/projects/LibHac.git -- its GitHub original,
+Thealexbarney/LibHac, is gone with no forks left, but the Ryujinx-hosted
+Forgejo mirror is real and current), not reconstructed from memory of
+the public NCA spec -- confirmed correct against two real DLC files: one
+cross-checked against its own bundled .cnmt.xml sidecar (a common but
+NOT universal scene convention -- confirmed NOT present on the other
+file, which this still worked on without it), the other cross-checked
+against its own outer PFS0's own file list.
+
 Functions:
   read_header_key(prod_keys_path) -- prod.keys -> the 32-byte header key.
-  _decrypt_nca_header(data, header_key) -- first 0x400 bytes of an NCA,
-      encrypted -> decrypted (AES-128-XTS, Nintendo's big-endian tweak).
-  _pfs0_entries(f) -- open PFS0 file -> [(name, offset, size), ...].
+  read_named_key(prod_keys_path, name) -- prod.keys -> any one named key line.
+  _decrypt_nca_header(data, header_key) -- an NCA's header bytes (any
+      multiple of 0x200, from offset 0), encrypted -> decrypted
+      (AES-128-XTS, Nintendo's big-endian tweak).
+  _pfs0_entries(f) -- open PFS0 file/BytesIO -> [(name, offset, size), ...].
   read_title_id(nsp_path, header_key) -- .nsp path -> TitleIdInfo, by
       locating and decrypting the header of its first *.cnmt.nca entry.
+  _nca_content_key(header_full, prod_keys_path) -- a non-RightsId NCA's
+      real AesCtr content key (key-area unwrap).
+  _nca_section0_pfs0(nsp_path, nca_data_offset, header_full, prod_keys_path)
+      -- decrypts NCA section 0 and returns its real PFS0 bytes (past
+      the HierarchicalSha256 integrity-info's own data-level offset).
+  read_dlc_content_nca_id(nsp_path, header_key, prod_keys_path) -- a
+      DLC .nsp -> the hex id (PFS0 filename, sans ".nca") of its actual
+      payload content NCA.
 """
+import io
 import os
 import struct
 from dataclasses import dataclass
@@ -72,20 +101,187 @@ class TitleIdInfo:
         return f"{self.title_id:016x}"
 
 
+def read_named_key(prod_keys_path, name):
+    """Any single `<name> = <hex>` line out of a real prod.keys file
+    (header_key, key_area_key_<application/ocean/system>_<XX>,
+    titlekek_<XX>, ...). None if the line isn't there at all -- a
+    missing key_area_key for a newer key generation than the user's
+    own dump has is a real, expected case (an unrecognized-format
+    error, not a parse bug), not something to raise on here."""
+    with open(prod_keys_path, encoding="utf-8") as f:
+        for line in f:
+            key, _, value = line.strip().partition("=")
+            if key.strip().lower() == name.lower():
+                hex_value = value.strip()
+                return bytes.fromhex(hex_value) if hex_value else None
+    return None
+
+
 def read_header_key(prod_keys_path):
     """The fixed 32-byte AES-128-XTS header key out of a real prod.keys
     file. Not console-unique -- every real Switch and every real NSP
     dump uses this same key -- but still sourced from the user's own
     key dump rather than bundled here."""
-    with open(prod_keys_path, encoding="utf-8") as f:
-        for line in f:
-            if line.strip().lower().startswith("header_key"):
-                _, _, value = line.partition("=")
-                hex_key = value.strip()
-                if len(hex_key) != 64:
-                    raise NspParseError(f"header_key in {prod_keys_path} is not 32 bytes")
-                return bytes.fromhex(hex_key)
-    raise NspParseError(f"No header_key line found in {prod_keys_path}")
+    key = read_named_key(prod_keys_path, "header_key")
+    if key is None:
+        raise NspParseError(f"No header_key line found in {prod_keys_path}")
+    if len(key) != 32:
+        raise NspParseError(f"header_key in {prod_keys_path} is not 32 bytes")
+    return key
+
+
+# LibHac's own KakNames (Nca.cs) -- which of prod.keys' three
+# key_area_key_<name>_<rev> line families a given NCA's own
+# KeyAreaKeyIndex header byte (0/1/2) selects.
+_KAK_NAMES = ("application", "ocean", "system")
+
+
+def _master_key_revision(key_generation):
+    """LibHac's own Utilities.GetMasterKeyRevision -- the real prod.keys
+    line suffix (key_area_key_*_<rev:02x>) is one less than the NCA
+    header's own KeyGeneration byte, except generation 0 which stays 0."""
+    return 0 if key_generation == 0 else key_generation - 1
+
+
+def _aes_ecb_decrypt(key, data):
+    decryptor = Cipher(algorithms.AES(key), modes.ECB()).decryptor()
+    return decryptor.update(data) + decryptor.finalize()
+
+
+def _aes_ecb_encrypt(key, data):
+    encryptor = Cipher(algorithms.AES(key), modes.ECB()).encryptor()
+    return encryptor.update(data) + encryptor.finalize()
+
+
+def _nca_content_key(header_full, prod_keys_path):
+    """The real AesCtr content key for section 0 of a non-RightsId NCA
+    -- ported from LibHac's own Nca.GetDecryptedKey/GetContentKey: the
+    key-area's slot 2 (NcaKeyType.AesCtr) is AES-ECB-decrypted with
+    key_area_key_<name>_<rev> (name picked by the header's own
+    KeyAreaKeyIndex byte, rev by KeyGeneration). header_full is the full
+    decrypted 0xC00-byte NCA header (_decrypt_nca_header's own output
+    when called with that many bytes).
+
+    Raises NspParseError if this NCA uses RightsId/title-key crypto
+    instead (a real ticket + titlekek, not this function's job) or if
+    prod.keys is missing the specific key_area_key line needed --
+    confirmed via real files that every DLC/update Meta content this
+    feature deals with uses the plain key-area path (RightsId all-
+    zero), never title-key crypto."""
+    rights_id = header_full[0x230:0x240]
+    if rights_id != b"\x00" * 16:
+        raise NspParseError("This NCA uses title-key crypto (has a RightsId) -- not supported here")
+    key_generation = max(header_full[0x206], header_full[0x220])
+    key_area_key_index = header_full[0x207]
+    if key_area_key_index >= len(_KAK_NAMES):
+        raise NspParseError(f"Unrecognized KeyAreaKeyIndex {key_area_key_index}")
+    key_name = f"key_area_key_{_KAK_NAMES[key_area_key_index]}_{_master_key_revision(key_generation):02x}"
+    key_area_key = read_named_key(prod_keys_path, key_name)
+    if key_area_key is None:
+        raise NspParseError(f"prod.keys is missing {key_name} -- can't decrypt this NCA's content section")
+    encrypted_key = header_full[0x300 + 0x10 * 2 : 0x300 + 0x10 * 3]
+    return _aes_ecb_decrypt(key_area_key, encrypted_key)
+
+
+def _ctr_decrypt(content_key, upper_counter, base_offset, data):
+    """AES-128-CTR decrypt using Nintendo's own NCA counter convention
+    -- ported from LibHac's own Aes128CtrStorage.CreateCounter/
+    UpdateCounter: a big-endian 16-byte counter, the upper 8 bytes the
+    FS-header's own "Counter" field (0 for every Meta content this
+    feature deals with), the lower 8 bytes the *absolute* NCA-file
+    block index (byte_offset // 0x10) -- not relative to the section's
+    own start, which is why base_offset (the section's own absolute
+    start within the NCA) has to be added in by the caller rather than
+    always starting the counter at 0."""
+    out = bytearray()
+    for i in range(0, len(data), 16):
+        block = data[i : i + 16]
+        counter = upper_counter.to_bytes(8, "big") + ((base_offset + i) // 0x10).to_bytes(8, "big")
+        keystream = _aes_ecb_encrypt(content_key, counter)
+        out += bytes(a ^ b for a, b in zip(block, keystream[: len(block)]))
+    return bytes(out)
+
+
+def _nca_section0_pfs0(nsp_path, nca_data_offset, header_full, prod_keys_path):
+    """Decrypts NCA section 0 and returns the real PFS0 bytes at its
+    HierarchicalSha256 integrity info's own data level -- every Meta-
+    content NCA this feature deals with uses exactly this shape
+    (AesCtr encryption + a 2-level SHA256 hash layout, the second level
+    being the real data), confirmed against two real DLC files, not
+    assumed. Raises NspParseError if a given NCA's section 0 isn't
+    AesCtr-encrypted -- an honest "can't handle this one" rather than
+    silently misreading a different layout as PFS0 bytes."""
+    fsh0 = header_full[0x400:0x600]
+    encryption_type = fsh0[0x04]
+    if encryption_type != 3:  # NcaEncryptionType.AesCtr
+        raise NspParseError(f"Unsupported NCA section 0 encryption type {encryption_type} (expected AesCtr)")
+    _block_size, level_count = struct.unpack("<ii", fsh0[0x28:0x30])
+    levels = [struct.unpack("<qq", fsh0[0x30 + 0x10 * i : 0x40 + 0x10 * i]) for i in range(level_count)]
+    if not levels:
+        raise NspParseError("NCA section 0 has no integrity-info levels")
+
+    content_key = _nca_content_key(header_full, prod_keys_path)
+    start_block, end_block = struct.unpack("<ii", header_full[0x240:0x248])
+    sect_start, sect_end = start_block * 0x200, end_block * 0x200
+    upper_counter = struct.unpack("<Q", fsh0[0x140:0x148])[0]
+
+    with open(nsp_path, "rb") as f:
+        f.seek(nca_data_offset + sect_start)
+        section_bytes = f.read(sect_end - sect_start)
+
+    plaintext = _ctr_decrypt(content_key, upper_counter, sect_start, section_bytes)
+    data_offset, data_size = levels[-1]
+    return plaintext[data_offset : data_offset + data_size]
+
+
+# Cnmt binary format (switchbrew's own "CNMT" page) content-entry
+# "Type" byte -- LibHac's own Ncm.ContentType enum, confirmed via its
+# real source. Only Data (the actual DLC payload NCA, as opposed to
+# Meta/Control/HtmlDocument/LegalInformation/DeltaFragment) matters
+# here.
+_CNMT_CONTENT_TYPE_DATA = 2
+
+
+def read_dlc_content_nca_id(nsp_path, header_key, prod_keys_path):
+    """For a DLC .nsp, finds its actual payload content NCA's id (the
+    PFS0 filename, sans ".nca") -- the piece Ryubing's own dlc.json
+    needs beyond a title ID (see standalone_emulators.py's own
+    docstring on why). Confirmed against two real DLC files (see this
+    module's own docstring)."""
+    with open(nsp_path, "rb") as f:
+        entries = _pfs0_entries(f)
+        cnmt_entry = next((e for e in entries if e[0].endswith(".cnmt.nca")), None)
+        if cnmt_entry is None:
+            raise NspParseError(f"No *.cnmt.nca entry found in {nsp_path}")
+        name, data_offset, _size = cnmt_entry
+        f.seek(data_offset)
+        encrypted_header = f.read(0xC00)
+
+    header_full = _decrypt_nca_header(encrypted_header, header_key)
+    magic = header_full[_OFF_MAGIC : _OFF_MAGIC + 4]
+    if magic != b"NCA3":
+        raise NspParseError(f"{name} in {nsp_path} decrypted to magic {magic!r}, expected NCA3")
+
+    pfs0_bytes = _nca_section0_pfs0(nsp_path, data_offset, header_full, prod_keys_path)
+    inner = io.BytesIO(pfs0_bytes)
+    inner_entries = _pfs0_entries(inner)
+    cnmt_entry = next((e for e in inner_entries if e[0].endswith(".cnmt")), None)
+    if cnmt_entry is None:
+        raise NspParseError(f"No .cnmt entry inside {name}'s own content section")
+    cnmt_name, cnmt_off, cnmt_size = cnmt_entry
+    inner.seek(cnmt_off)
+    cnmt = inner.read(cnmt_size)
+
+    table_offset = struct.unpack("<H", cnmt[0x0E:0x10])[0]
+    n_content = struct.unpack("<H", cnmt[0x10:0x12])[0]
+    entries_start = 0x20 + table_offset
+    for i in range(n_content):
+        entry = cnmt[entries_start + i * 0x38 : entries_start + (i + 1) * 0x38]
+        content_type = entry[0x36]
+        if content_type == _CNMT_CONTENT_TYPE_DATA:
+            return entry[0x20:0x30].hex()
+
+    raise NspParseError(f"No Data content entry found in {cnmt_name}")
 
 
 def _decrypt_nca_header(data, header_key):
