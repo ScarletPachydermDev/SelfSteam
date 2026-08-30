@@ -26,6 +26,15 @@
   </categories>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="0.1.19" date="2026-08-30">
+      <description>
+        <ul>
+          <li>Add a DLC &amp; Updates picker to the Emulators tab for Switch games (Ryubing -- Flathub and both AppImage builds -- and Eden): pick any DLC/update NSPs for a game and SelfSteam registers them with the emulator automatically, no manual setup in Ryujinx/Eden's own UI needed</li>
+          <li>Reopening a Switch shortcut to edit it now shows any DLC/updates it (or the emulator itself) already has registered, instead of starting from an empty list</li>
+          <li>Fix the Create button showing an unrelated browser's "Downloading &lt;browser&gt;" label on shortcuts that have nothing to do with the URL tab</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.18" date="2026-08-27">
       <description>
         <ul>
