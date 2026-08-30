@@ -491,6 +491,159 @@ def switch_registered_dlc_and_updates(entry, title_id_base_hex):
     return paths
 
 
+# Eden's own DLC/update mechanism -- fundamentally different from
+# Ryubing's, not just a same-shape-different-name reuse. Confirmed via
+# a real clone of Eden's own source (git.eden-emu.dev/eden-emu/eden.git,
+# not GitHub -- Nintendo DMCA'd Eden's GitHub mirror, confirmed live via
+# `gh api` returning a 451 with that exact takedown notice, same
+# reasoning as this project's own release_api already points at
+# Eden's/Ryubing's self-hosted Forgejo instances instead):
+# FileSys::ExternalContentProvider (core/file_sys/registered_cache.cpp)
+# recursively scans a set of configured directories for *.nsp/*.xci at
+# startup and figures out each file's own title ID/content type
+# itself -- no per-file JSON metadata needed the way dlc.json/
+# updates.json are for Ryubing, just getting the real file into a
+# directory Eden already knows to scan.
+EDEN_DLC_UPDATE_EMULATORS = {
+    "Eden (amd64 — Intel/AMD desktop)",
+    "Eden (Legacy amd64 — pre-Ryzen/pre-Haswell CPUs)",
+    "Eden (Zen 2 — Steam Deck)",
+    "Eden (Zen 4 — AMD Z1/Z2, ROG Ally X, Legion Go S, Steam Machine)",
+}
+
+
+def _eden_config_path():
+    # Same real host path regardless of which of the 4 CPU-target
+    # AppImage variants above is picked -- they're all the same
+    # codebase/config layout, just different build targets, and none
+    # of them are Flatpak-sandboxed (install_type "binary" for all 4),
+    # so there's no Flathub-vs-AppImage split to make here the way
+    # _switch_games_dir has to for Ryubing.
+    return _xdg_config_dir("eden", "qt-config.ini")
+
+
+def eden_external_content_dir():
+    """Real, fixed directory SelfSteam keeps its own copies of picked
+    Eden DLC/update files in, registered once into Eden's own
+    external_content_dirs config array (see _eden_register_external_
+    content_dir). A fixed SelfSteam-owned path, not the user's own
+    folder the file was originally picked from -- deliberately, so the
+    one config edit this needs to make only ever has to write this
+    one, known-safe (no spaces/special characters) path string, rather
+    than needing to correctly reproduce Qt's own QSettings value-
+    escaping rules for an arbitrary user path. Public since
+    selfsteam_server.py's own picker-seeding logic needs to list what's
+    already there."""
+    return _xdg_data_dir("selfsteam", "eden-external-content")
+
+
+def _eden_register_external_content_dir():
+    """Idempotently ensures eden_external_content_dir() is one of
+    Eden's own configured external_content_dirs. A real line-level edit
+    of qt-config.ini, confirmed against a genuine installed one (not
+    assumed from source alone): Qt's QSettings INI backend writes
+    Category::Paths' own settings as flat, backslash-joined compound
+    keys ("Paths\\external_content_dirs\\1\\path=...") directly inside
+    the single "[UI]" bracket section -- NOT a real nested "[Paths]"
+    bracket section of its own, which the C++ source's own
+    BeginGroup(Category::Paths) call would otherwise suggest. Only
+    ever appends one new array entry and bumps that array's own
+    "\\size" line -- every other line in this (very large, hand-tuned)
+    config file is left untouched.
+
+    No-op if qt-config.ini doesn't exist yet (Eden has never been
+    launched) or its [UI] section can't be found -- same "nothing safe
+    to bootstrap yet" reasoning as _ryubing_configure_game_dir's own
+    missing-config-file case: Qt would need this file in an exact,
+    fully-populated shape to avoid silently discarding a hand-crafted
+    partial one the next time Eden actually starts."""
+    config_path = _eden_config_path()
+    if not os.path.isfile(config_path):
+        return
+    target_dir = eden_external_content_dir()
+    os.makedirs(target_dir, exist_ok=True)
+
+    with open(config_path, encoding="utf-8") as f:
+        lines = f.readlines()
+
+    ui_start = next((i for i, line in enumerate(lines) if line.strip() == "[UI]"), None)
+    if ui_start is None:
+        return
+    ui_end = next((i for i in range(ui_start + 1, len(lines)) if lines[i].startswith("[")), len(lines))
+
+    size_key = "Paths\\external_content_dirs\\size="
+    path_suffix = f"\\path={target_dir}"
+    size_line_idx = None
+    size = 0
+    already_present = False
+    for i in range(ui_start, ui_end):
+        line = lines[i].rstrip("\n")
+        if line.startswith(size_key):
+            size_line_idx = i
+            size = int(line[len(size_key):])
+        elif line.startswith("Paths\\external_content_dirs\\") and line.endswith(path_suffix):
+            already_present = True
+
+    if size_line_idx is None or already_present:
+        return
+
+    new_index = size + 1
+    lines[size_line_idx] = f"{size_key}{new_index}\n"
+    lines.insert(size_line_idx + 1, f"Paths\\external_content_dirs\\{new_index}\\path={target_dir}\n")
+
+    with open(config_path, "w", encoding="utf-8") as f:
+        f.writelines(lines)
+
+
+def install_eden_dlc_and_updates(abs_paths):
+    """Copies each picked DLC/update file into Eden's own registered
+    external-content directory (see eden_external_content_dir) and
+    makes sure that directory is actually registered in Eden's config
+    to be scanned. No per-file metadata/JSON written at all, unlike
+    Ryubing -- Eden's own ExternalContentProvider figures out each
+    file's real title ID/content type itself by reading the file when
+    it scans this directory at its own next startup.
+
+    Skips a file outright if something with the same basename is
+    already sitting in the destination -- same "already registered,
+    nothing to redo" reasoning install_switch_title_updates' own no-op-
+    if-empty case has, just checked per-file here since this directory
+    accumulates across every game rather than being one file per
+    title. Hardlinks where possible (same filesystem) rather than a
+    real second multi-hundred-MB-to-multi-GB copy of a file that
+    already exists on disk, falling back to a real copy across
+    filesystems."""
+    if not abs_paths:
+        return
+    _eden_register_external_content_dir()
+    target_dir = eden_external_content_dir()
+    os.makedirs(target_dir, exist_ok=True)
+    for src in abs_paths:
+        dest = os.path.join(target_dir, os.path.basename(src))
+        if os.path.exists(dest):
+            continue
+        try:
+            os.link(src, dest)
+        except OSError:
+            shutil.copy2(src, dest)
+
+
+def eden_external_content_files():
+    """Every real file currently sitting in eden_external_content_dir()
+    -- used by selfsteam_server.py's own picker-seeding logic (which
+    already has nsp_metadata on hand to filter these down by title ID
+    the same way it classifies any other DLC/update pick) to show what
+    Eden already has registered for a given ROM, the same seeding
+    Ryubing's own switch_registered_dlc_and_updates provides. Deliber-
+    ately just a flat file listing, not title-ID-aware itself -- that
+    parsing already lives in nsp_metadata/selfsteam_server.py, no
+    reason to duplicate it here."""
+    target_dir = eden_external_content_dir()
+    if not os.path.isdir(target_dir):
+        return []
+    return [os.path.join(target_dir, name) for name in os.listdir(target_dir) if os.path.isfile(os.path.join(target_dir, name))]
+
+
 def _azahar_args(romfile):
     # -f/--fullscreen plus a bare positional romfile -- both confirmed
     # real via Azahar's own source (src/citra_qt/citra_qt.cpp's

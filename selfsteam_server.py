@@ -94,8 +94,8 @@ import steamos_session
 #
 # Emulators tab (em_ prefix) -- same shape as RetroArch's own:
 #   _em_breadcrumbs_html/_em_list_rows/_em_picker_section
-#   _em_dlc_classify/_em_dlc_picker_section -- Switch-family DLC+updates
-#     picker (see standalone_emulators.SWITCH_DLC_UPDATE_EMULATORS).
+#   _em_dlc_classify/_em_dlc_picker_section -- DLC+updates picker,
+#     Ryubing and Eden alike (see _DLC_UPDATE_EMULATORS).
 #   _emulators_tab_panel_html
 #   _em_display_term/_em_sgdb_search_bar_html/_em_middle_column_html
 #
@@ -2595,8 +2595,8 @@ _EM_STATE_KEYS = [
     "em_keyspath", "em_keysfile", "em_keyssource", "em_keys_skip",
     "em_firmwarepath", "em_firmwarefile", "em_firmwaresource", "em_firmware_skip",
     "em_resolved", "em_sgdb_q", "em_sgdb_cleared", "em_name_cleared",
-    # DLC+updates picker (Switch-family emulators only, see
-    # standalone_emulators.SWITCH_DLC_UPDATE_EMULATORS) -- em_dlc_paths
+    # DLC+updates picker (Ryubing and Eden, see _DLC_UPDATE_EMULATORS
+    # below) -- em_dlc_paths
     # is every added file's path (relative to _RA_ROOT), joined by
     # _EM_DLC_SEP, accumulated across as many separate uploads/local
     # picks as the user makes rather than replaced by each one (see
@@ -2720,13 +2720,28 @@ def _em_dlc_classify(state):
     return rom_title_id_base, rows, None
 
 
+# Every emulator the DLC+updates picker is wired up for, regardless of
+# which real mechanism actually applies the files at Create (Ryubing's
+# per-title dlc.json/updates.json vs Eden's shared external-content
+# directory -- see standalone_emulators.py's own docstrings on each).
+_DLC_UPDATE_EMULATORS = standalone_emulators.SWITCH_DLC_UPDATE_EMULATORS | standalone_emulators.EDEN_DLC_UPDATE_EMULATORS
+
+
 def _em_dlc_seed_state(state):
     """If em_dlc_paths is empty but the picked ROM already has real
-    dlc.json/updates.json entries -- editing a previously-created
-    shortcut for this game, or re-creating one after deleting it --
-    seeds the picker with those paths instead of starting blank. Not
-    edit-specific on purpose: "this ROM already has registrations" is
-    the real condition that matters, not how the page was reached.
+    registered DLC/updates -- editing a previously-created shortcut for
+    this game, or re-creating one after deleting it -- seeds the picker
+    with those paths instead of starting blank. Not edit-specific on
+    purpose: "this ROM already has registrations" is the real condition
+    that matters, not how the page was reached.
+
+    Branches by family for *where* to look: Ryubing keeps a real per-
+    title dlc.json/updates.json (switch_registered_dlc_and_updates
+    reads those directly); Eden keeps one shared external-content
+    directory with no per-title index at all, so its own files here get
+    filtered down to this ROM's title ID the same way _em_dlc_classify
+    classifies any other pick (nsp_metadata.read_title_id) -- there's
+    no Eden-specific metadata to read, just real files to check.
 
     A no-op (returns state as-is) once the user has touched the picker
     at all this session, including down to zero files -- a genuinely-
@@ -2734,7 +2749,7 @@ def _em_dlc_seed_state(state):
     the same accepted tradeoff every other picker's own plain-string
     state already has for a cleared-vs-never-set field."""
     emulator = state.get("em_emulator", "")
-    if emulator not in standalone_emulators.SWITCH_DLC_UPDATE_EMULATORS or state.get("em_dlc_paths"):
+    if emulator not in _DLC_UPDATE_EMULATORS or state.get("em_dlc_paths"):
         return state
     romfile = state.get("em_romfile", "")
     rom_abs = _ra_safe_join(romfile) if romfile else None
@@ -2748,8 +2763,20 @@ def _em_dlc_seed_state(state):
         rom_title_id_base = nsp_metadata.read_title_id(rom_abs, header_key).title_id_base
     except Exception:  # noqa: BLE001 -- can't resolve a title ID yet just means nothing to seed
         return state
-    entry = standalone_emulators.EMULATORS.get(emulator)
-    registered_abs = standalone_emulators.switch_registered_dlc_and_updates(entry, f"{rom_title_id_base:016x}")
+
+    if emulator in standalone_emulators.SWITCH_DLC_UPDATE_EMULATORS:
+        entry = standalone_emulators.EMULATORS.get(emulator)
+        registered_abs = standalone_emulators.switch_registered_dlc_and_updates(entry, f"{rom_title_id_base:016x}")
+    else:
+        registered_abs = []
+        for candidate in standalone_emulators.eden_external_content_files():
+            try:
+                candidate_title_id_base = nsp_metadata.read_title_id(candidate, header_key).title_id_base
+            except Exception:  # noqa: BLE001 -- one unreadable file in the shared directory shouldn't block the rest
+                continue
+            if candidate_title_id_base == rom_title_id_base:
+                registered_abs.append(candidate)
+
     rel_paths = [os.path.relpath(p, _RA_ROOT) for p in registered_abs if os.path.isfile(p)]
     if not rel_paths:
         return state
@@ -3497,9 +3524,9 @@ def _em_dlc_list_rows(abs_path, rel_path, state):
 
 
 def _em_dlc_picker_section(state):
-    """DLC+updates picker -- Switch-family emulators only (see
-    standalone_emulators.SWITCH_DLC_UPDATE_EMULATORS), always visible
-    for one of those but greyed out/inert until a ROM is actually
+    """DLC+updates picker -- Ryubing and Eden only (see
+    _DLC_UPDATE_EMULATORS), always visible for one of those but
+    greyed out/inert until a ROM is actually
     picked (classification has nothing to compare against yet, so
     letting someone add files before that just invites confusion about
     why everything shows "Pick a ROM first"). Same Upload/local-browse
@@ -3512,7 +3539,7 @@ def _em_dlc_picker_section(state):
     a required asterisk -- unlike Keys/Firmware/ROM, a shortcut is
     perfectly valid with no DLC/updates at all."""
     emulator = state.get("em_emulator", "")
-    if emulator not in standalone_emulators.SWITCH_DLC_UPDATE_EMULATORS:
+    if emulator not in _DLC_UPDATE_EMULATORS:
         return ""
 
     has_rom = bool(state.get("em_romfile"))
@@ -6362,15 +6389,17 @@ class Handler(BaseHTTPRequestHandler):
             for prefix, bios_abs in em_bios_slot_files.items():
                 standalone_emulators.install_bios_slot(em_emulator, prefix, bios_abs)
 
-            # DLC+updates picker (Switch-family only, see
-            # standalone_emulators.SWITCH_DLC_UPDATE_EMULATORS).
-            # Updates just need their own container path (Ryujinx re-
-            # scans the whole file at load time); DLC needs the actual
-            # payload content NCA's id *inside* its own PFS0, which
-            # needs a real decrypt (nsp_metadata.read_dlc_content_nca_id
-            # -- ported from LibHac's own real source, see its own
-            # module docstring), so that's only ever done here at
-            # Create time, not on every picker render.
+            # DLC+updates picker -- two entirely different real
+            # mechanisms depending on family (see standalone_emulators.
+            # py's own docstrings on each): Ryubing keeps a per-title
+            # dlc.json/updates.json (DLC needs the actual payload
+            # content NCA's id *inside* its own PFS0, which needs a
+            # real decrypt -- nsp_metadata.read_dlc_content_nca_id,
+            # ported from LibHac's own real source -- so that's only
+            # ever done here at Create time, not on every picker
+            # render); Eden just needs the real files copied into its
+            # own shared external-content directory, no per-file
+            # metadata at all.
             if em_emulator in standalone_emulators.SWITCH_DLC_UPDATE_EMULATORS:
                 em_dlc_state = _em_state_from_params(params)
                 rom_title_id_base, dlc_rows, _header_key_error = _em_dlc_classify(em_dlc_state)
@@ -6406,6 +6435,15 @@ class Handler(BaseHTTPRequestHandler):
                         standalone_emulators.EMULATORS[em_emulator],
                         f"{rom_title_id_base:016x}", dlc_entries,
                     )
+            elif em_emulator in standalone_emulators.EDEN_DLC_UPDATE_EMULATORS:
+                em_dlc_state = _em_state_from_params(params)
+                _rom_title_id_base, dlc_rows, _header_key_error = _em_dlc_classify(em_dlc_state)
+                dlc_update_abs_paths = [
+                    _ra_safe_join(row["path"]) for row in dlc_rows
+                    if row["kind"] in ("update", "dlc")
+                ]
+                dlc_update_abs_paths = [p for p in dlc_update_abs_paths if p]
+                standalone_emulators.install_eden_dlc_and_updates(dlc_update_abs_paths)
 
             args = standalone_emulators.launch_args(em_emulator, romfile_abs, zrif=em_zrif or None)
             if args is None:
