@@ -1125,7 +1125,20 @@ function selfsteamShowCreating(form) {
   // lookup instead. Reads whichever radio is ACTUALLY checked right
   // now, not a server-rendered default frozen at page-render time --
   // the user may have picked a different browser client-side since.
-  var browserRadio = document.querySelector('input[name="browser"]:checked');
+  // Only actually relevant to a genuine URL-tab submission -- every
+  // tab's own panel (including the URL tab's browser picker) stays in
+  // the DOM at all times regardless of which one is visible (CSS
+  // :target-driven, not conditional rendering), so a checked radio
+  // there is real and page-wide-queryable even while creating an
+  // Emulators/Apps-tab shortcut. Confirmed live: without the
+  // form.dataset.emulator/appName guard below, an unrelated Eden
+  // shortcut's own Create click showed "Downloading Google Chrome" --
+  // Chrome's own radio (unrelated, just first/default-checked in the
+  // URL tab's own always-present markup) happened to satisfy this
+  // branch purely because it matched :checked somewhere on the page.
+  var browserRadio = (!form.dataset.emulator && !form.dataset.appName)
+    ? document.querySelector('input[name="browser"]:checked')
+    : null;
   if (form.dataset.emulator && !form.dataset.installed) {
     button.innerHTML = "Downloading " + form.dataset.emulator + '<span class="spinner"></span>';
   } else if (form.dataset.pkgExtract) {
