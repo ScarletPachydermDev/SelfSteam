@@ -22,6 +22,7 @@ import configparser
 import json
 import os
 import re
+import struct
 import shlex
 import shutil
 import subprocess
@@ -1284,6 +1285,27 @@ def _shadps4_pkg_dir():
     return _xdg_data_dir("selfsteam", "shadps4-pkgs")
 
 
+def _run_pkgextract(pkg_path, out_dir):
+    """Shared subprocess call -- pkgextract writes sce_sys/* metadata
+    (param.sfo included) before it gets to the real PFS content, and
+    can genuinely exit non-zero after that metadata is already on disk
+    if the content itself fails to parse (confirmed live against a real
+    -- if seemingly truncated/incomplete -- DLC .pkg: sce_sys/param.sfo
+    came out fine, "cannot open outer PFS: cannot parse header" ended
+    it before any real content was written). Callers that only need
+    metadata (read_ps4_pkg_metadata) can tolerate that; callers that
+    need the real game content (extract_shadps4_pkg) can't -- so this
+    just runs the tool and returns its own (returncode, stderr) rather
+    than deciding what counts as success itself."""
+    os.makedirs(out_dir, exist_ok=True)
+    pkgextract = _ensure_pkgextract()
+    result = subprocess.run(
+        [pkgextract, pkg_path, "-o", out_dir, "-f"],
+        capture_output=True, text=True,
+    )
+    return result.returncode, (result.stderr.strip() or result.stdout.strip())
+
+
 def extract_shadps4_pkg(pkg_path):
     """Extracts a PS4 .pkg into its own folder under _shadps4_pkg_dir()
     via pkgextract, returning the extracted eboot.bin's path -- a real
@@ -1293,21 +1315,143 @@ def extract_shadps4_pkg(pkg_path):
     that's already been extracted, same "cheap once already done"
     convention as install_keys/install_firmware_zip elsewhere in this
     file."""
-    pkgextract = _ensure_pkgextract()
     out_dir = os.path.join(_shadps4_pkg_dir(), os.path.splitext(os.path.basename(pkg_path))[0])
     eboot_path = os.path.join(out_dir, "eboot.bin")
     if os.path.isfile(eboot_path):
         return eboot_path
-    os.makedirs(_shadps4_pkg_dir(), exist_ok=True)
-    result = subprocess.run(
-        [pkgextract, pkg_path, "-o", out_dir, "-f"],
-        capture_output=True, text=True,
-    )
-    if result.returncode != 0 or not os.path.isfile(eboot_path):
-        raise RuntimeError(
-            f"PS4 .pkg extraction failed: {result.stderr.strip() or result.stdout.strip() or 'no eboot.bin in extracted output'}"
-        )
+    _returncode, stderr = _run_pkgextract(pkg_path, out_dir)
+    if not os.path.isfile(eboot_path):
+        raise RuntimeError(f"PS4 .pkg extraction failed: {stderr or 'no eboot.bin in extracted output'}")
     return eboot_path
+
+
+# PARAM.SFO -- the small key/value metadata file every real PS4
+# package/install directory has at sce_sys/param.sfo. Stable, publicly
+# documented flat binary format (psdevwiki.com's own "PARAM.SFO"
+# page): a 20-byte header (magic, version, key-table offset, data-
+# table offset, entry count), then one 16-byte index entry per key
+# (key-table offset, a data-format tag, the value's real length/its
+# slot's max length, data-table offset), then the key table (NUL-
+# terminated strings back to back) and the data table (the actual
+# values) -- confirmed against three real files here (a genuine DLC's,
+# and this project's own already-known base-game filenames), not
+# assumed from documentation alone.
+_PSF_MAGIC = 0x46535000
+_PSF_FMT_UTF8 = (0x0004, 0x0204)
+_PSF_FMT_INT32 = 0x0404
+
+
+def _parse_psf(path):
+    with open(path, "rb") as f:
+        data = f.read()
+    magic, _version, key_table_off, data_table_off, count = struct.unpack("<IIIII", data[:20])
+    if magic != _PSF_MAGIC:
+        raise ValueError(f"{path} is not a real PARAM.SFO (bad magic {magic:#x})")
+    fields = {}
+    for i in range(count):
+        entry_off = 20 + i * 16
+        key_off, data_fmt, data_len, _data_max_len, data_off = struct.unpack("<HHIII", data[entry_off : entry_off + 16])
+        key_end = data.index(b"\x00", key_table_off + key_off)
+        key = data[key_table_off + key_off : key_end].decode("utf-8")
+        raw = data[data_table_off + data_off : data_table_off + data_off + data_len]
+        if data_fmt in _PSF_FMT_UTF8:
+            fields[key] = raw.split(b"\x00")[0].decode("utf-8", errors="replace")
+        elif data_fmt == _PSF_FMT_INT32:
+            fields[key] = struct.unpack("<i", raw[:4])[0]
+        else:
+            fields[key] = raw
+    return fields
+
+
+def read_ps4_pkg_metadata(pkg_path):
+    """A PS4 .pkg's own PARAM.SFO fields (TITLE, TITLE_ID, CONTENT_ID,
+    CATEGORY, ...) -- read by extracting into the same staging dir
+    extract_shadps4_pkg itself would use (so a DLC/update pick that
+    later gets actually installed doesn't redo this work), tolerating
+    the metadata-written-but-content-failed partial-failure case
+    _run_pkgextract's own docstring describes.
+
+    Deliberately does NOT try to verify a DLC/update "belongs to" a
+    given base game the way nsp_metadata's title-ID-offset check does
+    for Switch -- confirmed against a real Bloodborne DLC .pkg that PS4
+    content has no such relationship encoded anywhere in its own
+    metadata: its own TITLE_ID field (CUSA00900) is a distinct pseudo-
+    title assigned to the DLC/update itself, unrelated to the base
+    game's own TITLE_ID (CUSA03173) it's actually meant for. The real
+    TITLE field ("Bloodborne The Old Hunters") is the only reliable
+    signal here, and it's meant for a human to read, not to auto-match."""
+    out_dir = os.path.join(_shadps4_pkg_dir(), os.path.splitext(os.path.basename(pkg_path))[0])
+    param_sfo_path = os.path.join(out_dir, "sce_sys", "param.sfo")
+    if not os.path.isfile(param_sfo_path):
+        _returncode, stderr = _run_pkgextract(pkg_path, out_dir)
+        if not os.path.isfile(param_sfo_path):
+            raise RuntimeError(f"PS4 .pkg metadata read failed: {stderr or 'no sce_sys/param.sfo in extracted output'}")
+    return _parse_psf(param_sfo_path)
+
+
+PS4_DLC_UPDATE_EMULATORS = {"shadPS4"}
+
+# CATEGORY values PARAM.SFO actually uses -- confirmed via shadPS4's
+# own source (core/libraries/app_content/app_content.cpp's
+# sceAppContentInitialize, which specifically checks for "ac") and
+# psdevwiki's own documented category list for the others.
+_PS4_CATEGORY_LABELS = {"ac": "DLC", "gp": "Update", "gd": "Base game"}
+
+
+def ps4_category_label(category):
+    return _PS4_CATEGORY_LABELS.get(category)
+
+
+def shadps4_addon_dir(entry):
+    """Real per-game additional-content directory shadPS4 itself scans
+    at boot (core/libraries/app_content/app_content.cpp's
+    sceAppContentInitialize: <addon_dir>/<TITLE_ID>/<any folder>/
+    sce_sys/param.sfo with CATEGORY "ac") -- confirmed via its own
+    source (common/emulator_settings.cpp's GetAddonInstallDir default,
+    Common::FS::GetUserPath(UserDir) / "addcont") for where that
+    directory itself lives. Flatpak-sandboxed since shadPS4 here is
+    Flathub-only (no AppImage variant in this catalog) -- real path
+    not yet empirically confirmed against a live shadPS4 run (it's
+    never actually been launched on any test machine this session had
+    access to, only used via SelfSteam's own headless pkg extraction),
+    unlike every other path in this file that's been checked against a
+    real running instance."""
+    return _flatpak_data_dir(entry["app_id"], "shadPS4", "addcont")
+
+
+def shadps4_base_title_id(romfile_pkg_path):
+    """The base game's own real TITLE_ID, read from its already-
+    extracted sce_sys/param.sfo -- extract_shadps4_pkg's own idempotent
+    re-run just confirms/returns the existing extraction rather than
+    redoing it, since Create always extracts the base ROM before this
+    would ever be called. This is what install_shadps4_dlc's own
+    <base_title_id> folder needs to match for shadPS4 to associate the
+    DLC with the right game (see shadps4_addon_dir's own docstring)."""
+    eboot_path = extract_shadps4_pkg(romfile_pkg_path)
+    param_sfo_path = os.path.join(os.path.dirname(eboot_path), "sce_sys", "param.sfo")
+    return _parse_psf(param_sfo_path).get("TITLE_ID")
+
+
+def install_shadps4_dlc(entry, base_title_id, dlc_pkg_abs_paths):
+    """Extracts each picked DLC/update .pkg (via the same pkgextract
+    already used for the base game) into shadps4_addon_dir()'s own
+    <base_title_id>/<pkg's own filename>/ -- matching shadPS4's real
+    scan layout, so it needs no metadata/JSON registration of its own
+    the way Ryubing's dlc.json is, similar in spirit to Eden's own
+    directory-scan mechanism. Skips a pkg outright if its own output
+    folder already has a real sce_sys/param.sfo (already installed --
+    same "cheap once already done" convention as install_keys/
+    install_firmware_zip)."""
+    if not dlc_pkg_abs_paths:
+        return
+    addon_dir = shadps4_addon_dir(entry)
+    title_dir = os.path.join(addon_dir, base_title_id)
+    os.makedirs(title_dir, exist_ok=True)
+    for pkg_path in dlc_pkg_abs_paths:
+        out_dir = os.path.join(title_dir, os.path.splitext(os.path.basename(pkg_path))[0])
+        if os.path.isfile(os.path.join(out_dir, "sce_sys", "param.sfo")):
+            continue
+        _run_pkgextract(pkg_path, out_dir)
 
 
 def shadps4_pkg_extraction_needed(romfile):

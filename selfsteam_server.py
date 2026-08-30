@@ -2736,8 +2736,50 @@ def _em_dlc_classify(state):
 # Every emulator the DLC+updates picker is wired up for, regardless of
 # which real mechanism actually applies the files at Create (Ryubing's
 # per-title dlc.json/updates.json vs Eden's shared external-content
-# directory -- see standalone_emulators.py's own docstrings on each).
-_DLC_UPDATE_EMULATORS = standalone_emulators.SWITCH_DLC_UPDATE_EMULATORS | standalone_emulators.EDEN_DLC_UPDATE_EMULATORS
+# directory vs shadPS4's own addcont directory -- see standalone_
+# emulators.py's own docstrings on each).
+_DLC_UPDATE_EMULATORS = (
+    standalone_emulators.SWITCH_DLC_UPDATE_EMULATORS
+    | standalone_emulators.EDEN_DLC_UPDATE_EMULATORS
+    | standalone_emulators.PS4_DLC_UPDATE_EMULATORS
+)
+
+
+def _em_dlc_classify_ps4(state):
+    """Classifies every accumulated DLC/update-picker file for shadPS4.
+    Unlike the Switch-family classify above, there's no title-ID-based
+    way to confirm a PS4 DLC/update actually belongs to the currently-
+    picked ROM -- confirmed against a real Bloodborne DLC .pkg: its own
+    TITLE_ID field (a distinct pseudo-title, e.g. "CUSA00900" for "The
+    Old Hunters") is unrelated to the base game's own TITLE_ID
+    ("CUSA03173"). So this just reads and shows each file's own real
+    CATEGORY-derived label and TITLE for a human to judge -- no ROM
+    needed at all for classification itself (the picker's own generic
+    greyed-out-until-a-ROM's-picked gate still applies for UI
+    consistency with the Switch-family picker, just isn't load-bearing
+    here the way it is there)."""
+    rows = []
+    for p in _em_dlc_paths_list(state):
+        abs_path = _ra_safe_join(p)
+        filename = os.path.basename(p)
+        if abs_path is None or not os.path.isfile(abs_path):
+            rows.append({"path": p, "filename": filename, "kind": "error", "detail": "File not found"})
+            continue
+        try:
+            meta = standalone_emulators.read_ps4_pkg_metadata(abs_path)
+        except Exception:  # noqa: BLE001 -- one bad/unsupported .pkg shouldn't block classifying the rest of the batch
+            rows.append({"path": p, "filename": filename, "kind": "error", "detail": "Couldn't be read"})
+            continue
+        label = standalone_emulators.ps4_category_label(meta.get("CATEGORY"))
+        title = meta.get("TITLE") or ""
+        detail = f"{label} -- {title}" if label and title else (label or title or "Unrecognized content")
+        if label == "DLC":
+            rows.append({"path": p, "filename": filename, "kind": "dlc", "detail": detail})
+        elif label == "Update":
+            rows.append({"path": p, "filename": filename, "kind": "update", "detail": detail})
+        else:
+            rows.append({"path": p, "filename": filename, "kind": "mismatch", "detail": detail})
+    return rows
 
 
 def _em_dlc_seed_state(state):
@@ -2763,6 +2805,15 @@ def _em_dlc_seed_state(state):
     state already has for a cleared-vs-never-set field."""
     emulator = state.get("em_emulator", "")
     if emulator not in _DLC_UPDATE_EMULATORS or state.get("em_dlc_paths"):
+        return state
+    if emulator in standalone_emulators.PS4_DLC_UPDATE_EMULATORS:
+        # Not implemented -- shadPS4's own addcont dir only ever keeps
+        # the *extracted* output (install_shadps4_dlc unpacks straight
+        # into it), not a copy of the original .pkg the way Ryubing's
+        # dlc.json/Eden's own directory both keep a real file that can
+        # be pointed back at and re-classified. Nothing here to seed
+        # from yet without also preserving an original .pkg alongside
+        # each extraction.
         return state
     romfile = state.get("em_romfile", "")
     rom_abs = _ra_safe_join(romfile) if romfile else None
@@ -3556,7 +3607,11 @@ def _em_dlc_picker_section(state):
         return ""
 
     has_rom = bool(state.get("em_romfile"))
-    _rom_title_id_base, rows, header_key_error = _em_dlc_classify(state)
+    if emulator in standalone_emulators.PS4_DLC_UPDATE_EMULATORS:
+        rows = _em_dlc_classify_ps4(state)
+        header_key_error = None
+    else:
+        _rom_title_id_base, rows, header_key_error = _em_dlc_classify(state)
 
     label_text = "DLC &amp; Updates (optional)"
 
@@ -6457,6 +6512,23 @@ class Handler(BaseHTTPRequestHandler):
                 ]
                 dlc_update_abs_paths = [p for p in dlc_update_abs_paths if p]
                 standalone_emulators.install_eden_dlc_and_updates(dlc_update_abs_paths)
+            elif em_emulator in standalone_emulators.PS4_DLC_UPDATE_EMULATORS:
+                em_dlc_state = _em_state_from_params(params)
+                dlc_rows = _em_dlc_classify_ps4(em_dlc_state)
+                dlc_abs_paths = [
+                    _ra_safe_join(row["path"]) for row in dlc_rows
+                    if row["kind"] in ("dlc", "update")
+                ]
+                dlc_abs_paths = [p for p in dlc_abs_paths if p]
+                if dlc_abs_paths:
+                    try:
+                        base_title_id = standalone_emulators.shadps4_base_title_id(romfile_abs)
+                    except Exception:  # noqa: BLE001 -- can't resolve the base game's own title ID just means nothing to install against
+                        base_title_id = None
+                    if base_title_id:
+                        standalone_emulators.install_shadps4_dlc(
+                            standalone_emulators.EMULATORS[em_emulator], base_title_id, dlc_abs_paths,
+                        )
 
             args = standalone_emulators.launch_args(em_emulator, romfile_abs, zrif=em_zrif or None)
             if args is None:
