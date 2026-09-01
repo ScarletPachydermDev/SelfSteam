@@ -1428,15 +1428,35 @@ def shadps4_addon_dir(entry):
     return _flatpak_data_dir(entry["app_id"], "shadPS4", "addcont")
 
 
-def shadps4_base_title_id(romfile_pkg_path):
+def shadps4_resolve_eboot_path(romfile_path):
+    """The base game's own real, already-extracted eboot.bin path,
+    accepting either shape em_romfile can actually hold: the original
+    .pkg (before Create's ever run, or a freshly re-picked ROM --
+    extract_shadps4_pkg's own idempotent re-run just confirms/returns
+    the existing extraction rather than redoing it), or the already-
+    *extracted* eboot.bin path itself -- which is what a saved
+    shortcut's own LaunchOptions really stores (launch_args substitutes
+    the .pkg for its own extracted eboot.bin before ever writing
+    LaunchOptions), and so what create_webapp's own
+    _extract_standalone_emulator_info hands back on every Edit or re-
+    Save that doesn't re-pick the ROM. Confirmed live as a real gap:
+    without this, editing an existing shadPS4 shortcut to add a new DLC
+    file or update silently failed to install either at all, since a
+    .pkg-only extract_shadps4_pkg call raised outright on an eboot.bin
+    path and the caller's own try/except just swallowed it."""
+    if romfile_path.lower().endswith(".pkg"):
+        return extract_shadps4_pkg(romfile_path)
+    return romfile_path
+
+
+def shadps4_base_title_id(romfile_path):
     """The base game's own real TITLE_ID, read from its already-
-    extracted sce_sys/param.sfo -- extract_shadps4_pkg's own idempotent
-    re-run just confirms/returns the existing extraction rather than
-    redoing it, since Create always extracts the base ROM before this
-    would ever be called. This is what install_shadps4_dlc's own
-    <base_title_id> folder needs to match for shadPS4 to associate the
-    DLC with the right game (see shadps4_addon_dir's own docstring)."""
-    eboot_path = extract_shadps4_pkg(romfile_pkg_path)
+    extracted sce_sys/param.sfo -- see shadps4_resolve_eboot_path's own
+    docstring on the two shapes romfile_path can actually be. This is
+    what install_shadps4_dlc's own <base_title_id> folder needs to
+    match for shadPS4 to associate the DLC with the right game (see
+    shadps4_addon_dir's own docstring)."""
+    eboot_path = shadps4_resolve_eboot_path(romfile_path)
     param_sfo_path = os.path.join(os.path.dirname(eboot_path), "sce_sys", "param.sfo")
     return _parse_psf(param_sfo_path).get("TITLE_ID")
 
@@ -1512,6 +1532,57 @@ def install_shadps4_update(base_eboot_path, update_pkg_abs_path):
         if not os.path.isfile(os.path.join(out_dir, "eboot.bin")):
             raise RuntimeError(f"PS4 update extraction failed: {stderr or 'no eboot.bin in extracted output'}")
         shutil.copytree(out_dir, base_dir, dirs_exist_ok=True)
+
+
+def _shadps4_dlc_manifest_path():
+    return _xdg_data_dir("selfsteam", "shadps4-dlc-manifest.json")
+
+
+def _load_shadps4_dlc_manifest():
+    path = _shadps4_dlc_manifest_path()
+    if not os.path.isfile(path):
+        return {}
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def record_shadps4_dlc_paths(base_title_id, pkg_abs_paths):
+    """Remembers which original .pkg paths a user picked for this base
+    game's DLC+Updates picker -- purely so a later Edit can show them
+    again (see selfsteam_server.py's _em_dlc_seed_state). shadPS4 itself
+    never needs this: its own addcont dir only ever keeps install_
+    shadps4_dlc's *extracted* output, and install_shadps4_update merges
+    an update straight onto the base game's own directory, so neither
+    leaves anything behind pointing back at the original .pkg the way
+    Ryubing's dlc.json or Eden's directory scan do. Additive/deduped
+    per base_title_id, across both DLC and update picks alike -- there's
+    no reason to track them separately here, _em_dlc_classify_ps4
+    already re-derives DLC-vs-update from each file's own real PARAM.SFO
+    CATEGORY on every read, seeded or not."""
+    if not pkg_abs_paths:
+        return
+    manifest = _load_shadps4_dlc_manifest()
+    existing = manifest.get(base_title_id, [])
+    for p in pkg_abs_paths:
+        if p not in existing:
+            existing.append(p)
+    manifest[base_title_id] = existing
+    path = _shadps4_dlc_manifest_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(manifest, f)
+
+
+def shadps4_registered_dlc_and_updates(base_title_id):
+    """The original .pkg paths previously recorded for this base game
+    via record_shadps4_dlc_paths -- may include paths that have since
+    moved/been deleted, same as every other *_registered_dlc_and_updates/
+    *_external_content_files seed source; callers already filter those
+    out (see _em_dlc_seed_state)."""
+    return _load_shadps4_dlc_manifest().get(base_title_id, [])
 
 
 def shadps4_pkg_extraction_needed(romfile):

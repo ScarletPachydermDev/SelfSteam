@@ -2796,7 +2796,13 @@ def _em_dlc_seed_state(state):
     directory with no per-title index at all, so its own files here get
     filtered down to this ROM's title ID the same way _em_dlc_classify
     classifies any other pick (nsp_metadata.read_title_id) -- there's
-    no Eden-specific metadata to read, just real files to check.
+    no Eden-specific metadata to read, just real files to check; shadPS4
+    keeps no trace of the original .pkg in either its addcont dir
+    (install_shadps4_dlc's own extracted output) or the base game's
+    directory (install_shadps4_update merges straight onto it), so this
+    reads back SelfSteam's own small manifest of what was picked instead
+    (see standalone_emulators.record_shadps4_dlc_paths) -- there's
+    nothing in shadPS4 itself to seed from otherwise.
 
     A no-op (returns state as-is) once the user has touched the picker
     at all this session, including down to zero files -- a genuinely-
@@ -2807,14 +2813,23 @@ def _em_dlc_seed_state(state):
     if emulator not in _DLC_UPDATE_EMULATORS or state.get("em_dlc_paths"):
         return state
     if emulator in standalone_emulators.PS4_DLC_UPDATE_EMULATORS:
-        # Not implemented -- shadPS4's own addcont dir only ever keeps
-        # the *extracted* output (install_shadps4_dlc unpacks straight
-        # into it), not a copy of the original .pkg the way Ryubing's
-        # dlc.json/Eden's own directory both keep a real file that can
-        # be pointed back at and re-classified. Nothing here to seed
-        # from yet without also preserving an original .pkg alongside
-        # each extraction.
-        return state
+        romfile = state.get("em_romfile", "")
+        rom_abs = _ra_safe_join(romfile) if romfile else None
+        if not rom_abs or not os.path.isfile(rom_abs):
+            return state
+        try:
+            base_title_id = standalone_emulators.shadps4_base_title_id(rom_abs)
+        except Exception:  # noqa: BLE001 -- can't resolve a title ID yet just means nothing to seed
+            return state
+        if not base_title_id:
+            return state
+        registered_abs = standalone_emulators.shadps4_registered_dlc_and_updates(base_title_id)
+        rel_paths = [os.path.relpath(p, _RA_ROOT) for p in registered_abs if os.path.isfile(p)]
+        if not rel_paths:
+            return state
+        new_state = dict(state)
+        new_state["em_dlc_paths"] = _em_dlc_join(rel_paths)
+        return new_state
     romfile = state.get("em_romfile", "")
     rom_abs = _ra_safe_join(romfile) if romfile else None
     if not rom_abs or not os.path.isfile(rom_abs):
@@ -6543,23 +6558,25 @@ class Handler(BaseHTTPRequestHandler):
                 # bumped APP_VER).
                 update_abs_paths = [_ra_safe_join(row["path"]) for row in dlc_rows if row["kind"] == "update"]
                 update_abs_paths = [p for p in update_abs_paths if p]
-                if dlc_abs_paths:
+                if dlc_abs_paths or update_abs_paths:
                     try:
                         base_title_id = standalone_emulators.shadps4_base_title_id(romfile_abs)
                     except Exception:  # noqa: BLE001 -- can't resolve the base game's own title ID just means nothing to install against
                         base_title_id = None
                     if base_title_id:
-                        standalone_emulators.install_shadps4_dlc(
-                            standalone_emulators.EMULATORS[em_emulator], base_title_id, dlc_abs_paths,
-                        )
-                if update_abs_paths:
-                    try:
-                        base_eboot_path = standalone_emulators.extract_shadps4_pkg(romfile_abs)
-                    except Exception:  # noqa: BLE001 -- can't resolve/extract the base game yet means nothing to merge onto
-                        base_eboot_path = None
-                    if base_eboot_path:
+                        # Remembered purely so a later Edit can show
+                        # these again (see _em_dlc_seed_state) -- neither
+                        # install below leaves anything behind pointing
+                        # back at the original .pkg the way Ryubing's
+                        # dlc.json/Eden's directory scan do.
+                        standalone_emulators.record_shadps4_dlc_paths(base_title_id, dlc_abs_paths + update_abs_paths)
+                        if dlc_abs_paths:
+                            standalone_emulators.install_shadps4_dlc(
+                                standalone_emulators.EMULATORS[em_emulator], base_title_id, dlc_abs_paths,
+                            )
                         for update_abs_path in update_abs_paths:
                             try:
+                                base_eboot_path = standalone_emulators.shadps4_resolve_eboot_path(romfile_abs)
                                 standalone_emulators.install_shadps4_update(base_eboot_path, update_abs_path)
                             except Exception:  # noqa: BLE001 -- one bad/unreadable update shouldn't block Create or the rest of the batch
                                 continue
