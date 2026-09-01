@@ -56,6 +56,16 @@ def ensure_shown():
     request -- no-ops if already showing the right code."""
     global _proc, _baselayer_prior, _shown_code
     code = auth.current_code()
+    # SELFSTEAM_DEV_TEST-only: the throwaway dev-test venv (see
+    # _hostname()'s own wrench-emoji marker) has no pycairo/PyGObject --
+    # and can't build them either, no C compiler on SteamOS's own base --
+    # so auth_screen.py's own GUI just crashes before ever showing
+    # anything. Printing the code here instead is the one place it's
+    # ever knowable outside the on-screen window (auth.current_code()'s
+    # own value lives only in this process's memory), and only matters
+    # for a scratch instance no real user ever runs.
+    if os.environ.get("SELFSTEAM_DEV_TEST"):
+        print(f"[selfsteam-dev-test] pairing code: {code}")
     with _lock:
         if _proc is not None and _shown_code == code and _proc.poll() is None:
             return
