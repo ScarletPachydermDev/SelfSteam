@@ -83,7 +83,7 @@ def add_custom(name, target, start_dir, launch_options, asset_paths):
         _save(items)
 
 
-def add_removal(appid, name, romfile=None):
+def add_removal(appid, name, romfile=None, shadps4_base_title_id=None):
     # Removals are batchable the same way additions are -- someone
     # cleaning up several old shortcuts shouldn't need a separate Steam
     # restart per deletion any more than someone adding several new
@@ -93,6 +93,13 @@ def add_removal(appid, name, romfile=None):
     # this actually commits -- never BIOS/keys/firmware, which are
     # shared across every shortcut using that console/emulator, not
     # owned by this one shortcut the way its own ROM is.
+    #
+    # shadps4_base_title_id: set only for a shadPS4 shortcut, resolved
+    # up front (before the shortcut itself is gone) so commit time can
+    # call standalone_emulators.reset_shadps4_game_data -- the base
+    # game's own extraction, DLC, and update-merge state all live
+    # outside shortcuts.vdf entirely, so removing the shortcut alone
+    # would otherwise leave every bit of that behind.
     with _lock:
         items = _load()
         items.append({
@@ -100,6 +107,7 @@ def add_removal(appid, name, romfile=None):
             "appid": appid,
             "name": name,
             "romfile": romfile,
+            "shadps4_base_title_id": shadps4_base_title_id,
             "queued_at": time.time(),
         })
         _save(items)

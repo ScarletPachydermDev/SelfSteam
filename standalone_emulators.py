@@ -1483,6 +1483,27 @@ def install_shadps4_dlc(entry, base_title_id, dlc_pkg_abs_paths):
         _run_pkgextract(pkg_path, out_dir)
 
 
+def uninstall_shadps4_dlc(entry, base_title_id, removed_pkg_abs_paths):
+    """The counterpart to install_shadps4_dlc: deletes the addcont
+    extraction folder for a DLC .pkg that used to be in the DLC+Updates
+    picker's own list but was just removed via its X button (see
+    selfsteam_server.py's Create-time PS4 branch, which diffs the
+    picker's current submission against shadps4_registered_dlc_and_
+    updates' own previously-recorded list to find these). Safe to do
+    outright -- unlike an update merge, DLC's own addcont install is a
+    fully self-contained folder shadPS4 only scans at boot, so deleting
+    it is a clean, complete removal with nothing left half-applied.
+    update rows are never passed here -- see install_shadps4_update's
+    own docstring on why an already-merged update isn't undone the same
+    way."""
+    if not removed_pkg_abs_paths:
+        return
+    addon_dir = shadps4_addon_dir(entry)
+    for pkg_path in removed_pkg_abs_paths:
+        out_dir = os.path.join(addon_dir, base_title_id, os.path.splitext(os.path.basename(pkg_path))[0])
+        shutil.rmtree(out_dir, ignore_errors=True)
+
+
 def _psf_version_tuple(version_str):
     # "01.09" -> (1, 9), for comparing two APP_VER strings numerically
     # rather than as text (plain string comparison would put "01.10"
@@ -1494,6 +1515,36 @@ def _psf_version_tuple(version_str):
         return tuple(int(p) for p in str(version_str).split("."))
     except ValueError:
         return (0,)
+
+
+def _shadps4_update_backup_dir(base_title_id):
+    return _xdg_data_dir("selfsteam", "shadps4-update-backups", base_title_id)
+
+
+def _backup_before_overlay(source_dir, dest_dir, backup_dir):
+    """Copies every file source_dir is about to overlay onto dest_dir
+    into backup_dir first, preserving relative paths -- the exact by-
+    hand process confirmed live against a real Bloodborne v1.09 patch
+    before this was ever automated (back up the ~400 files about to be
+    touched, merge, then keep the backup around in case something needs
+    undoing). A fresh backup replaces whatever backup_dir already held:
+    only the most recent pre-merge state is ever meaningful to restore
+    to -- once a newer update has applied cleanly on top, there's no
+    reason to keep an older snapshot around too. Only files dest_dir
+    actually already has get backed up (a file the update introduces
+    for the first time has nothing to restore back to)."""
+    if os.path.isdir(backup_dir):
+        shutil.rmtree(backup_dir)
+    for root, _dirs, files in os.walk(source_dir):
+        rel_root = os.path.relpath(root, source_dir)
+        for fname in files:
+            rel_path = fname if rel_root == "." else os.path.join(rel_root, fname)
+            dest_file = os.path.join(dest_dir, rel_path)
+            if not os.path.isfile(dest_file):
+                continue
+            backup_file = os.path.join(backup_dir, rel_path)
+            os.makedirs(os.path.dirname(backup_file), exist_ok=True)
+            shutil.copy2(dest_file, backup_file)
 
 
 def install_shadps4_update(base_eboot_path, update_pkg_abs_path):
@@ -1510,6 +1561,19 @@ def install_shadps4_update(base_eboot_path, update_pkg_abs_path):
     directory) -- boots cleanly afterward, real asset streaming, no
     crashes, PARAM.SFO's own APP_VER correctly reporting "01.09".
 
+    Backs up every file about to be overwritten (see
+    _backup_before_overlay) before merging -- this is what makes a full
+    reset_shadps4_game_data possible later, and is otherwise the only
+    safety net here: removing this update from the DLC+Updates picker
+    does NOT itself restore these files (see _em_dlc_classify_ps4's own
+    reasoning on why an update's already-merged content isn't unmerged
+    that way -- selectively reverting *some* files out of a live install
+    that real gameplay may have since touched elsewhere is exactly the
+    kind of partial, easy-to-get-subtly-wrong operation not worth
+    trusting blindly). The backup exists so a full, clean revert is
+    still possible by deleting and re-adding the shortcut instead (see
+    reset_shadps4_game_data).
+
     Skipped if the base install's own PARAM.SFO already reports an
     APP_VER at least as new as this update's -- same "cheap once
     already done" convention as install_bios_slot/install_keys, and
@@ -1522,15 +1586,20 @@ def install_shadps4_update(base_eboot_path, update_pkg_abs_path):
     base_sfo_path = os.path.join(base_dir, "sce_sys", "param.sfo")
     update_meta = read_ps4_pkg_metadata(update_pkg_abs_path)
     update_ver = _psf_version_tuple(update_meta.get("APP_VER"))
+    base_title_id = None
     if os.path.isfile(base_sfo_path):
-        current_ver = _psf_version_tuple(_parse_psf(base_sfo_path).get("APP_VER"))
+        base_meta = _parse_psf(base_sfo_path)
+        current_ver = _psf_version_tuple(base_meta.get("APP_VER"))
         if current_ver >= update_ver:
             return
+        base_title_id = base_meta.get("TITLE_ID")
     with tempfile.TemporaryDirectory(dir=_shadps4_pkg_dir()) as staging_dir:
         out_dir = os.path.join(staging_dir, "update")
         _returncode, stderr = _run_pkgextract(update_pkg_abs_path, out_dir)
         if not os.path.isfile(os.path.join(out_dir, "eboot.bin")):
             raise RuntimeError(f"PS4 update extraction failed: {stderr or 'no eboot.bin in extracted output'}")
+        if base_title_id:
+            _backup_before_overlay(out_dir, base_dir, _shadps4_update_backup_dir(base_title_id))
         shutil.copytree(out_dir, base_dir, dirs_exist_ok=True)
 
 
@@ -1549,40 +1618,84 @@ def _load_shadps4_dlc_manifest():
         return {}
 
 
-def record_shadps4_dlc_paths(base_title_id, pkg_abs_paths):
-    """Remembers which original .pkg paths a user picked for this base
-    game's DLC+Updates picker -- purely so a later Edit can show them
-    again (see selfsteam_server.py's _em_dlc_seed_state). shadPS4 itself
-    never needs this: its own addcont dir only ever keeps install_
-    shadps4_dlc's *extracted* output, and install_shadps4_update merges
-    an update straight onto the base game's own directory, so neither
-    leaves anything behind pointing back at the original .pkg the way
-    Ryubing's dlc.json or Eden's directory scan do. Additive/deduped
-    per base_title_id, across both DLC and update picks alike -- there's
-    no reason to track them separately here, _em_dlc_classify_ps4
-    already re-derives DLC-vs-update from each file's own real PARAM.SFO
-    CATEGORY on every read, seeded or not."""
-    if not pkg_abs_paths:
-        return
-    manifest = _load_shadps4_dlc_manifest()
-    existing = manifest.get(base_title_id, [])
-    for p in pkg_abs_paths:
-        if p not in existing:
-            existing.append(p)
-    manifest[base_title_id] = existing
+def _save_shadps4_dlc_manifest(manifest):
     path = _shadps4_dlc_manifest_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as f:
         json.dump(manifest, f)
 
 
+def set_shadps4_dlc_paths(base_title_id, pkg_abs_paths):
+    """Replaces (not merges) the recorded original .pkg paths for this
+    base game -- purely so a later Edit can show them again (see
+    selfsteam_server.py's _em_dlc_seed_state). shadPS4 itself never
+    needs this: its own addcont dir only ever keeps install_shadps4_
+    dlc's *extracted* output, and install_shadps4_update merges an
+    update straight onto the base game's own directory, so neither
+    leaves anything behind pointing back at the original .pkg the way
+    Ryubing's dlc.json or Eden's directory scan do. Replace, not
+    append-and-dedup, on purpose: the caller always passes the DLC+
+    Updates picker's own full current list, so a file no longer in it
+    (removed via the picker's own X button) needs to actually stop
+    being remembered too -- an additive-only version of this would
+    have made every "removal" purely cosmetic, reappearing on the very
+    next Edit."""
+    manifest = _load_shadps4_dlc_manifest()
+    if pkg_abs_paths:
+        manifest[base_title_id] = list(dict.fromkeys(pkg_abs_paths))
+    elif base_title_id in manifest:
+        del manifest[base_title_id]
+    else:
+        return
+    _save_shadps4_dlc_manifest(manifest)
+
+
 def shadps4_registered_dlc_and_updates(base_title_id):
     """The original .pkg paths previously recorded for this base game
-    via record_shadps4_dlc_paths -- may include paths that have since
+    via set_shadps4_dlc_paths -- may include paths that have since
     moved/been deleted, same as every other *_registered_dlc_and_updates/
     *_external_content_files seed source; callers already filter those
     out (see _em_dlc_seed_state)."""
     return _load_shadps4_dlc_manifest().get(base_title_id, [])
+
+
+def reset_shadps4_game_data(entry, base_title_id):
+    """Full reset of everything SelfSteam itself installed for this PS4
+    game: the base game's own extraction (including any update merged
+    onto it -- see install_shadps4_update), its DLC addcont folder, its
+    update-merge backup, and its own entry in the DLC+Updates manifest.
+    Meant to be called when a shadPS4 shortcut is removed, so re-adding
+    the same base .pkg later gets a genuinely fresh extraction instead
+    of the same (possibly patched) one left behind -- confirmed as the
+    only real way to fully undo an applied update, since there's no
+    reliable way to selectively "unmerge" specific files back out of a
+    live install otherwise (see install_shadps4_update's own docstring).
+
+    Never touches shadPS4's own save data -- confirmed live (a real
+    Bloodborne save under shadPS4's Flatpak data dir) that it lives
+    entirely separately, at home/<user>/savedata/<save dir id>/ under
+    shadPS4's own data directory, nowhere near either the addcont
+    folder or SelfSteam's own extraction cache this function touches."""
+    # Base extraction (and anything merged onto it) -- _shadps4_pkg_dir()
+    # subfolders are named after the original pkg's own filename, not
+    # its title ID, so this has to open each one's own param.sfo to find
+    # the right folder rather than compute its path directly.
+    pkg_dir = _shadps4_pkg_dir()
+    if os.path.isdir(pkg_dir):
+        for name in os.listdir(pkg_dir):
+            sfo_path = os.path.join(pkg_dir, name, "sce_sys", "param.sfo")
+            if not os.path.isfile(sfo_path):
+                continue
+            try:
+                title_id = _parse_psf(sfo_path).get("TITLE_ID")
+            except Exception:  # noqa: BLE001 -- a corrupt/partial param.sfo just isn't a real match either way
+                continue
+            if title_id == base_title_id:
+                shutil.rmtree(os.path.join(pkg_dir, name), ignore_errors=True)
+
+    shutil.rmtree(os.path.join(shadps4_addon_dir(entry), base_title_id), ignore_errors=True)
+    shutil.rmtree(_shadps4_update_backup_dir(base_title_id), ignore_errors=True)
+    set_shadps4_dlc_paths(base_title_id, [])
 
 
 def shadps4_pkg_extraction_needed(romfile):

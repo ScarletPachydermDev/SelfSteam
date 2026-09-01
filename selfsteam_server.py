@@ -3637,6 +3637,24 @@ def _em_dlc_picker_section(state):
       <span class="info-icon">!</span>
       <span>{html.escape(header_key_error)}</span>
     </div>"""
+    # shadPS4-only: an Update row's X button can't actually undo its
+    # already-merged content the way removing a DLC row deletes its own
+    # self-contained addcont folder (see install_shadps4_update's own
+    # docstring on why an automatic file-level unmerge isn't attempted).
+    # Shown whenever an update is present, not just on hover/click, so a
+    # user isn't surprised only after already clicking Remove and
+    # expecting the patch to be gone.
+    if emulator in standalone_emulators.PS4_DLC_UPDATE_EMULATORS and any(r["kind"] == "update" for r in rows):
+        warning_html += """
+    <div class="hint-row warning" style="margin-top:0.5rem">
+      <span class="info-icon">!</span>
+      <span>Removing an update here won't undo it -- shadPS4 has no way to
+        cleanly revert an already-applied patch's files. To fully remove
+        one, delete this shortcut entirely and add it again as new; this
+        only resets SelfSteam's own extracted copy of the game, it never
+        touches your actual save data (shadPS4 keeps that completely
+        separately).</span>
+    </div>"""
 
     def _row_html(row):
         color, bg, border = _EM_DLC_KIND_STYLE.get(row["kind"], _EM_DLC_KIND_STYLE["unknown"])
@@ -5086,6 +5104,11 @@ def _run_commit_in_background(items, label):
                 romfile = item.get("romfile")
                 if romfile and os.path.isfile(romfile):
                     os.remove(romfile)
+                shadps4_base_title_id = item.get("shadps4_base_title_id")
+                if shadps4_base_title_id:
+                    standalone_emulators.reset_shadps4_game_data(
+                        standalone_emulators.EMULATORS["shadPS4"], shadps4_base_title_id,
+                    )
             elif item.get("type") == "add_custom":
                 create_webapp.register_custom_shortcut(
                     item["name"], item["target"], item["start_dir"], item["launch_options"], item["asset_paths"],
@@ -6141,11 +6164,32 @@ class Handler(BaseHTTPRequestHandler):
                 # scanning the real shortcuts.vdf for this exact appid
                 # is ever considered.
                 romfile = None
+                shadps4_base_title_id = None
+                match = None
                 if delete_file:
                     match = next((s for s in create_webapp.list_gridge_shortcuts() if str(s["appid"]) == appid), None)
                     if match:
                         romfile = match.get("ra_romfile") or match.get("em_romfile")
-                pending_queue.add_removal(appid, name, romfile=romfile)
+                # shadPS4's own extraction/DLC/update-merge state lives
+                # entirely outside shortcuts.vdf, unlike a plain ra_
+                # romfile/em_romfile -- resolved unconditionally (not
+                # gated on the delete_file checkbox above, which is
+                # about the original ROM file, a separate concern) so
+                # commit time can always fully clean it up. Looked up
+                # now, not at commit time, since the shortcut itself
+                # (and so em_romfile) is gone by then.
+                if match is None:
+                    match = next((s for s in create_webapp.list_gridge_shortcuts() if str(s["appid"]) == appid), None)
+                if match and match.get("em_emulator") in standalone_emulators.PS4_DLC_UPDATE_EMULATORS:
+                    em_romfile = match.get("em_romfile")
+                    if em_romfile:
+                        try:
+                            shadps4_base_title_id = standalone_emulators.shadps4_base_title_id(em_romfile)
+                        except Exception:  # noqa: BLE001 -- can't resolve a title ID just means nothing to reset later
+                            shadps4_base_title_id = None
+                pending_queue.add_removal(
+                    appid, name, romfile=romfile, shadps4_base_title_id=shadps4_base_title_id,
+                )
             self._redirect("/")
             return
 
@@ -6558,28 +6602,48 @@ class Handler(BaseHTTPRequestHandler):
                 # bumped APP_VER).
                 update_abs_paths = [_ra_safe_join(row["path"]) for row in dlc_rows if row["kind"] == "update"]
                 update_abs_paths = [p for p in update_abs_paths if p]
-                if dlc_abs_paths or update_abs_paths:
-                    try:
-                        base_title_id = standalone_emulators.shadps4_base_title_id(romfile_abs)
-                    except Exception:  # noqa: BLE001 -- can't resolve the base game's own title ID just means nothing to install against
-                        base_title_id = None
-                    if base_title_id:
-                        # Remembered purely so a later Edit can show
-                        # these again (see _em_dlc_seed_state) -- neither
-                        # install below leaves anything behind pointing
-                        # back at the original .pkg the way Ryubing's
-                        # dlc.json/Eden's directory scan do.
-                        standalone_emulators.record_shadps4_dlc_paths(base_title_id, dlc_abs_paths + update_abs_paths)
-                        if dlc_abs_paths:
-                            standalone_emulators.install_shadps4_dlc(
-                                standalone_emulators.EMULATORS[em_emulator], base_title_id, dlc_abs_paths,
-                            )
-                        for update_abs_path in update_abs_paths:
-                            try:
-                                base_eboot_path = standalone_emulators.shadps4_resolve_eboot_path(romfile_abs)
-                                standalone_emulators.install_shadps4_update(base_eboot_path, update_abs_path)
-                            except Exception:  # noqa: BLE001 -- one bad/unreadable update shouldn't block Create or the rest of the batch
-                                continue
+                try:
+                    base_title_id = standalone_emulators.shadps4_base_title_id(romfile_abs)
+                except Exception:  # noqa: BLE001 -- can't resolve the base game's own title ID just means nothing to install/remove against
+                    base_title_id = None
+                if base_title_id:
+                    current_paths = dlc_abs_paths + update_abs_paths
+                    # Anything previously recorded (see set_shadps4_dlc_
+                    # paths) that's no longer in this submission was
+                    # removed via the picker's own X button -- checked
+                    # regardless of whether current_paths is empty, so
+                    # removing everything still actually cleans up
+                    # rather than silently no-oping. A removed DLC row
+                    # gets its own addcont folder deleted outright (see
+                    # uninstall_shadps4_dlc); a removed update row just
+                    # stops being tracked -- its already-merged content
+                    # stays as-is, see install_shadps4_update's own
+                    # docstring on why that's not attempted automatically.
+                    previously_recorded = standalone_emulators.shadps4_registered_dlc_and_updates(base_title_id)
+                    removed_paths = [p for p in previously_recorded if p not in current_paths]
+                    removed_dlc_paths = []
+                    for removed_path in removed_paths:
+                        try:
+                            removed_meta = standalone_emulators.read_ps4_pkg_metadata(removed_path)
+                        except Exception:  # noqa: BLE001 -- can't re-classify an unreadable/moved file, nothing more to do with it
+                            continue
+                        if standalone_emulators.ps4_category_label(removed_meta.get("CATEGORY")) == "DLC":
+                            removed_dlc_paths.append(removed_path)
+                    if removed_dlc_paths:
+                        standalone_emulators.uninstall_shadps4_dlc(
+                            standalone_emulators.EMULATORS[em_emulator], base_title_id, removed_dlc_paths,
+                        )
+                    standalone_emulators.set_shadps4_dlc_paths(base_title_id, current_paths)
+                    if dlc_abs_paths:
+                        standalone_emulators.install_shadps4_dlc(
+                            standalone_emulators.EMULATORS[em_emulator], base_title_id, dlc_abs_paths,
+                        )
+                    for update_abs_path in update_abs_paths:
+                        try:
+                            base_eboot_path = standalone_emulators.shadps4_resolve_eboot_path(romfile_abs)
+                            standalone_emulators.install_shadps4_update(base_eboot_path, update_abs_path)
+                        except Exception:  # noqa: BLE001 -- one bad/unreadable update shouldn't block Create or the rest of the batch
+                            continue
 
             args = standalone_emulators.launch_args(em_emulator, romfile_abs, zrif=em_zrif or None)
             if args is None:
