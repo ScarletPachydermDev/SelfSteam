@@ -865,7 +865,16 @@ def _toml_get_in_section(content, section, key):
     stdlib only ships a *reader* (tomllib, no writer) and this only ever
     needs to touch one flat table of plain string values (xemu's own
     [sys.files]), not anything with arrays/nesting/other value types a
-    real parser would be needed to not mangle."""
+    real parser would be needed to not mangle.
+
+    Matches a value in either quote style, not just the double quotes
+    this file's own _toml_set_in_section writes -- confirmed live that
+    real xemu rewrites its entire xemu.toml in its own native (single-
+    quoted) style the moment it actually launches, silently converting
+    every entry this tool wrote. Double-quote-only matching meant a
+    shortcut's BIOS/EEPROM/HDD files stopped showing as "already
+    installed" on Edit forever after its first real launch, even though
+    the files were still genuinely configured and in use."""
     section_re = re.compile(r"^\[" + re.escape(section) + r"\]\s*$", re.MULTILINE)
     m = section_re.search(content)
     if not m:
@@ -874,7 +883,7 @@ def _toml_get_in_section(content, section, key):
     next_section = re.search(r"^\[", content[body_start:], re.MULTILINE)
     body_end = body_start + next_section.start() if next_section else len(content)
     body = content[body_start:body_end]
-    key_re = re.compile(r'^' + re.escape(key) + r'\s*=\s*"(.*)"\s*$', re.MULTILINE)
+    key_re = re.compile(r'^' + re.escape(key) + r'''\s*=\s*['"](.*)['"]\s*$''', re.MULTILINE)
     km = key_re.search(body)
     return km.group(1) if km else None
 

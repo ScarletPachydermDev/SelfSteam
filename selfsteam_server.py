@@ -5658,7 +5658,20 @@ class Handler(BaseHTTPRequestHandler):
             cu_chosen = None
             cu_candidates = {}
             if cu_target:
-                guessed = _ra_guess_name_from_filename(cu_target)
+                # Prefer the shortcut's own already-known real name
+                # (cu_edit_name, same source _custom_left_html's Name
+                # field already restores from) over guessing one from
+                # cu_target's own basename -- Target is the raw exe path
+                # for a foreign shortcut (e.g. "/usr/bin/flatpak" for a
+                # manually-added Flatpak-launched app), which is never
+                # itself a meaningful game title to search SGDB with.
+                # Confirmed live: editing a manually-added Ryujinx
+                # shortcut (Target genuinely is /usr/bin/flatpak) guessed
+                # "flatpak" -- and SGDB really does have an app called
+                # "Flatpak" -- so that showed up as the "identified"
+                # match/artwork instead of Ryujinx, even though the Name
+                # field itself already correctly said "Ryujinx".
+                guessed = cu_state.get("cu_edit_name") or _ra_guess_name_from_filename(cu_target)
                 cu_matches = _resolve_matches(
                     guessed, service_resolver.Resolved(name=guessed), cu_state.get("cu_sgdb_q"),
                 )

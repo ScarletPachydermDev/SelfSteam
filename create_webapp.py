@@ -595,53 +595,65 @@ def _extract_retroarch_info(launch_options):
     return None, None
 
 
-# Entries whose own args() (standalone_emulators.py) puts the romfile
-# first, ahead of its flags, rather than last like every other entry --
-# see _extract_standalone_emulator_info's own comment.
-_ROMFILE_FIRST_EMULATORS = {"Xenia Canary (AppImage)"}
+# Where the romfile actually sits within an entry's own args() output
+# (standalone_emulators.py) -- not always the last token the way most
+# entries put it. Xenia Canary puts it first, ahead of its flags
+# (confirmed via its own CLI docs). shadPS4 buries it in the middle --
+# its own args() is ["-d", "-g", romfile, "--", "--fullscreen", "true"]
+# (see _shadps4_args' own docstring on why "true" has to trail it), so
+# blindly taking the last token grabbed that literal "true" as the
+# romfile instead. Confirmed live: a real shadPS4 shortcut's Edit link
+# showed "True" as the guessed game name and a bogus romfile, even
+# though the shortcut itself launches its real game fine -- this only
+# ever affected reconstructing Edit's own state, never actual launching.
+# Every other entry's romfile is simply its args() output's last token
+# (index -1), the default when not listed here.
+_ROMFILE_ARGS_INDEX = {"Xenia Canary (AppImage)": 0, "shadPS4": 2}
 
 
 def _extract_standalone_emulator_info(launch_options):
     """Pulls (emulator_name, romfile) back out of a standalone-emulator
     shortcut's own LaunchOptions (see standalone_emulators.launch_args)
     so the Emulators tab's own Edit link can jump straight back into it,
-    same contract as _extract_retroarch_info above. The romfile is
-    assumed to be the argv's own last token, EXCEPT for entries in
-    _ROMFILE_FIRST_EMULATORS whose own args() puts it first instead
-    (Xenia Canary -- confirmed via its own CLI docs to need the
-    positional romfile before its flags, unlike every other entry
-    here). Returns (None, None) for anything else.
+    same contract as _extract_retroarch_info above. The romfile's
+    position within the args() portion of argv is looked up per-entry
+    via _ROMFILE_ARGS_INDEX (default: its last token). Returns
+    (None, None) for anything else.
 
     Two install_type shapes to reverse: a flathub entry's own
     "<flatpak> run <app_id> ..." (argv[2] is the app id, reverse-mapped
-    to its emulator name via standalone_emulators.EMULATORS), and a
-    binary (AppImage) entry's own "<real AppImage path> ..." -- no
-    "flatpak run" prefix at all, so argv[0] is compared directly against
-    each binary-install entry's own resolved path instead. <flatpak>
-    itself is host_exec.which("flatpak")'s own resolved absolute path
-    (e.g. "/usr/bin/flatpak"), never the bare "flatpak" launch_args()
-    actually writes it as -- matched by basename here, not by an exact
-    literal comparison. Confirmed live as a real gap: before this fix,
-    every flathub-installed shortcut's own Edit link silently fell
-    through to the URL tab instead of actually restoring it, since the
-    exact-string check never matched the real, absolute-path value."""
+    to its emulator name via standalone_emulators.EMULATORS, with its
+    own args() starting at argv[3]), and a binary (AppImage) entry's own
+    "<real AppImage path> ..." -- no "flatpak run" prefix at all, so
+    argv[0] is compared directly against each binary-install entry's own
+    resolved path instead, with its own args() starting at argv[1].
+    <flatpak> itself is host_exec.which("flatpak")'s own resolved
+    absolute path (e.g. "/usr/bin/flatpak"), never the bare "flatpak"
+    launch_args() actually writes it as -- matched by basename here, not
+    by an exact literal comparison. Confirmed live as a real gap: before
+    this fix, every flathub-installed shortcut's own Edit link silently
+    fell through to the URL tab instead of actually restoring it, since
+    the exact-string check never matched the real, absolute-path value."""
     try:
         tokens = shlex.split(launch_options)
     except ValueError:
         return None, None
     if not tokens:
         return None, None
+
+    def _romfile_at(name, args_start):
+        index = _ROMFILE_ARGS_INDEX.get(name)
+        return tokens[args_start + index] if index is not None and index >= 0 else tokens[-1]
+
     if os.path.basename(tokens[0]) == "flatpak" and len(tokens) >= 3 and tokens[1] == "run":
         app_id = tokens[2]
         for name, entry in standalone_emulators.EMULATORS.items():
             if entry.get("app_id") == app_id:
-                romfile = tokens[3] if name in _ROMFILE_FIRST_EMULATORS else tokens[-1]
-                return name, romfile
+                return name, _romfile_at(name, 3)
         return None, None
     for name, entry in standalone_emulators.EMULATORS.items():
         if entry.get("install_type") == "binary" and standalone_emulators.binary_path(name) == tokens[0]:
-            romfile = tokens[1] if name in _ROMFILE_FIRST_EMULATORS else tokens[-1]
-            return name, romfile
+            return name, _romfile_at(name, 1)
     return None, None
 
 
