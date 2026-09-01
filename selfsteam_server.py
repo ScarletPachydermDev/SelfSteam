@@ -3429,6 +3429,31 @@ def _em_list_rows(abs_path, rel_path, state, path_key, file_key):
     return "".join(rows)
 
 
+def _em_romfile_display_name(emulator, romfile_rel):
+    """The filename to show/guess-a-search-term-from for a ROM pick --
+    almost always just its own basename, except shadPS4: once Create's
+    ever run, em_romfile holds the *extracted* eboot.bin path, not the
+    original .pkg (standalone_emulators.launch_args substitutes it
+    before ever writing LaunchOptions -- see shadps4_resolve_eboot_
+    path's own docstring), so every shadPS4 shortcut's own Edit would
+    otherwise show/search on the meaningless "eboot.bin" instead of the
+    real game. Confirmed live as a real bug: a real Bloodborne
+    shortcut's Edit page showed "eboot.bin" as its ROM and matched
+    "eFootball PES 2020" as its SGDB guess -- SGDB's own fuzzy search
+    landing on something plausible-sounding for "eboot" is exactly the
+    kind of wrong-but-confident result a meaningless guess produces.
+
+    Reconstructed from the eboot.bin's own parent directory name instead
+    -- extract_shadps4_pkg names that directory after the original
+    .pkg's own basename (minus extension), so it's recoverable without
+    needing to have kept the original path anywhere. Falls back to the
+    plain basename if this isn't actually a shadPS4 eboot.bin path."""
+    abs_path = _ra_safe_join(romfile_rel)
+    if emulator == "shadPS4" and abs_path and os.path.basename(abs_path) == "eboot.bin":
+        return os.path.basename(os.path.dirname(abs_path)) + ".pkg"
+    return os.path.basename(romfile_rel)
+
+
 def _em_picker_section(prefix, label, state, already_installed=None, info_tooltip=None, info_link=None, optional=False):
     path_key = f"em_{prefix}path"
     file_key = f"em_{prefix}file"
@@ -3475,7 +3500,10 @@ def _em_picker_section(prefix, label, state, already_installed=None, info_toolti
         if prefix == "rom":
             remove_overrides["em_resolved"] = ""
         remove_href = _em_url("/new", state, **remove_overrides)
-        display_name = os.path.basename(selected_file)
+        display_name = (
+            _em_romfile_display_name(state.get("em_emulator", ""), selected_file)
+            if prefix == "rom" else os.path.basename(selected_file)
+        )
         # A real Switch key dump usually has title.keys sitting right
         # alongside the picked prod.keys -- install_keys already copies
         # it too automatically when it's there (see its own docstring),
@@ -3928,7 +3956,10 @@ def _emulators_tab_panel_html(state, chosen=None):
     # clean_sgdb_name strips SGDB's own trailing category tag ("Sober
     # (Program)", etc.) -- a useful disambiguator in a match list, but
     # not something that belongs in the actual shortcut name.
-    name_default = "" if name_cleared else (sgdb.clean_sgdb_name(chosen["name"]) if chosen else (_ra_guess_name_from_filename(romfile) if romfile else ""))
+    name_default = "" if name_cleared else (
+        sgdb.clean_sgdb_name(chosen["name"]) if chosen
+        else (_ra_guess_name_from_filename(_em_romfile_display_name(emulator, romfile)) if romfile else "")
+    )
     name_reset_href = _em_url("/new", state, em_name_cleared=("" if name_cleared else "1"))
     name_reset_title = "Reset to guessed name" if name_cleared else "Clear"
     # onclick=selfsteamEmNav -- see _retroarch_tab_panel_html's own comment
@@ -3984,7 +4015,9 @@ def _em_display_term(state, chosen=None):
     if chosen and chosen.get("name"):
         return chosen["name"].lower()
     romfile = state.get("em_romfile")
-    return _ra_guess_name_from_filename(romfile).lower() if romfile else ""
+    if not romfile:
+        return ""
+    return _ra_guess_name_from_filename(_em_romfile_display_name(state.get("em_emulator", ""), romfile)).lower()
 
 
 def _em_sgdb_search_bar_html(state, chosen=None):
@@ -5768,7 +5801,9 @@ class Handler(BaseHTTPRequestHandler):
             em_chosen = None
             em_candidates = {}
             if em_romfile:
-                em_guessed = _ra_guess_name_from_filename(em_romfile)
+                em_guessed = _ra_guess_name_from_filename(
+                    _em_romfile_display_name(em_state.get("em_emulator", ""), em_romfile)
+                )
                 em_matches = _resolve_matches(
                     em_guessed, service_resolver.Resolved(name=em_guessed), em_state.get("em_sgdb_q"),
                 )
@@ -6432,7 +6467,11 @@ class Handler(BaseHTTPRequestHandler):
         em_keysfile = (params.get("em_keysfile") or [""])[0]
         em_firmwarefile = (params.get("em_firmwarefile") or [""])[0]
         em_zrif = (params.get("em_zrif") or [""])[0].strip()
-        match_name = (params.get("em_match_name") or [""])[0] or _ra_guess_name_from_filename(em_romfile) or em_emulator
+        match_name = (
+            (params.get("em_match_name") or [""])[0]
+            or _ra_guess_name_from_filename(_em_romfile_display_name(em_emulator, em_romfile))
+            or em_emulator
+        )
 
         romfile_abs = _ra_safe_join(em_romfile)
         if romfile_abs is None or not os.path.isfile(romfile_abs):
