@@ -1463,6 +1463,57 @@ def install_shadps4_dlc(entry, base_title_id, dlc_pkg_abs_paths):
         _run_pkgextract(pkg_path, out_dir)
 
 
+def _psf_version_tuple(version_str):
+    # "01.09" -> (1, 9), for comparing two APP_VER strings numerically
+    # rather than as text (plain string comparison would put "01.10"
+    # before "01.9"). Tolerant of a missing/malformed value -- neither a
+    # base install nor an update .pkg is ever guaranteed to have one.
+    if not version_str:
+        return (0,)
+    try:
+        return tuple(int(p) for p in str(version_str).split("."))
+    except ValueError:
+        return (0,)
+
+
+def install_shadps4_update(base_eboot_path, update_pkg_abs_path):
+    """Merges a real PS4 incremental-update .pkg (PARAM.SFO CATEGORY
+    "gp") onto an already-extracted base game install. Unlike DLC
+    (CATEGORY "ac", which shadPS4 itself scans from a separate addcont
+    directory -- see install_shadps4_dlc), an update .pkg has no
+    directory of its own shadPS4 scans for: it's the base game's own
+    patch, same TITLE_ID, carrying a version-bumped eboot.bin plus a
+    partial set of replacement dvdroot_ps4/sce_sys files meant to
+    overlay directly on top of the base install. Confirmed live against
+    a real Bloodborne v1.09 patch (extracted, then every one of its 440
+    files copied over the matching path under the base game's own
+    directory) -- boots cleanly afterward, real asset streaming, no
+    crashes, PARAM.SFO's own APP_VER correctly reporting "01.09".
+
+    Skipped if the base install's own PARAM.SFO already reports an
+    APP_VER at least as new as this update's -- same "cheap once
+    already done" convention as install_bios_slot/install_keys, and
+    also the right call on a re-Create/Edit that still has an older
+    update file sitting in its own DLC+Updates list: redoing a several-
+    hundred-file copy every single save would be wasted work, and
+    blindly re-applying an older pick over a newer already-applied one
+    would be a real downgrade, not a no-op."""
+    base_dir = os.path.dirname(base_eboot_path)
+    base_sfo_path = os.path.join(base_dir, "sce_sys", "param.sfo")
+    update_meta = read_ps4_pkg_metadata(update_pkg_abs_path)
+    update_ver = _psf_version_tuple(update_meta.get("APP_VER"))
+    if os.path.isfile(base_sfo_path):
+        current_ver = _psf_version_tuple(_parse_psf(base_sfo_path).get("APP_VER"))
+        if current_ver >= update_ver:
+            return
+    with tempfile.TemporaryDirectory(dir=_shadps4_pkg_dir()) as staging_dir:
+        out_dir = os.path.join(staging_dir, "update")
+        _returncode, stderr = _run_pkgextract(update_pkg_abs_path, out_dir)
+        if not os.path.isfile(os.path.join(out_dir, "eboot.bin")):
+            raise RuntimeError(f"PS4 update extraction failed: {stderr or 'no eboot.bin in extracted output'}")
+        shutil.copytree(out_dir, base_dir, dirs_exist_ok=True)
+
+
 def shadps4_pkg_extraction_needed(romfile):
     """True if Create would actually run extract_shadps4_pkg's own
     extraction step for this romfile -- lets the UI show "Extracting

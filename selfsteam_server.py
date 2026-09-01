@@ -6528,11 +6528,21 @@ class Handler(BaseHTTPRequestHandler):
             elif em_emulator in standalone_emulators.PS4_DLC_UPDATE_EMULATORS:
                 em_dlc_state = _em_state_from_params(params)
                 dlc_rows = _em_dlc_classify_ps4(em_dlc_state)
-                dlc_abs_paths = [
-                    _ra_safe_join(row["path"]) for row in dlc_rows
-                    if row["kind"] in ("dlc", "update")
-                ]
+                dlc_abs_paths = [_ra_safe_join(row["path"]) for row in dlc_rows if row["kind"] == "dlc"]
                 dlc_abs_paths = [p for p in dlc_abs_paths if p]
+                # "update" rows (PARAM.SFO CATEGORY "gp") are the base
+                # game's own patch, not real DLC -- shadPS4 has no
+                # directory it scans for these the way it does addcont,
+                # so install_shadps4_dlc's addon-dir extraction would
+                # just leave them sitting there unused. install_shadps4_
+                # update instead merges each one's own extracted files
+                # straight onto the base game's already-extracted
+                # directory, same approach confirmed live against a real
+                # Bloodborne v1.09 patch (boots cleanly afterward, real
+                # asset streaming, PARAM.SFO correctly reporting the
+                # bumped APP_VER).
+                update_abs_paths = [_ra_safe_join(row["path"]) for row in dlc_rows if row["kind"] == "update"]
+                update_abs_paths = [p for p in update_abs_paths if p]
                 if dlc_abs_paths:
                     try:
                         base_title_id = standalone_emulators.shadps4_base_title_id(romfile_abs)
@@ -6542,6 +6552,17 @@ class Handler(BaseHTTPRequestHandler):
                         standalone_emulators.install_shadps4_dlc(
                             standalone_emulators.EMULATORS[em_emulator], base_title_id, dlc_abs_paths,
                         )
+                if update_abs_paths:
+                    try:
+                        base_eboot_path = standalone_emulators.extract_shadps4_pkg(romfile_abs)
+                    except Exception:  # noqa: BLE001 -- can't resolve/extract the base game yet means nothing to merge onto
+                        base_eboot_path = None
+                    if base_eboot_path:
+                        for update_abs_path in update_abs_paths:
+                            try:
+                                standalone_emulators.install_shadps4_update(base_eboot_path, update_abs_path)
+                            except Exception:  # noqa: BLE001 -- one bad/unreadable update shouldn't block Create or the rest of the batch
+                                continue
 
             args = standalone_emulators.launch_args(em_emulator, romfile_abs, zrif=em_zrif or None)
             if args is None:
