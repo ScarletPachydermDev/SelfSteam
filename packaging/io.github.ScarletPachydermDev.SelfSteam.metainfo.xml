@@ -26,6 +26,19 @@
   </categories>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="0.1.20" date="2026-09-01">
+      <description>
+        <ul>
+          <li>Add a DLC &amp; Updates picker for shadPS4 (PS4) games: pick any DLC or incremental-update .pkg for a game and SelfSteam installs it automatically -- DLC gets registered the way shadPS4 itself expects, and an update gets merged onto the base game's own install, backing up what it overwrites first</li>
+          <li>Reopening a shadPS4 shortcut to edit it now shows any DLC/updates already added, instead of starting from an empty list</li>
+          <li>Removing a DLC file from the picker now actually uninstalls it; removing an update only stops tracking it (shadPS4 has no way to cleanly undo an applied patch's files) -- a warning now explains that fully removing an update means deleting the shortcut and adding it again, which never touches your actual save data</li>
+          <li>Fix a shadPS4 shortcut's Edit page showing "eboot.bin" as its ROM and guessing a nonsense SteamGridDB search term (a real one matched "eFootball PES 2020" for an actual Bloodborne shortcut) instead of the real game</li>
+          <li>Fix a shadPS4 shortcut silently failing to install a new DLC/update when just editing an existing shortcut without re-picking the ROM</li>
+          <li>Fix xemu shortcuts losing their "already installed" BIOS/EEPROM/HDD status on Edit the first time a game's actually been launched -- real xemu rewrites its own config in a format this tool's reader didn't recognize</li>
+          <li>Fix a manually-added (non-SelfSteam) shortcut's Edit page guessing its SteamGridDB artwork match from its raw launch target instead of its own real name -- a real Flatpak-launched shortcut named "Ryujinx" was matching an unrelated SteamGridDB entry called "Flatpak"</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.19" date="2026-08-30">
       <description>
         <ul>
