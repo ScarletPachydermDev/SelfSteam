@@ -18,6 +18,7 @@ A headless companion, a small web UI for adding Steam shortcuts (with SteamGridD
 + Screen code authentication
 + Install emulators from flathub and appimages from developers source
 + Auto update flatpak
++ Convert .nsz Switch roms to .nsp automatically so Ryujinx/Eden can load them (not yet in a release)
 
 ## To be done
 - [ ] App icon

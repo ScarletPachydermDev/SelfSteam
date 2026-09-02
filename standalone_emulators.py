@@ -388,7 +388,18 @@ def convert_nsz_to_nsp(nsz_path):
     out_dir = os.path.dirname(out_path)
     os.makedirs(out_dir, exist_ok=True)
     result = subprocess.run(
-        [sys.executable, "-m", "nsz", "-D", nsz_path, "-o", out_dir, "--keys", keys_path],
+        # Not `-m nsz` -- confirmed live it has no __main__.py of its
+        # own ("'nsz' is a package and cannot be directly executed"),
+        # unlike pkgextract's own real standalone binary. `import nsz;
+        # nsz.main()` is what its own pip-installed "nsz" console-script
+        # entry point (setup.py: "nsz = nsz:main") actually runs under
+        # the hood -- main() takes no args itself, reading real CLI
+        # args straight from sys.argv the normal argparse way, which is
+        # exactly what the rest of this argv list becomes for a `-c`
+        # script. Also needs the output directory to already exist --
+        # confirmed live it raises outright otherwise ("Unable to open
+        # output directory"), unlike most CLI tools that just create it.
+        [sys.executable, "-c", "import nsz; nsz.main()", "-D", nsz_path, "-o", out_dir, "--keys", keys_path],
         capture_output=True, text=True,
     )
     if not os.path.isfile(out_path):

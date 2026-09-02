@@ -91,13 +91,19 @@ modules:
     # toolchain problem the way cryptography above has), so this is a
     # plain pinned-wheels install like it, just with more of them:
     # enlighten (nsz's own progress-bar dependency) pulls in blessed,
-    # which itself pulls in six and wcwidth -- the full real dependency
-    # tree pip resolves for `pip install nsz`, not guessed.
+    # which itself pulls in six, wcwidth, and jinxed -- the full real
+    # dependency tree, confirmed via a real `pip install nsz` on real
+    # x86_64 hardware (this manifest's own earlier cross-platform `pip
+    # download --platform manylinux2014_x86_64` dry run on a different
+    # architecture missed jinxed entirely -- blessed's own metadata
+    # requires it completely unconditionally, no platform marker at
+    # all, despite jinxed being Windows-console-specific code).
     buildsystem: simple
     build-commands:
       - pip3 install --no-index --no-deps --prefix=/app
           six-1.17.0-py2.py3-none-any.whl
           wcwidth-0.8.3-py3-none-any.whl
+          jinxed-2.1.0-py2.py3-none-any.whl
           blessed-1.49.0-py3-none-any.whl
           prefixed-0.9.0-py2.py3-none-any.whl
           enlighten-1.14.1-py2.py3-none-any.whl
@@ -111,6 +117,9 @@ modules:
       - type: file
         url: https://files.pythonhosted.org/packages/c4/0e/57f6bb3024a597b2e8ec4aee710ffe62ddc95af2e2bb1ee7a7abdc22c68c/wcwidth-0.8.3-py3-none-any.whl
         sha256: d5b73dba6158a595ec9370350e7f2637bcac8d6c5e4fde34f30fcffb6103a5e4
+      - type: file
+        url: https://files.pythonhosted.org/packages/f1/1d/0a6be99b69bb448448403a45a241aff0dca751832ae54f027ed940d2eb52/jinxed-2.1.0-py2.py3-none-any.whl
+        sha256: 43b802d18b70e405d410fb66eb2837d1101e7e5ea922e666507bb43f34d11d09
       - type: file
         url: https://files.pythonhosted.org/packages/aa/d9/d0a5f6cce623ae6fecda1a59d87a360ac2cd971ac6d4d06d3b3d832a2ccc/blessed-1.49.0-py3-none-any.whl
         sha256: 770279b4066218f38a06ee87976ccc658fbffd4ffb43a5ee1e9a5eef3d4f3ba0
