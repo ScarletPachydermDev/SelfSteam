@@ -2624,6 +2624,15 @@ _EM_STATE_KEYS = [
     # em_<prefix>path/em_<prefix>source, just without a single
     # em_dlcfile slot since this one accumulates instead of replacing.
     "em_dlc_paths", "em_dlcpath", "em_dlcsource",
+    # Ryubing-only (see standalone_emulators.PREFLIGHT_EMULATORS) --
+    # routes the shortcut through github.com/ScarletPachydermDev/
+    # Preflight's own launch wrapper instead of a direct `flatpak run`.
+    # A plain checkbox tied straight to the Add form (form="{_ADD_FORM_
+    # ID}", see _emulators_tab_panel_html's own preflight_block), not a
+    # live-nav-triggered link the way most other em_ toggles here are --
+    # nothing else on the page needs to react to it changing, so there's
+    # no reason to round-trip the server just to flip it.
+    "em_preflight",
     # Same reasoning as _RA_STATE_KEYS' own ra_edit_appid/ra_edit_name.
     "em_edit_appid", "em_edit_name",
 ]
@@ -3988,6 +3997,27 @@ def _emulators_tab_panel_html(state, chosen=None):
     </div>
   </div>"""
 
+    # Ryubing-only -- see standalone_emulators.PREFLIGHT_EMULATORS's own
+    # comment on why the AppImage variants can't use this. A plain
+    # checkbox on the shared Add form (form="{_ADD_FORM_ID}"), same
+    # "no reason to round-trip the server just to flip it" reasoning as
+    # em_match_name/em_zrif -- nothing else on the page reacts to this.
+    preflight_block = ""
+    if emulator in standalone_emulators.PREFLIGHT_EMULATORS:
+        preflight_checked = "checked" if state.get("em_preflight") else ""
+        preflight_tooltip = (
+            "Helpful for multiplayer games, helps you coordinate settings when multiple "
+            "controllers are paired.\n\nStill in development. For more info go to "
+            "https://github.com/ScarletPachydermDev/Preflight"
+        )
+        preflight_block = f"""
+  <div class="field-group">
+    <label style="display:flex;align-items:center;gap:0.4rem">
+      <input type="checkbox" name="em_preflight" form="{_ADD_FORM_ID}" {preflight_checked}>
+      Enable preflight {_info_tooltip_icon_html(preflight_tooltip)}
+    </label>
+  </div>"""
+
     return f"""
   <div class="field-group">
     {source_toggle}
@@ -3997,6 +4027,7 @@ def _emulators_tab_panel_html(state, chosen=None):
       {emulator_picker_html}
     </form>
   </div>
+  {preflight_block}
   {bios_block}
   {keys_block}
   {firmware_block}
@@ -5388,6 +5419,7 @@ def _poster_card_html(shortcut, pending_removal_appids):
         edit_href = _em_url("/new", {
             "em_emulator": shortcut["em_emulator"],
             "em_romfile": romfile_rel,
+            "em_preflight": "1" if shortcut.get("em_preflight") else "",
             "em_edit_appid": str(appid), "em_edit_name": name,
         })
     elif shortcut.get("apps_app_id"):
@@ -6487,6 +6519,7 @@ class Handler(BaseHTTPRequestHandler):
         em_keysfile = (params.get("em_keysfile") or [""])[0]
         em_firmwarefile = (params.get("em_firmwarefile") or [""])[0]
         em_zrif = (params.get("em_zrif") or [""])[0].strip()
+        em_preflight = bool(params.get("em_preflight"))
         match_name = (
             (params.get("em_match_name") or [""])[0]
             or _ra_guess_name_from_filename(_em_romfile_display_name(em_emulator, em_romfile))
@@ -6704,11 +6737,12 @@ class Handler(BaseHTTPRequestHandler):
                         except Exception:  # noqa: BLE001 -- one bad/unreadable update shouldn't block Create or the rest of the batch
                             continue
 
-            args = standalone_emulators.launch_args(em_emulator, romfile_abs, zrif=em_zrif or None)
+            args = standalone_emulators.launch_args(em_emulator, romfile_abs, zrif=em_zrif or None, preflight=em_preflight)
             if args is None:
                 raise RuntimeError(
                     "flatpak isn't available on this host, this emulator isn't installable yet, "
-                    "or (for a Vita3K .pkg) the zRIF key didn't take -- please check it and try again"
+                    "(for a Vita3K .pkg) the zRIF key didn't take, or (with preflight enabled) "
+                    "Preflight couldn't be installed -- please check it and try again"
                 )
 
             slug = create_webapp.slugify(match_name)

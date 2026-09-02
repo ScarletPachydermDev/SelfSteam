@@ -612,18 +612,21 @@ _ROMFILE_ARGS_INDEX = {"Xenia Canary (AppImage)": 0, "shadPS4": 2}
 
 
 def _extract_standalone_emulator_info(launch_options):
-    """Pulls (emulator_name, romfile) back out of a standalone-emulator
-    shortcut's own LaunchOptions (see standalone_emulators.launch_args)
-    so the Emulators tab's own Edit link can jump straight back into it,
-    same contract as _extract_retroarch_info above. The romfile's
-    position within the args() portion of argv is looked up per-entry
-    via _ROMFILE_ARGS_INDEX (default: its last token). Returns
-    (None, None) for anything else.
+    """Pulls (emulator_name, romfile, preflight) back out of a
+    standalone-emulator shortcut's own LaunchOptions (see standalone_
+    emulators.launch_args) so the Emulators tab's own Edit link can
+    jump straight back into it, same contract as _extract_retroarch_
+    info above. The romfile's position within the args() portion of
+    argv is looked up per-entry via _ROMFILE_ARGS_INDEX (default: its
+    last token). Returns (None, None, False) for anything else.
 
-    Two install_type shapes to reverse: a flathub entry's own
-    "<flatpak> run <app_id> ..." (argv[2] is the app id, reverse-mapped
-    to its emulator name via standalone_emulators.EMULATORS, with its
-    own args() starting at argv[3]), and a binary (AppImage) entry's own
+    Three shapes to reverse: a Preflight-launched shortcut's own
+    "<preflight.sh> <romfile>" (always "Ryubing" -- see standalone_
+    emulators.PREFLIGHT_EMULATORS, checked first since it's the most
+    specific/narrowest shape), a flathub entry's own "<flatpak> run
+    <app_id> ..." (argv[2] is the app id, reverse-mapped to its
+    emulator name via standalone_emulators.EMULATORS, with its own
+    args() starting at argv[3]), and a binary (AppImage) entry's own
     "<real AppImage path> ..." -- no "flatpak run" prefix at all, so
     argv[0] is compared directly against each binary-install entry's own
     resolved path instead, with its own args() starting at argv[1].
@@ -637,24 +640,26 @@ def _extract_standalone_emulator_info(launch_options):
     try:
         tokens = shlex.split(launch_options)
     except ValueError:
-        return None, None
+        return None, None, False
     if not tokens:
-        return None, None
+        return None, None, False
 
     def _romfile_at(name, args_start):
         index = _ROMFILE_ARGS_INDEX.get(name)
         return tokens[args_start + index] if index is not None and index >= 0 else tokens[-1]
 
+    if os.path.basename(tokens[0]) == "preflight.sh" and len(tokens) >= 2:
+        return "Ryubing", tokens[1], True
     if os.path.basename(tokens[0]) == "flatpak" and len(tokens) >= 3 and tokens[1] == "run":
         app_id = tokens[2]
         for name, entry in standalone_emulators.EMULATORS.items():
             if entry.get("app_id") == app_id:
-                return name, _romfile_at(name, 3)
-        return None, None
+                return name, _romfile_at(name, 3), False
+        return None, None, False
     for name, entry in standalone_emulators.EMULATORS.items():
         if entry.get("install_type") == "binary" and standalone_emulators.binary_path(name) == tokens[0]:
-            return name, _romfile_at(name, 1)
-    return None, None
+            return name, _romfile_at(name, 1), False
+    return None, None, False
 
 
 def _extract_apps_info(launch_options):
@@ -756,11 +761,13 @@ def list_gridge_shortcuts():
     live (2026-08-21) that filtering to only recognized-wrapper
     shortcuts hid entries a user reasonably expects to see and manage
     from here. Returns dicts with appid/name/url/ra_console/ra_romfile/
-    em_emulator/em_romfile/apps_app_id/user_id/managed -- ra_console/
-    ra_romfile are None for anything but a RetroArch shortcut (see
-    _extract_retroarch_info), em_emulator/em_romfile are None for
-    anything but a standalone-emulator shortcut (see
-    _extract_standalone_emulator_info), apps_app_id is None for
+    em_emulator/em_romfile/em_preflight/apps_app_id/user_id/managed --
+    ra_console/ra_romfile are None for anything but a RetroArch shortcut
+    (see _extract_retroarch_info), em_emulator/em_romfile are None for
+    anything but a standalone-emulator shortcut (em_preflight is always
+    False alongside them, real only for a Ryubing shortcut routed
+    through Preflight -- see _extract_standalone_emulator_info),
+    apps_app_id is None for
     anything but an Apps-tab shortcut (see _extract_apps_info), url is
     None when LaunchOptions doesn't look like a browser launch at all --
     all of which _poster_card_html already renders a sane generic
@@ -787,7 +794,7 @@ def list_gridge_shortcuts():
             exe = _field(entry, "exe", "Exe") or ""
             launch_options = _field(entry, "LaunchOptions", "launchoptions") or ""
             ra_console, ra_romfile = _extract_retroarch_info(launch_options)
-            em_emulator, em_romfile = _extract_standalone_emulator_info(launch_options)
+            em_emulator, em_romfile, em_preflight = _extract_standalone_emulator_info(launch_options)
             # Only checked once em_emulator's own curated-EMULATORS match
             # fails -- see _extract_apps_info's own docstring on why
             # that's the right order (a real emulator shortcut should
@@ -802,6 +809,7 @@ def list_gridge_shortcuts():
                 "ra_romfile": ra_romfile,
                 "em_emulator": em_emulator,
                 "em_romfile": em_romfile,
+                "em_preflight": em_preflight,
                 "apps_app_id": apps_app_id,
                 "apps_source": apps_source,
                 "user_id": uid,

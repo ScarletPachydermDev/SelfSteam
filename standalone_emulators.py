@@ -561,6 +561,15 @@ def ensure_preflight_installed():
     return dest
 
 
+# Catalog entries Preflight can actually launch -- just "Ryubing" (the
+# Flathub build), not either AppImage variant: Preflight's own
+# launch() always execs `flatpak run <app_id>` to hand off to the real
+# emulator once its own controller-registration screen finishes (see
+# find_app_id()/launch() in its own preflight.py), with no path for a
+# bare AppImage binary at all.
+PREFLIGHT_EMULATORS = {"Ryubing"}
+
+
 # Every Ryubing catalog entry -- the "Ryubing" family specifically,
 # which keeps a real per-title dlc.json/updates.json (see
 # switch_registered_dlc_and_updates) confirmed against its own real
@@ -3137,7 +3146,7 @@ def grant_permissions(name):
     )
 
 
-def launch_args(name, romfile, zrif=None):
+def launch_args(name, romfile, zrif=None, preflight=False):
     entry = EMULATORS.get(name)
     if not entry:
         return None
@@ -3146,12 +3155,27 @@ def launch_args(name, romfile, zrif=None):
     # splits into "binary" (the AppImage builds) vs "flathub" (Ryubing's
     # own Flathub build) -- unlike shadPS4's own single-flathub-only
     # .pkg swap further down, since shadPS4 has no AppImage variant in
-    # this catalog to also cover.
+    # this catalog to also cover. Runs before the preflight branch below
+    # too, so a preflight-enabled shortcut with an .nsz ROM still gets a
+    # real .nsp path handed to preflight.sh, not the original .nsz.
     if romfile.lower().endswith(".nsz") and name in (SWITCH_DLC_UPDATE_EMULATORS | EDEN_DLC_UPDATE_EMULATORS):
         converted = convert_nsz_to_nsp(romfile)
         if not converted:
             return None
         romfile = converted
+    # Preflight -- routes the shortcut through its own real launch
+    # wrapper instead of a direct `flatpak run`; preflight.sh does that
+    # itself internally (find_app_id() + `flatpak run`) once its own
+    # controller-registration screen finishes, so nothing below this
+    # (install_type branching, entry["args"]) is relevant at all when
+    # this is on. Ryubing (Flathub) only -- see PREFLIGHT_EMULATORS'
+    # own comment on why the AppImage variants can't use this.
+    if preflight and name in PREFLIGHT_EMULATORS:
+        preflight_dir = ensure_preflight_installed()
+        preflight_sh = os.path.join(preflight_dir, "preflight.sh")
+        if not os.path.isfile(preflight_sh):
+            return None
+        return [shlex.quote(preflight_sh), shlex.quote(romfile)]
     if entry["install_type"] == "binary":
         path = _binary_path(name, entry)
         if not os.path.isfile(path):
