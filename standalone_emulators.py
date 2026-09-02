@@ -27,6 +27,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 import urllib.error
@@ -437,6 +438,127 @@ def nsz_conversion_needed(romfile):
     NSZ to NSP" ahead of time, same shape as shadps4_pkg_extraction_
     needed."""
     return bool(romfile) and romfile.lower().endswith(".nsz") and not os.path.isfile(_nsz_output_path(romfile))
+
+
+# github.com/ScarletPachydermDev/Preflight -- a separate, actively-
+# developed project (a pre-launch controller-registration check for
+# Ryubing, so local multiplayer pads land in the right player slot
+# instead of scrambling) this app points a Ryubing shortcut's own
+# Target/Launch Options at, rather than something bundled/vendored
+# here. Confirmed live it has no GitHub Releases or tags at all yet
+# (just commits on its own default branch, "master"), so unlike
+# pkgextract/nsz there's no versioned release asset to fetch -- its own
+# real "Contract with Gridge" section (PLAN.md; the doc still says
+# "Gridge", this project's old name, since that section hasn't been
+# updated for the rename) already specifies the intended update
+# mechanism instead: a plain VERSION file, compared against this
+# project's own copy, re-fetching the whole default branch as a tarball
+# when they differ.
+_PREFLIGHT_REPO = "ScarletPachydermDev/Preflight"
+_PREFLIGHT_BRANCH = "master"
+
+
+def _preflight_dir():
+    return _xdg_data_dir("selfsteam", "preflight")
+
+
+def _preflight_installed_version():
+    version_path = os.path.join(_preflight_dir(), "VERSION")
+    if not os.path.isfile(version_path):
+        return None
+    with open(version_path) as f:
+        return f.read().strip()
+
+
+def _preflight_remote_version():
+    url = f"https://raw.githubusercontent.com/{_PREFLIGHT_REPO}/{_PREFLIGHT_BRANCH}/VERSION"
+    req = urllib.request.Request(url, headers={"User-Agent": "SelfSteam"})
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        return resp.read().decode().strip()
+
+
+# A hand-maintained dev copy of Preflight predates this project's own
+# managed install (see ensure_preflight_installed) on at least one real
+# machine, with real weeks-old accumulated controller-pairing state
+# (known_pads.json -- real MAC addresses, per-pad face-swap settings)
+# that must not be silently orphaned the first time this project takes
+# over installing/updating it. Checked once per install/update, not
+# just once ever, since a machine could reach this code for the first
+# time long after this project itself was already in use for other
+# emulators.
+_LEGACY_PREFLIGHT_STATE_DIR = os.path.expanduser("~/ryu-preflight/state")
+
+
+def _migrate_legacy_preflight_state(dest):
+    dest_state = os.path.join(dest, "state")
+    if os.path.isdir(dest_state) or not os.path.isdir(_LEGACY_PREFLIGHT_STATE_DIR):
+        return
+    shutil.copytree(_LEGACY_PREFLIGHT_STATE_DIR, dest_state)
+
+
+def ensure_preflight_installed():
+    """Installs or updates Preflight at _preflight_dir(), returning that
+    path -- called right before a preflight-enabled Ryubing shortcut's
+    own Create/Save, same "cheap once already done, real work only
+    when something's actually missing/stale" shape as every other
+    install_* helper here. Compares VERSION files rather than assuming
+    a fixed release asset exists (see this section's own comment on why
+    -- no Releases/tags exist for this project yet). Offline/unreachable
+    GitHub is tolerated by falling back to whatever's already installed
+    (a real, if possibly slightly stale, install beats none at all) --
+    only raises if nothing is installed AND the network's unreachable,
+    since there's genuinely nothing to run in that case.
+
+    Never touches state/ -- Preflight's own runtime data (known_pads.json
+    accumulates real controller MAC addresses across sessions) must
+    survive an update, exactly as its own README/PLAN.md insist. Also
+    calls _migrate_legacy_preflight_state so a real hand-maintained dev
+    copy's own already-accumulated state carries forward into this
+    project's managed install rather than starting over silently."""
+    try:
+        remote_version = _preflight_remote_version()
+    except (urllib.error.URLError, OSError, ValueError):
+        remote_version = None
+    installed_version = _preflight_installed_version()
+    if installed_version is not None and (remote_version is None or installed_version == remote_version):
+        _migrate_legacy_preflight_state(_preflight_dir())
+        return _preflight_dir()
+    if remote_version is None:
+        raise RuntimeError("Preflight isn't installed yet and GitHub couldn't be reached to install it")
+
+    tarball_url = f"https://github.com/{_PREFLIGHT_REPO}/archive/refs/heads/{_PREFLIGHT_BRANCH}.tar.gz"
+    req = urllib.request.Request(tarball_url, headers={"User-Agent": "SelfSteam"})
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tar_path = os.path.join(tmp_dir, "preflight.tar.gz")
+        with urllib.request.urlopen(req, timeout=60) as resp, open(tar_path, "wb") as f:
+            shutil.copyfileobj(resp, f)
+        with tarfile.open(tar_path) as tar:
+            tar.extractall(tmp_dir, filter="data")
+        # GitHub's own archive tarball wraps everything in a single
+        # "<repo>-<branch>/" root directory -- not assumed by name (the
+        # branch is part of it), just taken as whatever directory
+        # actually got extracted alongside the tarball itself.
+        extracted_root = next(
+            os.path.join(tmp_dir, name) for name in os.listdir(tmp_dir)
+            if os.path.isdir(os.path.join(tmp_dir, name))
+        )
+        dest = _preflight_dir()
+        os.makedirs(dest, exist_ok=True)
+        for name in os.listdir(extracted_root):
+            if name == "state":
+                continue
+            src_path = os.path.join(extracted_root, name)
+            dest_path = os.path.join(dest, name)
+            if os.path.isdir(dest_path):
+                shutil.rmtree(dest_path)
+            elif os.path.isfile(dest_path):
+                os.remove(dest_path)
+            shutil.move(src_path, dest_path)
+        entry_point = os.path.join(dest, "preflight.sh")
+        if os.path.isfile(entry_point):
+            os.chmod(entry_point, 0o755)
+    _migrate_legacy_preflight_state(dest)
+    return dest
 
 
 # Every Ryubing catalog entry -- the "Ryubing" family specifically,
