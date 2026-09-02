@@ -402,6 +402,27 @@ select {
   background-size: 1rem;
 }
 input[type=text]:focus, select:focus { border-color: var(--accent); }
+/* A real on/off pill, not a plain checkbox -- the standard CSS-only
+   technique (hide the real checkbox, style its sibling <span> as the
+   track, :checked drives both the track's fill color and the thumb's
+   position), so no JS is needed and the underlying element stays a
+   genuine checkbox for the form to submit. Introduced for the
+   Emulators tab's own "Enable preflight" toggle -- every other on/off
+   setting here (Couch Mode included) still renders as a plain
+   checkbox, this isn't a global restyle. */
+.toggle-switch { display: inline-flex; align-items: center; gap: 0.5rem; cursor: pointer; }
+.toggle-switch input[type=checkbox] { position: absolute; opacity: 0; width: 0; height: 0; }
+.toggle-switch-track {
+  position: relative; flex: 0 0 auto; width: 2.2rem; height: 1.25rem; border-radius: 999px;
+  background: var(--border); transition: background 0.15s ease;
+}
+.toggle-switch-track::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 1.05rem; height: 1.05rem;
+  border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  transition: transform 0.15s ease;
+}
+.toggle-switch input:checked + .toggle-switch-track { background: var(--accent); }
+.toggle-switch input:checked + .toggle-switch-track::after { transform: translateX(0.95rem); }
 /* Pairs the pill input with a separate circular search button beside
    it (not an icon glued inside the pill) -- a real type=submit, not
    just decoration, so there's now an explicit click target for
@@ -4012,8 +4033,9 @@ def _emulators_tab_panel_html(state, chosen=None):
         )
         preflight_block = f"""
   <div class="field-group">
-    <label style="display:flex;align-items:center;gap:0.4rem">
+    <label class="toggle-switch">
       <input type="checkbox" name="em_preflight" form="{_ADD_FORM_ID}" {preflight_checked}>
+      <span class="toggle-switch-track"></span>
       Enable preflight {_info_tooltip_icon_html(preflight_tooltip)}
     </label>
   </div>"""
