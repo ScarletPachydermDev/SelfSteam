@@ -424,7 +424,7 @@ def build_browser_launch_args(url, couch_mode, browser_app_id=None):
 
 
 def register_steam_shortcut(name, url, asset_paths, user_id=None, couch_mode=False, browser_app_id=None,
-                             launch_args=None):
+                             launch_args=None, steam_input_enabled=None):
     """Copy fetched assets into Steam's grid folder and add/update a
     non-Steam shortcut entry in shortcuts.vdf. Returns the appid.
 
@@ -435,7 +435,14 @@ def register_steam_shortcut(name, url, asset_paths, user_id=None, couch_mode=Fal
     shortcuts that aren't resolved fresh here. get_launch_wrapper_path()'s
     own wrapper script is generic (just re-execs whatever LaunchOptions
     it's given on the host), so this needs no separate wrapper of its
-    own."""
+    own.
+
+    steam_input_enabled (True/False, or None to leave it alone) sets
+    localconfig.vdf's own per-app Steam Input override for this exact
+    appid right after it's assigned -- see set_steam_input_enabled's
+    own docstring. Currently only Ryubing-preflight shortcuts ever pass
+    this (preflight needs Steam Input ON to tell same-model controllers
+    apart -- see ryu-preflight's own README)."""
     browser_args = launch_args if launch_args is not None else build_browser_launch_args(url, couch_mode, browser_app_id)
 
     userdata_dir = steam_paths.find_userdata_dir(user_id)
@@ -474,9 +481,86 @@ def register_steam_shortcut(name, url, asset_paths, user_id=None, couch_mode=Fal
                 os.remove(os.path.join(grid_dir, f))
                 print(f"  - removed stale {f}")
 
+    if steam_input_enabled is not None:
+        set_steam_input_enabled(appid, steam_input_enabled, user_id=user_id)
+
     print(f"\nAdded/updated Steam shortcut '{name}' (appid {appid}) in {vdf_path}")
     print("Restart Steam (fully quit, not just close the window) to see it.")
     return appid
+
+
+def set_steam_input_enabled(appid, enabled, user_id=None):
+    """Sets Steam's own per-shortcut "Enable Steam Input" override --
+    UserLocalConfigStore/apps/<appid>/UseSteamControllerConfig in
+    localconfig.vdf's real TEXT-VDF format (Valve's older plain-text
+    key-value format -- a different, unrelated file/format from
+    shortcuts.vdf's own binary one, and one this project has never
+    touched before). Confirmed live (2026-09-02) by diffing a real
+    localconfig.vdf before and after manually toggling this exact
+    setting on a real shortcut in Steam's own UI: the value is "2" for
+    enabled and "0" for disabled -- not a plain 0/1 boolean, there's a
+    third state (the key simply being absent) for "never touched, use
+    Steam's own default."
+
+    A targeted line-level patch, not a full parse/serialize round trip
+    -- same "hand-rolled targeted edit, not a full parser" reasoning as
+    standalone_emulators.py's own _toml_set_in_section: this file is
+    large, actively rewritten by Steam itself, and full of escaped JSON
+    blobs as string values a naive generic text-VDF writer could easily
+    reformat or corrupt. localconfig.vdf actually has *two* "apps"
+    sections -- this one, a direct child of the file's own root
+    UserLocalConfigStore map (one leading tab), and an unrelated one
+    four tabs deep under Software/Valve/Steam holding badge/playtime
+    data -- told apart here by indentation depth alone (^\\t"apps"$,
+    anchored, MULTILINE), confirmed against a real 1973-line copy of
+    this exact file rather than assumed from a text-VDF spec. Backs up
+    to .bak first, same safety net shortcuts_vdf.save() already gives
+    shortcuts.vdf. No-ops (returns False) if localconfig.vdf doesn't
+    exist yet for this user."""
+    userdata_dir = steam_paths.find_userdata_dir(user_id)
+    path = os.path.join(userdata_dir, "config", "localconfig.vdf")
+    if not os.path.isfile(path):
+        return False
+
+    with open(path, encoding="utf-8", newline="") as f:
+        content = f.read()
+
+    value = "2" if enabled else "0"
+    appid = str(appid)
+    key_line = f'\t\t\t"UseSteamControllerConfig"\t\t"{value}"\n'
+
+    apps_re = re.compile(r'^\t"apps"\n\t\{\n(.*?)^\t\}\n', re.DOTALL | re.MULTILINE)
+    apps_match = apps_re.search(content)
+
+    if not apps_match:
+        # No top-level "apps" section at all yet (no shortcut's own
+        # controller settings have ever been touched on this machine) --
+        # insert one right before the file's own final closing brace,
+        # the one that closes UserLocalConfigStore itself.
+        new_section = f'\t"apps"\n\t{{\n\t\t"{appid}"\n\t\t{{\n{key_line}\t\t}}\n\t}}\n'
+        idx = content.rstrip().rfind("}")
+        new_content = content[:idx] + new_section + content[idx:]
+    else:
+        apps_body = apps_match.group(1)
+        appid_re = re.compile(r'^\t\t"' + re.escape(appid) + r'"\n\t\t\{\n(.*?)^\t\t\}\n', re.DOTALL | re.MULTILINE)
+        appid_match = appid_re.search(apps_body)
+        if appid_match:
+            appid_body = appid_match.group(1)
+            key_re = re.compile(r'^\t\t\t"UseSteamControllerConfig"\s*"[^"]*"\n', re.MULTILINE)
+            if key_re.search(appid_body):
+                new_appid_body = key_re.sub(key_line, appid_body, count=1)
+            else:
+                new_appid_body = appid_body + key_line
+            new_apps_body = apps_body[:appid_match.start(1)] + new_appid_body + apps_body[appid_match.end(1):]
+        else:
+            new_apps_body = apps_body + f'\t\t"{appid}"\n\t\t{{\n{key_line}\t\t}}\n'
+        new_apps_block = f'\t"apps"\n\t{{\n{new_apps_body}\t}}\n'
+        new_content = content[:apps_match.start()] + new_apps_block + content[apps_match.end():]
+
+    shutil.copy2(path, path + ".bak")
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        f.write(new_content)
+    return True
 
 
 def register_custom_shortcut(name, target, start_dir, launch_options, asset_paths, user_id=None):

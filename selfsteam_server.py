@@ -5202,6 +5202,7 @@ def _run_commit_in_background(items, label):
                     item["name"], item["url"], item["asset_paths"],
                     couch_mode=item["couch_mode"], browser_app_id=item.get("browser_app_id"),
                     launch_args=item.get("launch_args"),
+                    steam_input_enabled=item.get("steam_input_enabled"),
                 )
 
     try:
@@ -6754,7 +6755,15 @@ class Handler(BaseHTTPRequestHandler):
                 selections[basename] = {"url": selection_url} if selection_url else None
             asset_paths = create_webapp.download_selected_assets(slug, selections)
             _queue_edit_rename_cleanup(params, "em", match_name)
-            pending_queue.add(match_name, None, False, asset_paths, launch_args=args)
+            # Steam Input needs to be ON for preflight to tell same-
+            # model controllers apart (see ryu-preflight's own README) --
+            # None (not just False) for every non-preflight shortcut, so
+            # this never touches a setting nothing asked for.
+            steam_input_enabled = True if em_preflight else None
+            pending_queue.add(
+                match_name, None, False, asset_paths, launch_args=args,
+                steam_input_enabled=steam_input_enabled,
+            )
             # Emulator (and its Flathub/AppImage source), plus the ROM
             # picker's own folder/source, carried forward -- same
             # reasoning as _add_retroarch_shortcut's own carry-forward,

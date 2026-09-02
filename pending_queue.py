@@ -48,7 +48,13 @@ def _save(items):
     config.atomic_write_json(_QUEUE_FILE, items)
 
 
-def add(name, url, couch_mode, asset_paths, browser_app_id=None, launch_args=None):
+def add(name, url, couch_mode, asset_paths, browser_app_id=None, launch_args=None, steam_input_enabled=None):
+    # steam_input_enabled: Ryubing-preflight shortcuts only (see
+    # selfsteam_server.py's own em_preflight handling) -- True/False to
+    # set create_webapp.set_steam_input_enabled once the shortcut's real
+    # appid is known at commit time, None (every other shortcut) to
+    # leave Steam Input's own per-app setting untouched entirely rather
+    # than writing a value nothing asked for.
     with _lock:
         items = _load()
         items.append({
@@ -59,6 +65,7 @@ def add(name, url, couch_mode, asset_paths, browser_app_id=None, launch_args=Non
             "asset_paths": asset_paths,
             "browser_app_id": browser_app_id,
             "launch_args": launch_args,
+            "steam_input_enabled": steam_input_enabled,
             "queued_at": time.time(),
         })
         _save(items)
