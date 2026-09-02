@@ -79,6 +79,57 @@ modules:
         url: https://files.pythonhosted.org/packages/7e/3c/0e77bd5ffcf078e9dd27d3074aad6c030d9b10d0bf69329d573c927a188c/cryptography-50.0.1-cp39-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
         sha256: e22dfed744bd4002e909464cb23d2f0b05c6f3113a79ef2e9864a53db737c733
 
+  - name: python3-nsz
+    # Needed by standalone_emulators.py's own convert_nsz_to_nsp -- the
+    # real nicoboss/nsz package (a compression/decompression tool for
+    # Nintendo Switch dumps; micherwa/nsz-to-nsp is just a batch-
+    # conversion wrapper built on this exact same engine, not a
+    # separate implementation), invoked as `python3 -m nsz -D` the same
+    # way pkgextract gets invoked as a subprocess elsewhere in this
+    # file. Pure-Python-installable (only zstandard/pycryptodome carry
+    # real C extensions, and both ship real manylinux wheels -- no Rust
+    # toolchain problem the way cryptography above has), so this is a
+    # plain pinned-wheels install like it, just with more of them:
+    # enlighten (nsz's own progress-bar dependency) pulls in blessed,
+    # which itself pulls in six and wcwidth -- the full real dependency
+    # tree pip resolves for `pip install nsz`, not guessed.
+    buildsystem: simple
+    build-commands:
+      - pip3 install --no-index --no-deps --prefix=/app
+          six-1.17.0-py2.py3-none-any.whl
+          wcwidth-0.8.3-py3-none-any.whl
+          blessed-1.49.0-py3-none-any.whl
+          prefixed-0.9.0-py2.py3-none-any.whl
+          enlighten-1.14.1-py2.py3-none-any.whl
+          pycryptodome-3.23.0-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+          zstandard-0.25.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
+          nsz-5.0.0-py3-none-any.whl
+    sources:
+      - type: file
+        url: https://files.pythonhosted.org/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl
+        sha256: 4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274
+      - type: file
+        url: https://files.pythonhosted.org/packages/c4/0e/57f6bb3024a597b2e8ec4aee710ffe62ddc95af2e2bb1ee7a7abdc22c68c/wcwidth-0.8.3-py3-none-any.whl
+        sha256: d5b73dba6158a595ec9370350e7f2637bcac8d6c5e4fde34f30fcffb6103a5e4
+      - type: file
+        url: https://files.pythonhosted.org/packages/aa/d9/d0a5f6cce623ae6fecda1a59d87a360ac2cd971ac6d4d06d3b3d832a2ccc/blessed-1.49.0-py3-none-any.whl
+        sha256: 770279b4066218f38a06ee87976ccc658fbffd4ffb43a5ee1e9a5eef3d4f3ba0
+      - type: file
+        url: https://files.pythonhosted.org/packages/c3/61/d9957a0ed189ac8a89075c59c97588fb1c77e51d8d44a26f5cdf001d260c/prefixed-0.9.0-py2.py3-none-any.whl
+        sha256: 3cdb74bfc4cf0aba28f3574662b13afdcac27c463dcbef320fe5d03f4c5fbca8
+      - type: file
+        url: https://files.pythonhosted.org/packages/73/1e/244bb2fc5713ad21ae9f9012067f6432c682593816c6a45372c24f5a7d61/enlighten-1.14.1-py2.py3-none-any.whl
+        sha256: 5fbd0c959ca1644034c41bb0ace5db19c9852cf9d721b6103f5f130663c57be8
+      - type: file
+        url: https://files.pythonhosted.org/packages/5f/e9/a09476d436d0ff1402ac3867d933c61805ec2326c6ea557aeeac3825604e/pycryptodome-3.23.0-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+        sha256: c8987bd3307a39bc03df5c8e0e3d8be0c4c3518b7f044b0f4c15d1aa78f52575
+      - type: file
+        url: https://files.pythonhosted.org/packages/63/4b/e3678b4e776db00f9f7b2fe58e547e8928ef32727d7a1ff01dea010f3f13/zstandard-0.25.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
+        sha256: 8e735494da3db08694d26480f1493ad2cf86e99bdd53e8e9771b2752a5c0246a
+      - type: file
+        url: https://files.pythonhosted.org/packages/85/7f/e11c738d92ffa58116184b443636b27c4cdefc0a7d73e5eacff1c9e3b6dd/nsz-5.0.0-py3-none-any.whl
+        sha256: b3698cab8d7720aed056a0290017ff60a989d8343b7bb9c3c161ab137ec03965
+
   - name: selfsteam
     buildsystem: simple
     build-commands:

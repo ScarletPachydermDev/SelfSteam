@@ -26,6 +26,7 @@ import struct
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.error
@@ -346,13 +347,96 @@ def switch_prod_keys_path():
     return None
 
 
-# Emulators this DLC+updates picker is wired up for -- deliberately not
-# every "Nintendo Switch" entry in EMULATORS (Eden is a separate
-# codebase forked from Ryujinx, and its own on-disk dlc.json/
-# updates.json format hasn't been confirmed against its real source the
-# way Ryubing's has -- see standalone_emulators.py's own needs_keys/
-# _ryubing_configure_game_dir comments on always confirming this kind
-# of format from source rather than assuming a fork kept it identical).
+def _nsz_conversion_dir():
+    return _xdg_data_dir("selfsteam", "nsz-converted")
+
+
+def _nsz_output_path(nsz_path):
+    stem = os.path.splitext(os.path.basename(nsz_path))[0]
+    return os.path.join(_nsz_conversion_dir(), stem, stem + ".nsp")
+
+
+def convert_nsz_to_nsp(nsz_path):
+    """Converts a Switch .nsz (compressed NSP) into a real .nsp Ryubing/
+    Eden can actually load -- neither fork understands .nsz directly
+    (confirmed via real user testing, see EMULATORS' own rom_exclude_
+    extensions), so this is the same "one-time real-content conversion,
+    cached forever after by content" shape as shadPS4's own extract_
+    shadps4_pkg, just for Switch instead of PS4. The real engine is
+    nicoboss/nsz (pip package "nsz"), run as its own real CLI (`python3
+    -m nsz -D`) rather than reimplementing zstd/NCA decompression here
+    -- the exact same tool micherwa/nsz-to-nsp's own batch-conversion
+    wrapper is built on top of, not a separate implementation. sys.
+    executable, not a bare "python3" -- this needs to be the same
+    interpreter nsz itself was pip-installed into (the Flatpak's own
+    /app/bin/python3, or the dev-test venv's own), not whatever "python3"
+    happens to resolve to on the host.
+
+    Needs the same prod.keys already required for every other Switch-
+    family feature here (DLC/updates, keys install) -- compression never
+    removes an NCA's own per-title key layer, nsz's own decompression
+    still has to unwrap it the same way nsp_metadata.py's own DLC-
+    content pipeline does. Returns None (rather than raising) if no
+    prod.keys are installed yet, since that's a normal, recoverable
+    state everywhere else this file deals with Switch keys, not a bug."""
+    keys_path = switch_prod_keys_path()
+    if not keys_path:
+        return None
+    out_path = _nsz_output_path(nsz_path)
+    if os.path.isfile(out_path):
+        return out_path
+    out_dir = os.path.dirname(out_path)
+    os.makedirs(out_dir, exist_ok=True)
+    result = subprocess.run(
+        [sys.executable, "-m", "nsz", "-D", nsz_path, "-o", out_dir, "--keys", keys_path],
+        capture_output=True, text=True,
+    )
+    if not os.path.isfile(out_path):
+        raise RuntimeError(f"NSZ conversion failed: {result.stderr.strip() or result.stdout.strip() or 'no .nsp produced'}")
+    return out_path
+
+
+def nsz_converted_display_name(nsp_path):
+    """The original .nsz filename a converted .nsp path came from, or
+    None if nsp_path isn't actually one of convert_nsz_to_nsp's own
+    outputs. Once Create's ever run, a saved shortcut's own LaunchOptions
+    holds this converted .nsp path, not the original .nsz (launch_args
+    substitutes it before building argv, the same "real content-path
+    substitution" shape as shadPS4's own .pkg->eboot.bin swap) -- without
+    this, every such shortcut's Edit page would show the converted
+    file's own real name instead, same class of bug _em_romfile_
+    display_name's own shadPS4 case exists to avoid (there it was a
+    meaningless "eboot.bin"; here it would only be a wrong extension,
+    since _nsz_output_path keeps the same basename, but still wrong).
+    Reconstructed the same way: _nsz_output_path names each output's own
+    parent directory after the original .nsz's basename (minus
+    extension), so that's recoverable without having kept the original
+    path anywhere."""
+    if not nsp_path.lower().endswith(".nsp"):
+        return None
+    parent = os.path.dirname(nsp_path)
+    if os.path.dirname(parent) != _nsz_conversion_dir():
+        return None
+    return os.path.basename(parent) + ".nsz"
+
+
+def nsz_conversion_needed(romfile):
+    """True if launch_args (via convert_nsz_to_nsp) would actually run a
+    real conversion for this romfile -- lets the UI show "Converting
+    NSZ to NSP" ahead of time, same shape as shadps4_pkg_extraction_
+    needed."""
+    return bool(romfile) and romfile.lower().endswith(".nsz") and not os.path.isfile(_nsz_output_path(romfile))
+
+
+# Every Ryubing catalog entry -- the "Ryubing" family specifically,
+# which keeps a real per-title dlc.json/updates.json (see
+# switch_registered_dlc_and_updates) confirmed against its own real
+# source. Eden (a yuzu/C++ fork, NOT a Ryujinx fork despite this
+# comment once claiming otherwise) is wired up separately via
+# EDEN_DLC_UPDATE_EMULATORS below -- its own directory-scan mechanism
+# has no per-title index file the way this dict/JSON approach does, so
+# it needs its own distinct install/seed logic rather than sharing this
+# set.
 SWITCH_DLC_UPDATE_EMULATORS = {"Ryubing", "Ryubing (AppImage)", "Ryubing Canary (AppImage)"}
 
 
@@ -2053,9 +2137,6 @@ EMULATORS = {
         "keys_installed": _switch_keys_installed,
         "install_keys": _switch_install_keys,
         "keys_tooltip": "Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
-        # .nsz omitted from the ROM picker -- not supported by Ryubing
-        # (or Eden, its other fork) per real user testing, not guessed.
-        "rom_exclude_extensions": {".nsz"},
     },
     "Cemu": {
         "install_type": "flathub",
@@ -2397,9 +2478,6 @@ EMULATORS = {
         "keys_installed": _switch_keys_installed,
         "install_keys": _switch_install_keys,
         "keys_tooltip": "Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
-        # .nsz omitted from the ROM picker -- not supported by Eden (or
-        # Ryubing, its other fork) per real user testing, not guessed.
-        "rom_exclude_extensions": {".nsz"},
     },
     "Eden (Legacy amd64 — pre-Ryzen/pre-Haswell CPUs)": {
         "install_type": "binary",
@@ -2415,7 +2493,6 @@ EMULATORS = {
         "keys_installed": _switch_keys_installed,
         "install_keys": _switch_install_keys,
         "keys_tooltip": "Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
-        "rom_exclude_extensions": {".nsz"},
     },
     "Eden (Zen 2 — Steam Deck)": {
         "install_type": "binary",
@@ -2430,7 +2507,6 @@ EMULATORS = {
         "keys_installed": _switch_keys_installed,
         "install_keys": _switch_install_keys,
         "keys_tooltip": "Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
-        "rom_exclude_extensions": {".nsz"},
     },
     "Eden (Zen 4 — AMD Z1/Z2, ROG Ally X, Legion Go S, Steam Machine)": {
         "install_type": "binary",
@@ -2446,7 +2522,6 @@ EMULATORS = {
         "keys_installed": _switch_keys_installed,
         "install_keys": _switch_install_keys,
         "keys_tooltip": "Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
-        "rom_exclude_extensions": {".nsz"},
     },
     "Ryubing (AppImage)": {
         "install_type": "binary",
@@ -2480,7 +2555,6 @@ EMULATORS = {
         "keys_installed": _switch_keys_installed,
         "install_keys": _switch_install_keys,
         "keys_tooltip": "Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
-        "rom_exclude_extensions": {".nsz"},
     },
     "Ryubing Canary (AppImage)": {
         "install_type": "binary",
@@ -2497,7 +2571,6 @@ EMULATORS = {
         "keys_installed": _switch_keys_installed,
         "install_keys": _switch_install_keys,
         "keys_tooltip": "Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
-        "rom_exclude_extensions": {".nsz"},
     },
     "Vita3K": {
         "install_type": "binary",
@@ -2935,6 +3008,17 @@ def launch_args(name, romfile, zrif=None):
     entry = EMULATORS.get(name)
     if not entry:
         return None
+    # NSZ->NSP conversion -- Ryubing and Eden alike, whichever install
+    # type, so this has to happen before the install_type branch below
+    # splits into "binary" (the AppImage builds) vs "flathub" (Ryubing's
+    # own Flathub build) -- unlike shadPS4's own single-flathub-only
+    # .pkg swap further down, since shadPS4 has no AppImage variant in
+    # this catalog to also cover.
+    if romfile.lower().endswith(".nsz") and name in (SWITCH_DLC_UPDATE_EMULATORS | EDEN_DLC_UPDATE_EMULATORS):
+        converted = convert_nsz_to_nsp(romfile)
+        if not converted:
+            return None
+        romfile = converted
     if entry["install_type"] == "binary":
         path = _binary_path(name, entry)
         if not os.path.isfile(path):

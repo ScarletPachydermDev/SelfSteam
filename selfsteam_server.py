@@ -1143,6 +1143,8 @@ function selfsteamShowCreating(form) {
     button.innerHTML = "Downloading " + form.dataset.emulator + '<span class="spinner"></span>';
   } else if (form.dataset.pkgExtract) {
     button.innerHTML = "Extracting PKG" + '<span class="spinner"></span>';
+  } else if (form.dataset.nszConvert) {
+    button.innerHTML = "Converting NSZ to NSP" + '<span class="spinner"></span>';
   } else if (browserRadio && !browserRadio.dataset.installed) {
     button.innerHTML = "Downloading " + browserRadio.dataset.name + '<span class="spinner"></span>';
   } else if (form.dataset.appName && !form.dataset.installed) {
@@ -3431,26 +3433,37 @@ def _em_list_rows(abs_path, rel_path, state, path_key, file_key):
 
 def _em_romfile_display_name(emulator, romfile_rel):
     """The filename to show/guess-a-search-term-from for a ROM pick --
-    almost always just its own basename, except shadPS4: once Create's
-    ever run, em_romfile holds the *extracted* eboot.bin path, not the
-    original .pkg (standalone_emulators.launch_args substitutes it
-    before ever writing LaunchOptions -- see shadps4_resolve_eboot_
-    path's own docstring), so every shadPS4 shortcut's own Edit would
-    otherwise show/search on the meaningless "eboot.bin" instead of the
-    real game. Confirmed live as a real bug: a real Bloodborne
-    shortcut's Edit page showed "eboot.bin" as its ROM and matched
-    "eFootball PES 2020" as its SGDB guess -- SGDB's own fuzzy search
-    landing on something plausible-sounding for "eboot" is exactly the
-    kind of wrong-but-confident result a meaningless guess produces.
+    almost always just its own basename, except for two real content-
+    path substitutions launch_args makes before ever writing
+    LaunchOptions, both of which would otherwise leak the substituted
+    path's own filename into Edit instead of the real game:
 
-    Reconstructed from the eboot.bin's own parent directory name instead
-    -- extract_shadps4_pkg names that directory after the original
-    .pkg's own basename (minus extension), so it's recoverable without
-    needing to have kept the original path anywhere. Falls back to the
-    plain basename if this isn't actually a shadPS4 eboot.bin path."""
+    shadPS4: em_romfile holds the *extracted* eboot.bin path, not the
+    original .pkg (see shadps4_resolve_eboot_path's own docstring).
+    Confirmed live as a real bug: a real Bloodborne shortcut's Edit
+    page showed "eboot.bin" as its ROM and matched "eFootball PES 2020"
+    as its SGDB guess -- SGDB's own fuzzy search landing on something
+    plausible-sounding for "eboot" is exactly the kind of wrong-but-
+    confident result a meaningless guess produces. Reconstructed from
+    the eboot.bin's own parent directory name instead -- extract_
+    shadps4_pkg names that directory after the original .pkg's own
+    basename (minus extension).
+
+    Ryubing/Eden: em_romfile holds the *converted* .nsp path for an
+    originally-picked .nsz (see standalone_emulators.convert_nsz_to_
+    nsp) -- a smaller version of the same problem (nsz_converted_
+    display_name's own docstring on why it's "only" a wrong extension,
+    not a meaningless name, but still wrong).
+
+    Falls back to the plain basename for everything else."""
     abs_path = _ra_safe_join(romfile_rel)
-    if emulator == "shadPS4" and abs_path and os.path.basename(abs_path) == "eboot.bin":
+    if not abs_path:
+        return os.path.basename(romfile_rel)
+    if emulator == "shadPS4" and os.path.basename(abs_path) == "eboot.bin":
         return os.path.basename(os.path.dirname(abs_path)) + ".pkg"
+    nsz_name = standalone_emulators.nsz_converted_display_name(abs_path)
+    if nsz_name:
+        return nsz_name
     return os.path.basename(romfile_rel)
 
 
@@ -4858,10 +4871,17 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
         # since both can apply on a shadPS4 game's very first shortcut
         # (not yet installed AND not yet extracted).
         em_pkg_extract_needed = em_emulator == "shadPS4" and standalone_emulators.shadps4_pkg_extraction_needed(em_state.get("em_romfile", ""))
+        # Ryubing/Eden-only: same "give real feedback for a real slow
+        # step" reasoning as em_pkg_extract_needed above -- converting a
+        # picked .nsz to .nsp (standalone_emulators.convert_nsz_to_nsp)
+        # is a real, sometimes-multi-minute blocking step inside /add
+        # too, not just a quick file-move.
+        em_nsz_convert_needed = standalone_emulators.nsz_conversion_needed(em_state.get("em_romfile", ""))
         add_form = f"""
 <form id="{_ADD_FORM_ID}" action="/add" method="post" onsubmit="selfsteamShowCreating(this)"
       data-emulator="{html.escape(em_emulator)}" data-installed="{"1" if em_already_installed else ""}"
-      data-pkg-extract="{"1" if em_pkg_extract_needed else ""}">
+      data-pkg-extract="{"1" if em_pkg_extract_needed else ""}"
+      data-nsz-convert="{"1" if em_nsz_convert_needed else ""}">
   <input type="hidden" name="em_emulator" value="{html.escape(em_emulator)}">
   <input type="hidden" name="em_romfile" value="{html.escape(em_state.get('em_romfile', ''))}">
   <input type="hidden" name="em_biosfile" value="{html.escape(em_state.get('em_biosfile', ''))}">
