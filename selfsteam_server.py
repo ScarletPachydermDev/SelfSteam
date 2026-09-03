@@ -605,7 +605,16 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
    dark #3a3a3a real cells use, which exists specifically to keep white
    logos visible) matching the design handoff's own placeholder look. */
 .artwork-skeleton { background: var(--skeleton); border-radius: 8px; }
-.switch-row { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; }
+/* Same font-size/color as .hint-row's own (the "Shortcut for X will be
+   added" line right below these) -- confirmed live as a real
+   inconsistency: this row's plain-label checkbox text, the next row's
+   unstyled default-blue-underlined <a>, and .hint-row's own dimmed
+   text all rendered at three visibly different sizes/weights stacked
+   directly on top of each other. .switch-row a keeps its own accent
+   color (still reads as clickable) without inheriting the browser's
+   own default link size/underline-everywhere styling. */
+.switch-row { display: flex; align-items: center; gap: 0.5rem; font-size: 0.95rem; color: var(--text-dim); }
+.switch-row a { color: var(--accent); }
 /* Segmented tab bar (URL / Apps / RetroArch / Emulators): CSS :target,
    not a radio hack -- no page reload needed to switch tabs (:target is
    driven purely by the URL's own #fragment), and unlike a radio's
@@ -1315,6 +1324,24 @@ function selfsteamUploadFetch(input, swapIds) {
     .then(function (r) { if (!r.ok) throw new Error("bad status"); return r.text().then(function (t) { return {text: t, url: r.url}; }); })
     .then(function (result) { selfsteamApplySwap(result.text, result.url, swapIds); })
     .catch(function () { form.submit(); });
+}
+
+var SELFSTEAM_URL_SWAP_IDS = [
+  "selfsteam-url-tab-panel", "selfsteam-url-middle", "selfsteam-url-right",
+  "selfsteam-add-form-slot", "selfsteam-add-button",
+];
+
+// Picking a different SGDB match used to be a plain <a href> -- a real
+// full-page navigation, then that page's own url_loading branch (see
+// render_page) doing its usual instant-placeholder-then-real-fetch
+// dance, but as a second full page load instead of the in-place swap
+// every other picker in the app already gets. Same fix as RA/Emulators'
+// own selfsteamRaNav/selfsteamEmNav: route the click through fetch +
+// selfsteamApplySwap instead, which already knows how to chase that
+// same url_loading meta-refresh itself without a second full reload.
+function selfsteamUrlNav(a) {
+  selfsteamTabFetch(a.getAttribute("href"), SELFSTEAM_URL_SWAP_IDS);
+  return false;
 }
 
 var SELFSTEAM_RA_SWAP_IDS = [
@@ -4539,20 +4566,22 @@ def _sgdb_search_bar_html(query, couch_mode, browser, sgdb_q, ra_state=None, em_
 
 
 def _match_list_html(query, couch_mode, browser, sgdb_q, matches, match_index, ra_state=None, em_state=None):
-    # Plain links, not radio+submit-button: clicking one navigates
-    # straight to that match's artwork (a real GET, no JS needed) --
-    # a radio selection alone doesn't submit anything by itself, which
-    # read as "artwork doesn't change when I pick a different match".
-    # sgdb_q stays whatever it already was across rows -- picking a
-    # match no longer touches the search box, only which artwork/name
-    # is chosen (the Name field, back in the left column, follows the
-    # picked match's own name instead).
+    # Plain <a href>, not radio+submit-button (a radio selection alone
+    # doesn't submit anything by itself, which read as "artwork doesn't
+    # change when I pick a different match") -- but routed through
+    # selfsteamUrlNav (see PAGE_TAIL), not a real navigation, so picking
+    # a different match swaps in place the same way every other picker
+    # in the app already does instead of a full-page flash. sgdb_q stays
+    # whatever it already was across rows -- picking a match no longer
+    # touches the search box, only which artwork/name is chosen (the
+    # Name field, back in the left column, follows the picked match's
+    # own name instead).
     rows = []
     qs = _state_qs(query, couch_mode, browser, ra_state, em_state, sgdb_q=sgdb_q)
     for i, m in enumerate(matches):
         selected = " selected" if i == match_index else ""
         rows.append(
-            f'<a class="{selected.strip()}" href="/search?{qs}&match_index={i}">{html.escape(m["name"])}</a>'
+            f'<a class="{selected.strip()}" href="/search?{qs}&match_index={i}" onclick="return selfsteamUrlNav(this)">{html.escape(m["name"])}</a>'
         )
     return f'<div class="boxed-list">{"".join(rows)}</div>'
 
@@ -4563,7 +4592,7 @@ def _middle_column_html(query, couch_mode, browser, sgdb_q, matches, match_index
         matches = []
     list_html = _match_list_html(query, couch_mode, browser, sgdb_q, matches, match_index, ra_state, em_state) if matches else _placeholder_matches_html()
     return f"""
-<div class="card {extra_class}">
+<div class="card {extra_class}" id="selfsteam-url-middle">
   {_sgdb_search_bar_html(query, couch_mode, browser, sgdb_q, ra_state, em_state, has_matches=bool(matches))}
   <div class="field-group" style="flex:1;min-height:0">
     <h2>SGDB matches</h2>
@@ -5121,7 +5150,7 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
 <div class="card">
   {_tab_bar_html()}
   <div class="tab-panels">
-    <div class="tab-panel tab-panel-url">
+    <div class="tab-panel tab-panel-url" id="selfsteam-url-tab-panel">
       <form action="/search" method="get" style="display:flex;flex-direction:column;gap:0.9rem;flex:1;min-height:0">
         {_ra_hidden_fields(ra_state)}
         {_ra_hidden_fields(em_state)}
@@ -5210,10 +5239,10 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
         )
         extra_head = f'<meta http-equiv="refresh" content="0;url={html.escape(refresh_url)}">'
         middle_url = _middle_column_html(query, couch_mode, browser, sgdb_q, [], match_index, extra_class="middle-panel-url", ra_state=ra_state, em_state=em_state)
-        right_url = f'<div class="card artwork-card right-panel-url">{_ra_loading_artwork_html()}</div>'
+        right_url = f'<div class="card artwork-card right-panel-url" id="selfsteam-url-right">{_ra_loading_artwork_html()}</div>'
     else:
         middle_url = _middle_column_html(query, couch_mode, browser, sgdb_q, matches, match_index, extra_class="middle-panel-url", ra_state=ra_state, em_state=em_state)
-        right_url = f'<div class="card artwork-card right-panel-url">{_artwork_picker_html(candidates_by_category)}</div>'
+        right_url = f'<div class="card artwork-card right-panel-url" id="selfsteam-url-right">{_artwork_picker_html(candidates_by_category)}</div>'
     right_ra = f'<div class="card artwork-card right-panel-retroarch" id="selfsteam-ra-right">{ra_right_content}</div>'
     right_em = f'<div class="card artwork-card right-panel-emulators" id="selfsteam-em-right">{em_right_content}</div>'
     right_apps = f'<div class="card artwork-card right-panel-apps" id="selfsteam-apps-right">{apps_right_content}</div>'
