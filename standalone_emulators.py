@@ -501,89 +501,6 @@ def _preflight_remote_commit():
         return json.load(resp)["sha"]
 
 
-def _preflight_xdg_dir(env, fallback):
-    base = os.environ.get(env) or os.path.expanduser(fallback)
-    return os.path.join(base, "preflight")
-
-
-def _preflight_state_dir():
-    # Matches Preflight's own real derivation exactly (see its own
-    # preflight.py: STATE_DIR = the PREFLIGHT_STATE_DIR env var, else
-    # XDG_STATE_HOME, else ~/.local/state, then /preflight) -- not
-    # reading PREFLIGHT_STATE_DIR itself, since SelfSteam never sets
-    # that override; this is only ever the *default* location Preflight
-    # derives on its own when nothing overrides it.
-    return _preflight_xdg_dir("XDG_STATE_HOME", "~/.local/state")
-
-
-def _migrate_preflight_state_to_xdg():
-    """Copies known_pads.json/backups out of either real place Preflight's
-    own user data could still be sitting from before it moved this out
-    of its own install directory entirely (confirmed live 2026-09-03,
-    see Preflight's own real preflight.py source): a hand-maintained dev
-    copy that predates this project's own managed install altogether
-    (~/ryu-preflight/state/), and this project's own now-obsolete
-    _preflight_dir()/state/ from before that move. Preflight's own
-    adopt_user_files() would eventually rescue either one the next time
-    a game actually launches through it -- but ensure_preflight_installed
-    may now wipe the install directory outright before that ever
-    happens (see its own docstring), so this does the same move
-    ourselves, straight to Preflight's own real XDG state directory,
-    rather than risk losing real weeks-old controller-pairing data to a
-    race with when the user next happens to launch a game.
-
-    known_pads.json is a single file Preflight keeps rewriting in place
-    over time, so this compares mtimes and keeps whichever copy is
-    actually newer rather than skipping outright the moment *a* copy
-    exists at the destination -- confirmed live (2026-09-03) as a real
-    bug on a real machine: an earlier partial run had already left a
-    weeks-stale copy sitting at the XDG destination, and the original
-    "skip if destination exists" version would have kept that stale
-    copy forever, silently discarding everything paired/relabeled since.
-
-    backups/ merges per-file instead -- each Config.<timestamp>.json is
-    its own immutable once-written snapshot, so copying whichever ones
-    aren't at the destination yet is both correct and simpler than a
-    mtime comparison. This was the other half of the same real bug:
-    treating the whole folder as one exists-or-doesn't check meant any
-    backup file that only existed in the source (added after an earlier
-    partial migration already created the destination folder) was
-    silently dropped instead of merged in -- two real, days-old backups
-    were lost this way before this fix, only recovered because a
-    separate manual backup had been taken first.
-
-    Copies rather than moves -- safe to call on every ensure_preflight_
-    installed run, not just once, and leaves the *_preflight_dir()/
-    state/ source alone too (ensure_preflight_installed's own rmtree
-    cleans that up right after, this function doesn't need to)."""
-    dest = _preflight_state_dir()
-    legacy_dirs = (
-        os.path.expanduser("~/ryu-preflight/state"),
-        os.path.join(_preflight_dir(), "state"),
-    )
-    for source in legacy_dirs:
-        if not os.path.isdir(source):
-            continue
-        os.makedirs(dest, exist_ok=True)
-
-        src_pads = os.path.join(source, "known_pads.json")
-        dst_pads = os.path.join(dest, "known_pads.json")
-        if os.path.isfile(src_pads) and (
-            not os.path.isfile(dst_pads) or os.path.getmtime(src_pads) > os.path.getmtime(dst_pads)
-        ):
-            shutil.copy2(src_pads, dst_pads)
-
-        src_backups = os.path.join(source, "backups")
-        dst_backups = os.path.join(dest, "backups")
-        if os.path.isdir(src_backups):
-            os.makedirs(dst_backups, exist_ok=True)
-            for name in os.listdir(src_backups):
-                src_file = os.path.join(src_backups, name)
-                dst_file = os.path.join(dst_backups, name)
-                if os.path.isfile(src_file) and not os.path.exists(dst_file):
-                    shutil.copy2(src_file, dst_file)
-
-
 def ensure_preflight_installed():
     """Installs or updates Preflight at _preflight_dir(), returning that
     path -- called right before a preflight-enabled Ryubing shortcut's
@@ -602,17 +519,13 @@ def ensure_preflight_installed():
     genuinely nothing to run in that case.
 
     A genuine wipe-and-replace on update (shutil.rmtree then move the
-    freshly extracted tree straight into place), not a careful per-file
-    copy that skips some directory by name -- confirmed live (2026-09-03)
-    that Preflight itself moved all of its own user data (known_pads.json,
-    backups/) out to real XDG paths (see _preflight_state_dir), so the
-    install directory this function owns is genuinely disposable now:
-    nothing sitting inside it needs preserving across an update, ever
-    again. _migrate_preflight_state_to_xdg runs first regardless (a
-    cheap, idempotent check) to rescue any state still sitting in either
-    place it used to live, before that rmtree would otherwise have
-    thrown it away for good."""
-    _migrate_preflight_state_to_xdg()
+    freshly extracted tree straight into place) -- Preflight itself
+    keeps its own user data (known_pads.json, backups/) under a real
+    XDG state directory now, not inside this install directory, so
+    there's nothing here worth preserving across an update. No
+    migration of anything older than that: both projects are still
+    pre-userbase, so simplicity wins over guarding data neither project
+    needs to care about keeping yet."""
     try:
         remote_commit = _preflight_remote_commit()
     except (urllib.error.URLError, OSError, ValueError, KeyError):
