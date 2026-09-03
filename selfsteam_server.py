@@ -220,6 +220,17 @@ _X_ICON_SVG = (
     '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round">'
     '<path d="M5 5L19 19M19 5L5 19"></path></svg>'
 )
+# Same polyline shape/stroke as every <select>'s own CSS background-
+# image chevron (see the select{} rule's own comment), just as a real
+# element instead of a background-image -- the DLC+updates picker's own
+# "+" add-row needs this to only exist when the picker's actually open,
+# which a static background-image can't conditionally do. currentColor,
+# not the select chevron's own hardcoded #888 -- this one needs to
+# follow .dlc-add-row's own :hover color shift.
+_CHEVRON_UP_ICON_SVG = (
+    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" '
+    'stroke-linecap="round" stroke-linejoin="round"><polyline points="6 15 12 9 18 15"></polyline></svg>'
+)
 # Real icon (from info-circle-svgrepo-com.svg, fill swapped to
 # currentColor so it follows .info-icon's own color) rather than a
 # CSS circle + "i" glyph -- same reasoning as _X_ICON_SVG's own switch
@@ -525,8 +536,12 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
    rounding as every real added-item row above it for free, reading as
    "the last slot in this list is always the add action" rather than a
    separate control bolted on underneath. */
-.dlc-add-row { justify-content: center; cursor: pointer; color: var(--text-dim); font-size: 1.3rem; font-weight: 700; text-decoration: none; }
+.dlc-add-row { position: relative; justify-content: center; cursor: pointer; color: var(--text-dim); font-size: 1.3rem; font-weight: 700; text-decoration: none; }
 .dlc-add-row:hover { color: var(--accent); }
+/* The open-state chevron -- same right inset as .remove-file-btn's own
+   row position, absolutely placed rather than a flex sibling so the
+   "+" itself stays perfectly centered whether or not this is present. */
+.dlc-add-row-chevron { position: absolute; right: 0.9rem; top: 50%; transform: translateY(-50%); display: flex; }
 /* Placeholder rows before any search -- reserves the middle column's
    space instead of it looking like an empty gap. */
 .placeholder-row { flex: 0 0 auto; height: 2.3rem; }
@@ -3716,13 +3731,16 @@ def _em_dlc_picker_section(state):
     always shows either its own selected-file row or its own browser,
     never neither, this one used to show its browser permanently
     alongside the added-items list, which read as cluttered/always-on
-    next to every other picker's own show-or-hide behavior. Now a real
+    next to every other picker's own show-or-hide behavior. A real
     trailing "+" row (styled as part of the added-items list itself,
-    see its own CSS comment) is the default state instead -- clicking
-    it sets em_dlc_picker_open and swaps in the real Upload/local-browse
-    UI in its place; picking a file (see _em_dlc_list_rows) or a
-    successful upload (see _handle_em_dlc_upload) clears that flag again
-    and the "+" row comes back. Each accumulated file shows its own
+    see its own CSS comment) is the default state instead, and it stays
+    visible either way -- an accordion-style toggle, not a one-way
+    reveal: clicking it flips em_dlc_picker_open, showing/hiding the
+    real Upload/local-browse UI right underneath. Picking a file (see
+    _em_dlc_list_rows) or a successful upload (see
+    _handle_em_dlc_upload) also closes it automatically, same as
+    clicking the "+" again manually would. Each accumulated file shows
+    its own
     remove (x) button, the only per-file control now (no more enable/
     disable checkbox -- every listed file is simply applied at Create).
     Marked "(optional)", not a required asterisk -- unlike Keys/
@@ -3781,11 +3799,20 @@ def _em_dlc_picker_section(state):
 
     rows_html = "".join(_row_html(r) for r in rows)
 
+    # A persistent toggle, not a one-way reveal -- stays visible (and
+    # clickable) whether the picker's open or closed, flipping em_dlc_
+    # picker_open the other way each time, same "click again to
+    # collapse" affordance an accordion header gives. Picking a file
+    # (see _em_dlc_list_rows/_handle_em_dlc_upload) still auto-closes
+    # it too, that's unchanged -- this only adds the *manual* close.
     picker_open = bool(state.get("em_dlc_picker_open"))
-    add_row_html = ""
-    if not picker_open:
-        add_row_href = _em_url("/new", state, em_dlc_picker_open="1")
-        add_row_html = f'<a href="{add_row_href}" class="dlc-added-row dlc-add-row" onclick="return selfsteamEmNav(this)" title="Add DLC/update">+</a>'
+    add_row_href = _em_url("/new", state, em_dlc_picker_open=("" if picker_open else "1"))
+    add_row_title = "Hide DLC/update picker" if picker_open else "Add DLC/update"
+    add_row_chevron = f'<span class="dlc-add-row-chevron">{_CHEVRON_UP_ICON_SVG}</span>' if picker_open else ""
+    add_row_html = (
+        f'<a href="{add_row_href}" class="dlc-added-row dlc-add-row" onclick="return selfsteamEmNav(this)" '
+        f'title="{add_row_title}">+{add_row_chevron}</a>'
+    )
     # A dedicated class, not .boxed-list -- .boxed-list's own "a" rule
     # (see the Apps-tab-list comment on the exact same pitfall) matches
     # *any* nested <a> regardless of depth, including this row's own
