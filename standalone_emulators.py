@@ -3166,19 +3166,6 @@ def launch_args(name, romfile, zrif=None, preflight=False):
         if not converted:
             return None
         romfile = converted
-    # Preflight -- routes the shortcut through its own real launch
-    # wrapper instead of a direct `flatpak run`; preflight.sh does that
-    # itself internally (find_app_id() + `flatpak run`) once its own
-    # controller-registration screen finishes, so nothing below this
-    # (install_type branching, entry["args"]) is relevant at all when
-    # this is on. Ryubing (Flathub) only -- see PREFLIGHT_EMULATORS'
-    # own comment on why the AppImage variants can't use this.
-    if preflight and name in PREFLIGHT_EMULATORS:
-        preflight_dir = ensure_preflight_installed()
-        preflight_sh = os.path.join(preflight_dir, "preflight.sh")
-        if not os.path.isfile(preflight_sh):
-            return None
-        return [shlex.quote(preflight_sh), shlex.quote(romfile)]
     if entry["install_type"] == "binary":
         path = _binary_path(name, entry)
         if not os.path.isfile(path):
@@ -3217,7 +3204,24 @@ def launch_args(name, romfile, zrif=None, preflight=False):
     # case above, just without a title-id round trip.
     if name == "shadPS4" and romfile.lower().endswith(".pkg"):
         romfile = extract_shadps4_pkg(romfile)
-    return [flatpak, "run", entry["app_id"], *entry["args"](romfile)]
+    args = [flatpak, "run", entry["app_id"], *entry["args"](romfile)]
+    # Preflight -- wraps the real launch command instead of replacing
+    # it, per its own current real CLI: `preflight.sh -- <full command>`
+    # runs its own controller-registration screen, then execs whatever
+    # follows `--` verbatim once that finishes, rather than (its older
+    # shape) building a Ryujinx-specific `flatpak run` command itself
+    # internally. Deliberately emulator-agnostic on Preflight's own side
+    # now (its own words: "this is for when preflight supports other
+    # emulators"), so this wraps whatever args() already built rather
+    # than special-casing Ryubing's own shape -- Ryubing (Flathub) is
+    # just the only PREFLIGHT_EMULATORS entry today.
+    if preflight and name in PREFLIGHT_EMULATORS:
+        preflight_dir = ensure_preflight_installed()
+        preflight_sh = os.path.join(preflight_dir, "preflight.sh")
+        if not os.path.isfile(preflight_sh):
+            return None
+        return [shlex.quote(preflight_sh), "--", *args]
+    return args
 
 
 def configure_game_dir(name, game_dir):

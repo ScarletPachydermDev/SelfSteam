@@ -705,22 +705,27 @@ def _extract_standalone_emulator_info(launch_options):
     last token). Returns (None, None, False) for anything else.
 
     Three shapes to reverse: a Preflight-launched shortcut's own
-    "<preflight.sh> <romfile>" (always "Ryubing" -- see standalone_
-    emulators.PREFLIGHT_EMULATORS, checked first since it's the most
-    specific/narrowest shape), a flathub entry's own "<flatpak> run
-    <app_id> ..." (argv[2] is the app id, reverse-mapped to its
-    emulator name via standalone_emulators.EMULATORS, with its own
-    args() starting at argv[3]), and a binary (AppImage) entry's own
-    "<real AppImage path> ..." -- no "flatpak run" prefix at all, so
-    argv[0] is compared directly against each binary-install entry's own
-    resolved path instead, with its own args() starting at argv[1].
-    <flatpak> itself is host_exec.which("flatpak")'s own resolved
-    absolute path (e.g. "/usr/bin/flatpak"), never the bare "flatpak"
-    launch_args() actually writes it as -- matched by basename here, not
-    by an exact literal comparison. Confirmed live as a real gap: before
-    this fix, every flathub-installed shortcut's own Edit link silently
-    fell through to the URL tab instead of actually restoring it, since
-    the exact-string check never matched the real, absolute-path value."""
+    "<preflight.sh> -- <the real command>" (checked first, since it's
+    the most specific/narrowest shape) -- Preflight's own real CLI now
+    just wraps and execs whatever follows "--" once its own controller-
+    registration screen finishes, rather than (an earlier shape)
+    building a Ryujinx-specific `flatpak run` command internally, so
+    everything after "--" gets parsed exactly like a normal flathub
+    shortcut's own LaunchOptions (see below) rather than needing its own
+    separate parsing rule; a flathub entry's own "<flatpak> run <app_id>
+    ..." (the app id, reverse-mapped to its emulator name via
+    standalone_emulators.EMULATORS, with its own args() starting right
+    after); and a binary (AppImage) entry's own "<real AppImage path>
+    ..." -- no "flatpak run" prefix at all, so argv[0] is compared
+    directly against each binary-install entry's own resolved path
+    instead, with its own args() starting at argv[1]. <flatpak> itself
+    is host_exec.which("flatpak")'s own resolved absolute path (e.g.
+    "/usr/bin/flatpak"), never the bare "flatpak" launch_args() actually
+    writes it as -- matched by basename here, not by an exact literal
+    comparison. Confirmed live as a real gap: before this fix, every
+    flathub-installed shortcut's own Edit link silently fell through to
+    the URL tab instead of actually restoring it, since the exact-string
+    check never matched the real, absolute-path value."""
     try:
         tokens = shlex.split(launch_options)
     except ValueError:
@@ -728,21 +733,27 @@ def _extract_standalone_emulator_info(launch_options):
     if not tokens:
         return None, None, False
 
-    def _romfile_at(name, args_start):
+    def _romfile_at(name, args_start, argv):
         index = _ROMFILE_ARGS_INDEX.get(name)
-        return tokens[args_start + index] if index is not None and index >= 0 else tokens[-1]
+        return argv[args_start + index] if index is not None and index >= 0 else argv[-1]
 
-    if os.path.basename(tokens[0]) == "preflight.sh" and len(tokens) >= 2:
-        return "Ryubing", tokens[1], True
-    if os.path.basename(tokens[0]) == "flatpak" and len(tokens) >= 3 and tokens[1] == "run":
-        app_id = tokens[2]
-        for name, entry in standalone_emulators.EMULATORS.items():
-            if entry.get("app_id") == app_id:
-                return name, _romfile_at(name, 3), False
-        return None, None, False
+    def _flathub_shape(argv):
+        if len(argv) >= 3 and os.path.basename(argv[0]) == "flatpak" and argv[1] == "run":
+            app_id = argv[2]
+            for name, entry in standalone_emulators.EMULATORS.items():
+                if entry.get("app_id") == app_id:
+                    return name, _romfile_at(name, 3, argv)
+        return None, None
+
+    if os.path.basename(tokens[0]) == "preflight.sh" and len(tokens) >= 2 and tokens[1] == "--":
+        name, romfile = _flathub_shape(tokens[2:])
+        return (name, romfile, True) if name else (None, None, False)
+    name, romfile = _flathub_shape(tokens)
+    if name:
+        return name, romfile, False
     for name, entry in standalone_emulators.EMULATORS.items():
         if entry.get("install_type") == "binary" and standalone_emulators.binary_path(name) == tokens[0]:
-            return name, _romfile_at(name, 1), False
+            return name, _romfile_at(name, 1, tokens), False
     return None, None, False
 
 
