@@ -462,11 +462,19 @@ def _preflight_dir():
     return _xdg_data_dir("selfsteam", "preflight")
 
 
-def _preflight_installed_version():
-    version_path = os.path.join(_preflight_dir(), "VERSION")
-    if not os.path.isfile(version_path):
+def _preflight_installed_commit_path():
+    # A SelfSteam-owned marker, not anything from Preflight's own repo
+    # content -- the leading dot (unlike every real file the tarball
+    # extracts) is deliberate, so it reads as "ours" at a glance and
+    # can never collide with a real file Preflight adds later.
+    return os.path.join(_preflight_dir(), ".selfsteam-commit")
+
+
+def _preflight_installed_commit():
+    path = _preflight_installed_commit_path()
+    if not os.path.isfile(path):
         return None
-    with open(version_path) as f:
+    with open(path) as f:
         return f.read().strip()
 
 
@@ -475,14 +483,22 @@ def preflight_installed():
     (selfsteam_server.py's own on-SelfSteam-update check) decide to
     update an existing install without also force-installing it for a
     user who's never enabled the preflight toggle on any shortcut."""
-    return _preflight_installed_version() is not None
+    return _preflight_installed_commit() is not None
 
 
-def _preflight_remote_version():
-    url = f"https://raw.githubusercontent.com/{_PREFLIGHT_REPO}/{_PREFLIGHT_BRANCH}/VERSION"
-    req = urllib.request.Request(url, headers={"User-Agent": "SelfSteam"})
+def _preflight_remote_commit():
+    # The real repo's own latest commit SHA on its default branch, not
+    # a VERSION file -- confirmed live (2026-09-03) that Preflight's
+    # own VERSION has sat at "0.1.0" since the project's very first
+    # commit and was never bumped for any real change since, which
+    # would make a VERSION-string comparison here silently never
+    # notice an update at all. A commit SHA needs no discipline from
+    # Preflight's own side to stay meaningful -- it changes on every
+    # real push, full stop.
+    url = f"https://api.github.com/repos/{_PREFLIGHT_REPO}/commits/{_PREFLIGHT_BRANCH}"
+    req = urllib.request.Request(url, headers={"User-Agent": "SelfSteam", "Accept": "application/vnd.github+json"})
     with urllib.request.urlopen(req, timeout=15) as resp:
-        return resp.read().decode().strip()
+        return json.load(resp)["sha"]
 
 
 # A hand-maintained dev copy of Preflight predates this project's own
@@ -509,13 +525,17 @@ def ensure_preflight_installed():
     path -- called right before a preflight-enabled Ryubing shortcut's
     own Create/Save, same "cheap once already done, real work only
     when something's actually missing/stale" shape as every other
-    install_* helper here. Compares VERSION files rather than assuming
-    a fixed release asset exists (see this section's own comment on why
-    -- no Releases/tags exist for this project yet). Offline/unreachable
-    GitHub is tolerated by falling back to whatever's already installed
-    (a real, if possibly slightly stale, install beats none at all) --
-    only raises if nothing is installed AND the network's unreachable,
-    since there's genuinely nothing to run in that case.
+    install_* helper here. Compares the branch's own latest commit SHA
+    (see _preflight_remote_commit's own docstring on why, not a VERSION
+    file, decides staleness) against a SelfSteam-owned marker written
+    after the last successful install/update -- and downloads a plain
+    default-branch tarball snapshot rather than assuming a fixed
+    release asset exists, since no GitHub Releases/tags exist for this
+    project yet either. Offline/unreachable GitHub is tolerated by
+    falling back to whatever's already installed (a real, if possibly
+    slightly stale, install beats none at all) -- only raises if
+    nothing is installed AND the network's unreachable, since there's
+    genuinely nothing to run in that case.
 
     Never touches state/ -- Preflight's own runtime data (known_pads.json
     accumulates real controller MAC addresses across sessions) must
@@ -524,14 +544,14 @@ def ensure_preflight_installed():
     copy's own already-accumulated state carries forward into this
     project's managed install rather than starting over silently."""
     try:
-        remote_version = _preflight_remote_version()
-    except (urllib.error.URLError, OSError, ValueError):
-        remote_version = None
-    installed_version = _preflight_installed_version()
-    if installed_version is not None and (remote_version is None or installed_version == remote_version):
+        remote_commit = _preflight_remote_commit()
+    except (urllib.error.URLError, OSError, ValueError, KeyError):
+        remote_commit = None
+    installed_commit = _preflight_installed_commit()
+    if installed_commit is not None and (remote_commit is None or installed_commit == remote_commit):
         _migrate_legacy_preflight_state(_preflight_dir())
         return _preflight_dir()
-    if remote_version is None:
+    if remote_commit is None:
         raise RuntimeError("Preflight isn't installed yet and GitHub couldn't be reached to install it")
 
     tarball_url = f"https://github.com/{_PREFLIGHT_REPO}/archive/refs/heads/{_PREFLIGHT_BRANCH}.tar.gz"
@@ -565,6 +585,8 @@ def ensure_preflight_installed():
         entry_point = os.path.join(dest, "preflight.sh")
         if os.path.isfile(entry_point):
             os.chmod(entry_point, 0o755)
+    with open(_preflight_installed_commit_path(), "w") as f:
+        f.write(remote_commit)
     _migrate_legacy_preflight_state(dest)
     return dest
 
