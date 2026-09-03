@@ -519,6 +519,14 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
 .dlc-added-row:nth-child(even) { background: #f3f3f3; }
 .dlc-added-row:first-child { border-top-left-radius: 8px; border-top-right-radius: 8px; }
 .dlc-added-row:last-child { border-bottom-left-radius: 8px; border-bottom-right-radius: 8px; }
+/* The DLC+updates picker's own "add another" row -- a real trailing
+   child of .dlc-added-list (not a separate element styled to merely
+   resemble one), so it picks up the exact same striping/corner-
+   rounding as every real added-item row above it for free, reading as
+   "the last slot in this list is always the add action" rather than a
+   separate control bolted on underneath. */
+.dlc-add-row { justify-content: center; cursor: pointer; color: var(--text-dim); font-size: 1.3rem; font-weight: 700; text-decoration: none; }
+.dlc-add-row:hover { color: var(--accent); }
 /* Placeholder rows before any search -- reserves the middle column's
    space instead of it looking like an empty gap. */
 .placeholder-row { flex: 0 0 auto; height: 2.3rem; }
@@ -2645,6 +2653,16 @@ _EM_STATE_KEYS = [
     # em_<prefix>path/em_<prefix>source, just without a single
     # em_dlcfile slot since this one accumulates instead of replacing.
     "em_dlc_paths", "em_dlcpath", "em_dlcsource",
+    # Whether the DLC+updates picker's own Upload/local-browse UI is
+    # currently shown -- default closed (just the "+" add-row, see
+    # _em_dlc_picker_section), opened by clicking it, closed again the
+    # moment a file's actually added (by a local-browse click or a
+    # successful upload) so it never just sits open the way it used to
+    # unconditionally. em_dlcpath is deliberately NOT reset alongside
+    # this -- reopening the picker lands back on whatever folder was
+    # last browsed, not the root, so adding several files from the same
+    # folder doesn't mean re-navigating there every single time.
+    "em_dlc_picker_open",
     # Ryubing-only (see standalone_emulators.PREFLIGHT_EMULATORS) --
     # routes the shortcut through github.com/ScarletPachydermDev/
     # Preflight's own launch wrapper instead of a direct `flatpak run`.
@@ -3639,14 +3657,17 @@ _EM_DLC_KIND_STYLE = {
 def _em_dlc_list_rows(abs_path, rel_path, state):
     """Local-browse rows for the DLC+updates picker -- unlike every
     other picker's own _em_list_rows, clicking a file here *adds* it to
-    em_dlc_paths and stays on this same folder listing (path_key stays
-    rel_path, not the clicked file's own dir) rather than replacing a
-    single file slot and moving on -- lets someone add several files
-    from the same folder one click at a time. A file already in
-    em_dlc_paths renders greyed out/unclickable instead of as a normal
-    link, so it's obvious re-clicking it wouldn't do anything (it'd
-    just add a second, indistinguishable entry pointing at the same
-    real path)."""
+    em_dlc_paths rather than replacing a single file slot, then closes
+    the picker back to its own "+" add-row (see em_dlc_picker_open's own
+    comment) instead of leaving the browser sitting open. em_dlcpath
+    itself isn't reset alongside that close, though -- reopening the
+    picker (another "+" click) lands back on this exact same folder, so
+    adding several files from one folder is still just as fast, one
+    "+"-click-then-pick round trip at a time rather than the browser
+    staying open across all of them. A file already in em_dlc_paths
+    renders greyed out/unclickable instead of as a normal link, so it's
+    obvious re-clicking it wouldn't do anything (it'd just add a
+    second, indistinguishable entry pointing at the same real path)."""
     try:
         entries = sorted(os.scandir(abs_path), key=lambda e: (not e.is_dir(), e.name.lower()))
     except PermissionError:
@@ -3667,7 +3688,16 @@ def _em_dlc_list_rows(abs_path, rel_path, state):
                 f'<span class="file-icon">&#128190;</span>{html.escape(entry.name)} &#10003;</span>'
             )
         else:
-            overrides = {"em_dlcpath": rel_path, "em_dlc_paths": _em_dlc_join(_em_dlc_paths_list(state) + [entry_rel])}
+            # em_dlc_picker_open="" -- closes the picker back to the
+            # "+" add-row the moment a file's actually picked (see
+            # _em_dlc_picker_section's own docstring), rather than
+            # leaving the browser sitting open the way it used to
+            # unconditionally.
+            overrides = {
+                "em_dlcpath": rel_path,
+                "em_dlc_paths": _em_dlc_join(_em_dlc_paths_list(state) + [entry_rel]),
+                "em_dlc_picker_open": "",
+            }
             href = _em_url("/new", state, **overrides)
             rows.append(f'<a href="{href}" onclick="return selfsteamEmNav(this)"><span class="file-icon">&#128190;</span>{html.escape(entry.name)}</a>')
     return "".join(rows)
@@ -3675,19 +3705,29 @@ def _em_dlc_list_rows(abs_path, rel_path, state):
 
 def _em_dlc_picker_section(state):
     """DLC+updates picker -- Ryubing and Eden only (see
-    _DLC_UPDATE_EMULATORS), always visible for one of those but
-    greyed out/inert until a ROM is actually
-    picked (classification has nothing to compare against yet, so
-    letting someone add files before that just invites confusion about
-    why everything shows "Pick a ROM first"). Same Upload/local-browse
-    toggle every other picker has, except the local browser here adds
-    to em_dlc_paths one click at a time and stays on the same folder
-    (see _em_dlc_list_rows) instead of replacing a single file slot.
-    Each accumulated file shows its own remove (x) button, the only
-    per-file control now (no more enable/disable checkbox -- every
-    listed file is simply applied at Create). Marked "(optional)", not
-    a required asterisk -- unlike Keys/Firmware/ROM, a shortcut is
-    perfectly valid with no DLC/updates at all."""
+    _DLC_UPDATE_EMULATORS), always visible for one of those but greyed
+    out/inert until a ROM is actually picked (classification has
+    nothing to compare against yet, so letting someone add files before
+    that just invites confusion about why everything shows "Pick a ROM
+    first").
+
+    The Upload/local-browse UI itself isn't shown by default -- unlike
+    every single-file picker here (BIOS/Keys/Firmware/ROM), which
+    always shows either its own selected-file row or its own browser,
+    never neither, this one used to show its browser permanently
+    alongside the added-items list, which read as cluttered/always-on
+    next to every other picker's own show-or-hide behavior. Now a real
+    trailing "+" row (styled as part of the added-items list itself,
+    see its own CSS comment) is the default state instead -- clicking
+    it sets em_dlc_picker_open and swaps in the real Upload/local-browse
+    UI in its place; picking a file (see _em_dlc_list_rows) or a
+    successful upload (see _handle_em_dlc_upload) clears that flag again
+    and the "+" row comes back. Each accumulated file shows its own
+    remove (x) button, the only per-file control now (no more enable/
+    disable checkbox -- every listed file is simply applied at Create).
+    Marked "(optional)", not a required asterisk -- unlike Keys/
+    Firmware/ROM, a shortcut is perfectly valid with no DLC/updates at
+    all."""
     emulator = state.get("em_emulator", "")
     if emulator not in _DLC_UPDATE_EMULATORS:
         return ""
@@ -3740,6 +3780,12 @@ def _em_dlc_picker_section(state):
       </div>"""
 
     rows_html = "".join(_row_html(r) for r in rows)
+
+    picker_open = bool(state.get("em_dlc_picker_open"))
+    add_row_html = ""
+    if not picker_open:
+        add_row_href = _em_url("/new", state, em_dlc_picker_open="1")
+        add_row_html = f'<a href="{add_row_href}" class="dlc-added-row dlc-add-row" onclick="return selfsteamEmNav(this)" title="Add DLC/update">+</a>'
     # A dedicated class, not .boxed-list -- .boxed-list's own "a" rule
     # (see the Apps-tab-list comment on the exact same pitfall) matches
     # *any* nested <a> regardless of depth, including this row's own
@@ -3747,33 +3793,38 @@ def _em_dlc_picker_section(state):
     # real red-circle-with-X into a flat grey nth-child stripe with no
     # visible X at all, since .boxed-list a's higher specificity (a
     # class+element selector beats .remove-file-btn's plain class one)
-    # silently won over its color/sizing.
-    rows_block = f'<div class="picker-list"><div class="dlc-added-list">{rows_html}</div></div>' if rows else ""
+    # silently won over its color/sizing. The "+" add-row is a real
+    # trailing child of this same list (not a separate element below
+    # it) so it always picks up the exact same look -- see its own CSS
+    # comment.
+    rows_block = f'<div class="picker-list"><div class="dlc-added-list">{rows_html}{add_row_html}</div></div>'
 
-    dom_prefix = "em-dlc-source"
-    source = state.get("em_dlcsource") or "local"
-    upload_action = f"/new/upload-em-dlc?{_em_qs(state)}#tab-emulators"
-    upload_panel = f"""
+    picker_ui = ""
+    if picker_open:
+        dom_prefix = "em-dlc-source"
+        source = state.get("em_dlcsource") or "local"
+        upload_action = f"/new/upload-em-dlc?{_em_qs(state)}#tab-emulators"
+        upload_panel = f"""
     <form method="post" enctype="multipart/form-data" action="{upload_action}">
-      <input type="file" name="file" multiple
+      <input type="file" name="file"
              onchange="selfsteamShowUploading('em-dlc'); selfsteamUploadFetch(this, SELFSTEAM_EM_SWAP_IDS)">
     </form>"""
 
-    dlc_rel_path = _ra_resolve_relpath(state.get("em_dlcpath", ""))
-    dlc_abs_path = _ra_safe_join(dlc_rel_path)
-    if dlc_abs_path is None or not os.path.isdir(dlc_abs_path):
-        dlc_rel_path = _RA_DEFAULT_RELPATH
-        dlc_abs_path = _ra_safe_join(dlc_rel_path) or _RA_ROOT
-    local_panel = (
-        f'<div class="breadcrumbs">{_em_breadcrumbs_html(dlc_rel_path, state, "em_dlcpath")}</div>'
-        f'<div class="picker-list"><div class="boxed-list">{_em_dlc_list_rows(dlc_abs_path, dlc_rel_path, state)}</div></div>'
-    )
+        dlc_rel_path = _ra_resolve_relpath(state.get("em_dlcpath", ""))
+        dlc_abs_path = _ra_safe_join(dlc_rel_path)
+        if dlc_abs_path is None or not os.path.isdir(dlc_abs_path):
+            dlc_rel_path = _RA_DEFAULT_RELPATH
+            dlc_abs_path = _ra_safe_join(dlc_rel_path) or _RA_ROOT
+        local_panel = (
+            f'<div class="breadcrumbs">{_em_breadcrumbs_html(dlc_rel_path, state, "em_dlcpath")}</div>'
+            f'<div class="picker-list"><div class="boxed-list">{_em_dlc_list_rows(dlc_abs_path, dlc_rel_path, state)}</div></div>'
+        )
 
-    upload_display = "" if source == "upload" else "none"
-    local_display = "none" if source == "upload" else ""
-    upload_active = "source-label active" if source == "upload" else "source-label"
-    local_active = "source-label" if source == "upload" else "source-label active"
-    picker_ui = f"""
+        upload_display = "" if source == "upload" else "none"
+        local_display = "none" if source == "upload" else ""
+        upload_active = "source-label active" if source == "upload" else "source-label"
+        local_active = "source-label" if source == "upload" else "source-label active"
+        picker_ui = f"""
     <div class="source-toggle">
       <a class="{upload_active}" href="javascript:void(0)" id="{dom_prefix}-upload-label" onclick="selfsteamToggleSource('{dom_prefix}', 'upload', 'em_dlcsource')">Upload</a>
       <a class="{local_active}" href="javascript:void(0)" id="{dom_prefix}-local-label" onclick="selfsteamToggleSource('{dom_prefix}', 'local', 'em_dlcsource')">{html.escape(_hostname())}</a>
@@ -6966,14 +7017,16 @@ class Handler(BaseHTTPRequestHandler):
         self._redirect(_em_url("/new", em_state, **overrides))
 
     def _handle_em_dlc_upload(self):
-        # A `multiple` file input, unlike every other picker's own
-        # single-file upload form -- multipart_upload.save_uploaded_files
-        # (not save_uploaded_file) streams every part in the one POST to
-        # its own destination file. Accumulates onto whatever was already
-        # in em_dlc_paths rather than replacing it (see
-        # selfsteamEmDlcPreviewCount's own comment on why) -- picking
-        # from a second folder afterward is meant to add to the first
-        # batch, not lose it.
+        # multipart_upload.save_uploaded_files (not the single-file
+        # save_uploaded_file every other picker's own upload handler
+        # uses) -- kept even though the picker's own <input> is single-
+        # file now (see _em_dlc_picker_section), since it already
+        # tolerates exactly one part just fine and there's no reason to
+        # duplicate a second, narrower upload path just for this one
+        # handler. Accumulates onto whatever was already in em_dlc_paths
+        # rather than replacing it, then closes the picker back to its
+        # own "+" add-row (em_dlc_picker_open="") the same way a
+        # successful local-browse pick already does.
         parsed = urllib.parse.urlparse(self.path)
         params = urllib.parse.parse_qs(parsed.query)
         em_state = _em_state_from_params(params)
@@ -7011,7 +7064,7 @@ class Handler(BaseHTTPRequestHandler):
             if rel_path not in existing:
                 existing.append(rel_path)
 
-        overrides = {"em_dlc_paths": _em_dlc_join(existing)}
+        overrides = {"em_dlc_paths": _em_dlc_join(existing), "em_dlc_picker_open": ""}
         self._redirect(_em_url("/new", em_state, **overrides))
 
     def _commit_pending(self):
