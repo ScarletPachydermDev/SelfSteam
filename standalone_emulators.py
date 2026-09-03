@@ -501,23 +501,52 @@ def _preflight_remote_commit():
         return json.load(resp)["sha"]
 
 
-# A hand-maintained dev copy of Preflight predates this project's own
-# managed install (see ensure_preflight_installed) on at least one real
-# machine, with real weeks-old accumulated controller-pairing state
-# (known_pads.json -- real MAC addresses, per-pad face-swap settings)
-# that must not be silently orphaned the first time this project takes
-# over installing/updating it. Checked once per install/update, not
-# just once ever, since a machine could reach this code for the first
-# time long after this project itself was already in use for other
-# emulators.
-_LEGACY_PREFLIGHT_STATE_DIR = os.path.expanduser("~/ryu-preflight/state")
+def _preflight_xdg_dir(env, fallback):
+    base = os.environ.get(env) or os.path.expanduser(fallback)
+    return os.path.join(base, "preflight")
 
 
-def _migrate_legacy_preflight_state(dest):
-    dest_state = os.path.join(dest, "state")
-    if os.path.isdir(dest_state) or not os.path.isdir(_LEGACY_PREFLIGHT_STATE_DIR):
-        return
-    shutil.copytree(_LEGACY_PREFLIGHT_STATE_DIR, dest_state)
+def _preflight_state_dir():
+    # Matches Preflight's own real derivation exactly (see its own
+    # preflight.py: STATE_DIR = the PREFLIGHT_STATE_DIR env var, else
+    # XDG_STATE_HOME, else ~/.local/state, then /preflight) -- not
+    # reading PREFLIGHT_STATE_DIR itself, since SelfSteam never sets
+    # that override; this is only ever the *default* location Preflight
+    # derives on its own when nothing overrides it.
+    return _preflight_xdg_dir("XDG_STATE_HOME", "~/.local/state")
+
+
+def _migrate_preflight_state_to_xdg():
+    """Moves known_pads.json/backups out of either real place Preflight's
+    own user data could still be sitting from before it moved this out
+    of its own install directory entirely (confirmed live 2026-09-03,
+    see Preflight's own real preflight.py source): a hand-maintained dev
+    copy that predates this project's own managed install altogether
+    (~/ryu-preflight/state/), and this project's own now-obsolete
+    _preflight_dir()/state/ from before that move. Preflight's own
+    adopt_user_files() would eventually rescue either one the next time
+    a game actually launches through it -- but ensure_preflight_installed
+    may now wipe the install directory outright before that ever
+    happens (see its own docstring), so this does the same move
+    ourselves, straight to Preflight's own real XDG state directory,
+    rather than risk losing real weeks-old controller-pairing data to a
+    race with when the user next happens to launch a game. Idempotent
+    (never overwrites something already moved), so safe to call on
+    every ensure_preflight_installed run, not just once."""
+    dest = _preflight_state_dir()
+    legacy_dirs = (
+        os.path.expanduser("~/ryu-preflight/state"),
+        os.path.join(_preflight_dir(), "state"),
+    )
+    for source in legacy_dirs:
+        if not os.path.isdir(source):
+            continue
+        os.makedirs(dest, exist_ok=True)
+        for name in ("known_pads.json", "backups"):
+            src = os.path.join(source, name)
+            dst = os.path.join(dest, name)
+            if os.path.exists(src) and not os.path.exists(dst):
+                shutil.move(src, dst)
 
 
 def ensure_preflight_installed():
@@ -537,19 +566,24 @@ def ensure_preflight_installed():
     nothing is installed AND the network's unreachable, since there's
     genuinely nothing to run in that case.
 
-    Never touches state/ -- Preflight's own runtime data (known_pads.json
-    accumulates real controller MAC addresses across sessions) must
-    survive an update, exactly as its own README/PLAN.md insist. Also
-    calls _migrate_legacy_preflight_state so a real hand-maintained dev
-    copy's own already-accumulated state carries forward into this
-    project's managed install rather than starting over silently."""
+    A genuine wipe-and-replace on update (shutil.rmtree then move the
+    freshly extracted tree straight into place), not a careful per-file
+    copy that skips some directory by name -- confirmed live (2026-09-03)
+    that Preflight itself moved all of its own user data (known_pads.json,
+    backups/) out to real XDG paths (see _preflight_state_dir), so the
+    install directory this function owns is genuinely disposable now:
+    nothing sitting inside it needs preserving across an update, ever
+    again. _migrate_preflight_state_to_xdg runs first regardless (a
+    cheap, idempotent check) to rescue any state still sitting in either
+    place it used to live, before that rmtree would otherwise have
+    thrown it away for good."""
+    _migrate_preflight_state_to_xdg()
     try:
         remote_commit = _preflight_remote_commit()
     except (urllib.error.URLError, OSError, ValueError, KeyError):
         remote_commit = None
     installed_commit = _preflight_installed_commit()
     if installed_commit is not None and (remote_commit is None or installed_commit == remote_commit):
-        _migrate_legacy_preflight_state(_preflight_dir())
         return _preflight_dir()
     if remote_commit is None:
         raise RuntimeError("Preflight isn't installed yet and GitHub couldn't be reached to install it")
@@ -571,23 +605,14 @@ def ensure_preflight_installed():
             if os.path.isdir(os.path.join(tmp_dir, name))
         )
         dest = _preflight_dir()
-        os.makedirs(dest, exist_ok=True)
-        for name in os.listdir(extracted_root):
-            if name == "state":
-                continue
-            src_path = os.path.join(extracted_root, name)
-            dest_path = os.path.join(dest, name)
-            if os.path.isdir(dest_path):
-                shutil.rmtree(dest_path)
-            elif os.path.isfile(dest_path):
-                os.remove(dest_path)
-            shutil.move(src_path, dest_path)
+        if os.path.isdir(dest):
+            shutil.rmtree(dest)
+        shutil.move(extracted_root, dest)
         entry_point = os.path.join(dest, "preflight.sh")
         if os.path.isfile(entry_point):
             os.chmod(entry_point, 0o755)
     with open(_preflight_installed_commit_path(), "w") as f:
         f.write(remote_commit)
-    _migrate_legacy_preflight_state(dest)
     return dest
 
 
