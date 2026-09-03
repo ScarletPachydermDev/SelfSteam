@@ -745,7 +745,14 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
   background: #fff; cursor: pointer; font: inherit; text-align: left; color: inherit;
 }
 .console-picker-trigger .apps-card-icon { width: 40px; height: 40px; flex: 0 0 auto; }
-.console-picker-placeholder { color: var(--text-dim); }
+/* flex:1, matching .console-picker-name's own -- without it, the
+   placeholder-only case (nothing picked yet) has no flexible element
+   between the text and the caret, so they cluster at the left instead
+   of the caret landing at the trigger's own right edge the way it does
+   once something's actually picked. Confirmed live: this shared class
+   backs both the RA tab's console picker and the Emulators tab's own
+   emulator picker, so one fix here covers both. */
+.console-picker-placeholder { flex: 1; min-width: 0; color: var(--text-dim); }
 .console-picker-name { font-weight: 600; font-size: 0.9rem; flex: 1; min-width: 0; }
 .console-picker-caret { flex: 0 0 auto; color: var(--text-dim); }
 .console-picker-panel {
@@ -4106,16 +4113,32 @@ def _emulators_tab_panel_html(state, chosen=None):
         preflight_checked = "checked" if state.get("em_preflight") else ""
         preflight_tooltip = (
             "Helpful for multiplayer games, helps you coordinate settings when multiple "
-            "controllers are paired.\n\nStill in development. For more info go to "
-            "https://github.com/ScarletPachydermDev/Preflight"
+            "controllers are paired."
+        )
+        # A real link, not folded into the tooltip's own text -- same
+        # _EXTERNAL_LINK_ICON_SVG the Apps tab's own "Open its Flathub
+        # page" link uses, for the exact same icon everywhere this app
+        # links out to an external project page. Outside the <label>
+        # on purpose -- inside it, a click here would also toggle the
+        # checkbox underneath, not just follow the link.
+        # Same inline-flex/vertical-align/top nudge as _info_tooltip_
+        # icon_html's own -- without it, this icon and the tooltip one
+        # right next to it don't actually line up on the same baseline.
+        preflight_link = (
+            f'<a href="https://github.com/ScarletPachydermDev/Preflight" target="_blank" rel="noopener" '
+            f'style="display:inline-flex;align-items:center;justify-content:center;vertical-align:middle;'
+            f'position:relative;top:-0.15rem;color:var(--text-dim)" title="Preflight on GitHub">{_EXTERNAL_LINK_ICON_SVG}</a>'
         )
         preflight_block = f"""
   <div class="field-group">
-    <label class="toggle-switch">
-      <input type="checkbox" name="em_preflight" form="{_ADD_FORM_ID}" {preflight_checked}>
-      <span class="toggle-switch-track"></span>
-      Enable preflight {_info_tooltip_icon_html(preflight_tooltip)}
-    </label>
+    <div style="display:flex;align-items:center;gap:0.5rem">
+      <label class="toggle-switch">
+        <input type="checkbox" name="em_preflight" form="{_ADD_FORM_ID}" {preflight_checked}>
+        <span class="toggle-switch-track"></span>
+        Enable preflight {_info_tooltip_icon_html(preflight_tooltip)}
+      </label>
+      {preflight_link}
+    </div>
   </div>"""
 
     return f"""
