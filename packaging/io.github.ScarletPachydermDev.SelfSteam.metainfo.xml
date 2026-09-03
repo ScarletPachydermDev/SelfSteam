@@ -26,6 +26,18 @@
   </categories>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="0.1.21" date="2026-09-03">
+      <description>
+        <ul>
+          <li>Add NSZ support to the ROM picker for Ryubing/Eden Switch shortcuts: pick a compressed .nsz directly and SelfSteam converts it to a real .nsp automatically before launch, no manual conversion needed first</li>
+          <li>Add an opt-in "Enable preflight" toggle for Ryubing shortcuts, integrating github.com/ScarletPachydermDev/Preflight -- a pre-launch controller check for local multiplayer Switch games that makes sure every paired controller lands on the right player slot before the game starts, installed and kept up to date automatically, with Steam Input enabled on the shortcut automatically since Preflight needs it on to tell same-model controllers apart</li>
+          <li>The DLC &amp; Updates picker (Ryubing/Eden/shadPS4) no longer sits open all the time -- it now collapses to a small "+" row that expands into the file picker on click and collapses again once a file's picked, matching how every other file picker in the app already behaves</li>
+          <li>Fix the RetroArch/Emulators tab's own console/emulator picker showing its dropdown arrow in the wrong place (not flush right) whenever nothing was picked yet</li>
+          <li>Fix picking a different SteamGridDB search result on the URL tab causing a visible full-page flash instead of updating smoothly in place, like every other picker in the app already does</li>
+          <li>Fix the Couch Mode checkbox, "Install VacuumTube" link, and "Shortcut for X will be added" hint text rendering at three different sizes/styles stacked on top of each other</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.20" date="2026-09-01">
       <description>
         <ul>
