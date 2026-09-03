@@ -7133,9 +7133,41 @@ def _watch_for_first_gamescope_entry():
         time.sleep(_FIRST_SHOW_POLL_INTERVAL)
 
 
+def _check_preflight_update_on_selfsteam_version_change():
+    """Runs Preflight's own update check (standalone_emulators.
+    ensure_preflight_installed) once, the moment this process notices
+    it's running as a different SelfSteam version than the last time it
+    started -- not on every single startup (a systemd crash-restart on
+    the *same* version shouldn't re-trigger this), and not gated behind
+    a preflight-enabled shortcut actually being created/saved the way
+    the normal check already is (see ensure_preflight_installed's own
+    docstring) -- a SelfSteam update is exactly the moment a user is
+    already thinking "what's new," so Preflight staying in sync with it
+    reads as one coherent update instead of a second, invisible one
+    that only ever happens to land on whoever next touches a Ryubing
+    shortcut. One-shot at startup, not a poll loop -- there's nothing
+    to keep watching for between here and the next process restart.
+
+    Only updates an *already*-installed Preflight -- never installs it
+    fresh for a user who's never enabled the preflight toggle on any
+    Ryubing shortcut; that first install still only ever happens lazily,
+    at that shortcut's own Create/Save (see ensure_preflight_installed's
+    own docstring)."""
+    current_version = _selfsteam_version()
+    if not current_version or current_version == config.get_last_seen_selfsteam_version():
+        return
+    if standalone_emulators.preflight_installed():
+        try:
+            standalone_emulators.ensure_preflight_installed()
+        except Exception:  # noqa: BLE001 -- a failed background update-check shouldn't block startup or retry-loop
+            pass
+    config.set_last_seen_selfsteam_version(current_version)
+
+
 def main():
     threading.Thread(target=_watch_for_first_gamescope_entry, daemon=True).start()
     threading.Thread(target=_watch_for_update_and_restart, daemon=True).start()
+    threading.Thread(target=_check_preflight_update_on_selfsteam_version_change, daemon=True).start()
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     print(f"SelfSteam listening on http://0.0.0.0:{PORT}/")
     server.serve_forever()

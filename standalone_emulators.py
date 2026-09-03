@@ -470,6 +470,14 @@ def _preflight_installed_version():
         return f.read().strip()
 
 
+def preflight_installed():
+    """True if Preflight is already installed at all -- lets a caller
+    (selfsteam_server.py's own on-SelfSteam-update check) decide to
+    update an existing install without also force-installing it for a
+    user who's never enabled the preflight toggle on any shortcut."""
+    return _preflight_installed_version() is not None
+
+
 def _preflight_remote_version():
     url = f"https://raw.githubusercontent.com/{_PREFLIGHT_REPO}/{_PREFLIGHT_BRANCH}/VERSION"
     req = urllib.request.Request(url, headers={"User-Agent": "SelfSteam"})

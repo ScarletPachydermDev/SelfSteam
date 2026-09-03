@@ -132,3 +132,17 @@ def get_pending_first_show():
 
 def set_pending_first_show(value):
     save(pending_first_show=bool(value))
+
+
+def get_last_seen_selfsteam_version():
+    # None the first time this ever runs (a fresh install, or an
+    # existing config that predates this flag) -- selfsteam_server.py's
+    # own startup check treats that the same as "different from
+    # current," so a Preflight update-check still runs once rather than
+    # silently never firing for anyone upgrading from before this
+    # existed.
+    return load().get("last_seen_selfsteam_version")
+
+
+def set_last_seen_selfsteam_version(version):
+    save(last_seen_selfsteam_version=version)
