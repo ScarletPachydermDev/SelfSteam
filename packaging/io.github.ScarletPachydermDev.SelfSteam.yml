@@ -143,7 +143,7 @@ modules:
     buildsystem: simple
     build-commands:
       - mkdir -p /app/share/selfsteam
-      - cp -r *.py vendor launch-browser.sh /app/share/selfsteam/
+      - cp -r *.py vendor launch.sh /app/share/selfsteam/
       - install -Dm755 packaging/selfsteam.sh /app/bin/selfsteam-launcher
       - install -Dm644 packaging/io.github.ScarletPachydermDev.SelfSteam.desktop
           /app/share/applications/io.github.ScarletPachydermDev.SelfSteam.desktop

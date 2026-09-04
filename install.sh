@@ -27,8 +27,8 @@ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 
 echo "Installing SelfSteam to $INSTALL_DIR"
 mkdir -p "$INSTALL_DIR"
-cp "$SCRIPT_DIR"/*.py "$SCRIPT_DIR/launch-browser.sh" "$INSTALL_DIR/"
-chmod +x "$INSTALL_DIR"/*.py "$INSTALL_DIR/launch-browser.sh"
+cp "$SCRIPT_DIR"/*.py "$SCRIPT_DIR/launch.sh" "$INSTALL_DIR/"
+chmod +x "$INSTALL_DIR"/*.py "$INSTALL_DIR/launch.sh"
 
 mkdir -p "$(dirname "$CONFIG_FILE")"
 if [ ! -f "$CONFIG_FILE" ]; then

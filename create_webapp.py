@@ -24,10 +24,10 @@ import standalone_emulators
 import steam_paths
 
 # Functions:
-#   is_gridge_launch_wrapper(exe) -- True if exe is one of this tool's own launch-browser.sh paths.
+#   is_gridge_launch_wrapper(exe) -- True if exe is one of this tool's own launch.sh paths.
 #   _grant_steam_flatpak_spawn_permission() -- lets Steam's own flatpak-spawn talk to the host.
 #   _copy_launcher(dest_dir) -- copies the launch wrapper + its runtime deps into dest_dir.
-#   get_launch_wrapper_path() -- the launch-browser.sh path to use as a shortcut's exe.
+#   get_launch_wrapper_path() -- the launch.sh path to use as a shortcut's exe.
 #   slugify(name) -- filesystem-safe slug for a shortcut name.
 #   clean_shortcut_name(name) -- strips SGDB's own category-tag suffix from a match name.
 #   pick_match(matches, index) -- the chosen match dict, or a synthetic fallback.
@@ -72,10 +72,20 @@ GRID_THUMB_DIR = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expand
 # the gallery only ever shows at postage-stamp size.
 _GRID_THUMB_WIDTH = 332
 
+# The wrapper is generic -- it just re-execs whatever LaunchOptions it
+# is handed on the host -- so it is named for that job rather than for
+# browsers. "launch-browser.sh" is what it was called back when this
+# project only ever made browser shortcuts; that name stays recognized
+# (see _OLD_LAUNCH_WRAPPER_NAME below) because it is baked into the exe
+# field of every shortcut created before the rename, and nothing here
+# rewrites those in place.
+_LAUNCH_WRAPPER_NAME = "launch.sh"
+_OLD_LAUNCH_WRAPPER_NAME = "launch-browser.sh"
+
 # Where the launcher lives when Steam itself is natively installed --
 # native Steam has full host filesystem access, so pointing straight at
 # wherever SelfSteam itself is installed works fine.
-LOCAL_LAUNCH_WRAPPER = os.path.join(os.path.dirname(__file__), "launch-browser.sh")
+LOCAL_LAUNCH_WRAPPER = os.path.join(os.path.dirname(__file__), _LAUNCH_WRAPPER_NAME)
 
 # Flatpak Steam's sandbox does NOT get general home/host filesystem
 # access by default (confirmed: its stock permissions only grant a
@@ -96,7 +106,7 @@ FLATPAK_STEAM_DATA_DIR = os.path.expanduser("~/.var/app/com.valvesoftware.Steam"
 # around, or listing/removing them in the UI would silently stop working.
 FLATPAK_LAUNCHER_DIR = os.path.join(FLATPAK_STEAM_DATA_DIR, "selfsteam-launcher")
 _OLD_FLATPAK_LAUNCHER_DIRNAME = "gridge-launcher"
-FLATPAK_LAUNCH_WRAPPER = os.path.join(FLATPAK_LAUNCHER_DIR, "launch-browser.sh")
+FLATPAK_LAUNCH_WRAPPER = os.path.join(FLATPAK_LAUNCHER_DIR, _LAUNCH_WRAPPER_NAME)
 _LAUNCHER_COPY_ITEMS = ["sync_gamescope_resolution.py", "vendor"]
 
 # Relocating the wrapper into Steam's own sandbox-visible dir only gets
@@ -142,7 +152,7 @@ fi
 
 
 def is_gridge_launch_wrapper(exe):
-    """True if exe is one of the launch-browser.sh paths this tool
+    """True if exe is one of the launch wrapper paths this tool
     creates shortcuts with -- used by export/import to find only
     shortcuts this tool created, never a user's own unrelated non-Steam
     shortcuts. Covers the native-Steam-root-relative case (see
@@ -154,7 +164,7 @@ def is_gridge_launch_wrapper(exe):
     stay recognized indefinitely, not just during a transition window."""
     if exe in (LOCAL_LAUNCH_WRAPPER, FLATPAK_LAUNCH_WRAPPER):
         return True
-    if os.path.basename(exe) != "launch-browser.sh":
+    if os.path.basename(exe) not in (_LAUNCH_WRAPPER_NAME, _OLD_LAUNCH_WRAPPER_NAME):
         return False
     dirname = os.path.basename(os.path.dirname(exe))
     return dirname in ("selfsteam-launcher", _OLD_FLATPAK_LAUNCHER_DIRNAME)
@@ -182,7 +192,7 @@ def _grant_steam_flatpak_spawn_permission():
 
 def _copy_launcher(dest_dir, script_content=None):
     """Copy the wrapper + its runtime dependencies into dest_dir.
-    script_content overrides launch-browser.sh's own content (used for
+    script_content overrides the wrapper's own content (used for
     the flatpak-spawn-wrapped Flatpak-Steam variant); None just copies
     the plain script unchanged (native Steam, which isn't sandboxed and
     so needs no escape hatch, regardless of whether SelfSteam itself is)."""
@@ -198,18 +208,18 @@ def _copy_launcher(dest_dir, script_content=None):
         else:
             shutil.copy2(src, dest)
 
-    wrapper_path = os.path.join(dest_dir, "launch-browser.sh")
+    wrapper_path = os.path.join(dest_dir, _LAUNCH_WRAPPER_NAME)
     if script_content is not None:
         with open(wrapper_path, "w") as f:
             f.write(script_content)
     else:
-        shutil.copy2(os.path.join(src_dir, "launch-browser.sh"), wrapper_path)
+        shutil.copy2(os.path.join(src_dir, _LAUNCH_WRAPPER_NAME), wrapper_path)
     os.chmod(wrapper_path, 0o755)
     return wrapper_path
 
 
 def get_launch_wrapper_path():
-    """Return the launch-browser.sh path to use as this shortcut's exe.
+    """Return the launch wrapper path to use as this shortcut's exe.
 
     LOCAL_LAUNCH_WRAPPER (wherever SelfSteam's own source lives) only
     works when BOTH sides can see it: SelfSteam running unsandboxed
