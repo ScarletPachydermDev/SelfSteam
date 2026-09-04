@@ -31,9 +31,14 @@ POLL_TIMEOUT = 60
 # restarting" from the UI side.
 LAUNCH_POLL_TIMEOUT = 150
 
+
+class SteamStopError(RuntimeError):
+    """Steam was asked to exit and didn't, within POLL_TIMEOUT."""
+
 # Functions:
 #   is_steam_running() -- True if a Steam process is currently running (native or Flatpak).
-#   restart_steam() -- kill Steam, wait for it to actually exit, relaunch it.
+#   stop_steam() -- ask Steam to exit, wait for it; False if it refused.
+#   restart_steam() -- stop Steam (raising if it refuses), then relaunch it.
 #   steam_pids() -- pids of any currently-running Steam process.
 #   _launch_and_wait(argv) -- launches argv, then polls until Steam is confirmed running again.
 #   launch_flatpak_steam_detached() -- fire-and-forget launch, used right after installing Steam.
@@ -47,15 +52,64 @@ def is_steam_running():
     return subprocess.run(host_exec.wrap(["pidof", "steam"]), capture_output=True).returncode == 0
 
 
-def restart_steam():
-    pids = steam_pids()
-    if pids:
-        subprocess.run(host_exec.wrap(["kill", "-15", *pids]), capture_output=True)
+def stop_steam():
+    """Asks Steam to exit, then polls until it actually does. Returns
+    True once no Steam process is left, False if it outlived
+    POLL_TIMEOUT and is still running.
 
+    `steam -shutdown` first, not `kill -15` -- confirmed live
+    (2026-09-04) on a real SteamOS *desktop-mode* session that a plain
+    SIGTERM to Steam's own pid does nothing there: SteamOS runs Steam
+    under its own steam-launcher.service, whose unit sets
+    KillSignal=SIGCONT and does termination itself via
+    `ExecStop=... kill -TERM $(pgrep -P $MAINPID || echo $MAINPID)` --
+    and that ExecStop is itself broken when $MAINPID comes through
+    empty (pgrep prints its usage text, kill then gets no pid at all,
+    the unit fails with status=2/INVALIDARGUMENT). Steam survived a
+    real SIGTERM for six hours straight that way, while `steam
+    -shutdown` -- Steam's own documented shutdown request, which works
+    the same for native and Flatpak installs -- brought it down in
+    about a second. SIGTERM stays as a fallback for anything that
+    doesn't respond to the official request.
+    """
+    if not is_steam_running():
+        return True
+
+    subprocess.run(host_exec.wrap(["steam", "-shutdown"]), capture_output=True)
     waited = 0.0
     while is_steam_running() and waited < POLL_TIMEOUT:
         time.sleep(POLL_INTERVAL)
         waited += POLL_INTERVAL
+    if not is_steam_running():
+        return True
+
+    pids = steam_pids()
+    if pids:
+        subprocess.run(host_exec.wrap(["kill", "-15", *pids]), capture_output=True)
+    while is_steam_running() and waited < POLL_TIMEOUT * 2:
+        time.sleep(POLL_INTERVAL)
+        waited += POLL_INTERVAL
+    return not is_steam_running()
+
+
+def restart_steam():
+    """Stops Steam, waits for it to really exit, then relaunches it.
+
+    Raises SteamStopError if Steam refused to exit -- deliberately not
+    a silent carry-on. Confirmed live as a real, user-visible failure:
+    a commit that writes shortcuts.vdf behind a still-running Steam
+    leaves that Steam holding a stale in-memory shortcut list, so the
+    new shortcut simply never appears (and can be lost outright if
+    Steam later rewrites the file from that stale copy). Before this,
+    that path just fell through to relaunching an already-running Steam
+    and reported success, which read as "SelfSteam created the shortcut
+    but it isn't there."
+    """
+    if not stop_steam():
+        raise SteamStopError(
+            "Steam didn't shut down when asked, so its shortcut list couldn't be "
+            "reloaded -- please quit Steam yourself and start it again to see this shortcut"
+        )
 
     try:
         root = steam_paths.find_steam_root()
