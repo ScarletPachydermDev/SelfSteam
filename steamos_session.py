@@ -146,7 +146,18 @@ def exit_maintenance_mode():
 
     Still unmasks the unit either way -- enter_maintenance_mode masks
     it regardless of mode, so leaving it masked would strand Steam
-    un-startable by its normal means afterward."""
+    un-startable by its normal means afterward.
+
+    Big Picture opened *manually inside* a desktop session is not
+    restored, and deliberately isn't chased: confirmed live
+    (2026-09-04) that Steam doesn't restore it either. Quitting Steam
+    from Big Picture and relaunching it brings it back as an ordinary
+    desktop window, and nothing about the mode is persisted anywhere --
+    registry.vdf, localconfig.vdf and config.vdf were all diffed
+    across the switch and across the exit, and the only delta was
+    config.vdf's UI scale factors (exactly halved, a rendering artifact
+    of Big Picture's own scale, not a mode flag). So relaunching as a
+    desktop app *is* the faithful behaviour here, not a shortfall."""
     if is_gamescope_session():
         _systemctl("unmask", SERVICE)
 
