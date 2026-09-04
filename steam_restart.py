@@ -37,6 +37,7 @@ class SteamStopError(RuntimeError):
 
 # Functions:
 #   is_steam_running() -- True if a Steam process is currently running (native or Flatpak).
+#   _shutdown_argv() -- the right `-shutdown` command for the installed Steam (native vs Flatpak).
 #   stop_steam() -- ask Steam to exit, wait for it; False if it refused.
 #   restart_steam() -- stop Steam (raising if it refuses), then relaunch it.
 #   steam_pids() -- pids of any currently-running Steam process.
@@ -52,30 +53,72 @@ def is_steam_running():
     return subprocess.run(host_exec.wrap(["pidof", "steam"]), capture_output=True).returncode == 0
 
 
+def _shutdown_argv():
+    """The right "ask Steam to quit" command for whichever Steam is
+    actually installed, or None if neither shape is available.
+
+    A Flatpak Steam usually has no host-side `steam` binary at all, so
+    the request has to go through `flatpak run <app-id> -shutdown`;
+    a native install has the binary and takes `steam -shutdown`
+    directly. Checked in that order against the real detected install
+    root rather than guessing from PATH alone."""
+    try:
+        root = steam_paths.find_steam_root()
+    except steam_paths.SteamNotFoundError:
+        root = None
+
+    if root == os.path.expanduser(steam_paths.FLATPAK_ROOT):
+        flatpak = host_exec.which("flatpak")
+        if flatpak:
+            return [flatpak, "run", "com.valvesoftware.Steam", "-shutdown"]
+
+    if host_exec.which("steam"):
+        return ["steam", "-shutdown"]
+
+    flatpak = host_exec.which("flatpak")
+    if flatpak:
+        return [flatpak, "run", "com.valvesoftware.Steam", "-shutdown"]
+    return None
+
+
 def stop_steam():
     """Asks Steam to exit, then polls until it actually does. Returns
     True once no Steam process is left, False if it outlived
     POLL_TIMEOUT and is still running.
 
-    `steam -shutdown` first, not `kill -15` -- confirmed live
-    (2026-09-04) on a real SteamOS *desktop-mode* session that a plain
-    SIGTERM to Steam's own pid does nothing there: SteamOS runs Steam
-    under its own steam-launcher.service, whose unit sets
+    Steam's own `-shutdown` request first, not `kill -15` -- confirmed
+    live (2026-09-04) on a real SteamOS *desktop-mode* session that a
+    plain SIGTERM to Steam's own pid does nothing there: SteamOS runs
+    Steam under its own steam-launcher.service, whose unit sets
     KillSignal=SIGCONT and does termination itself via
     `ExecStop=... kill -TERM $(pgrep -P $MAINPID || echo $MAINPID)` --
     and that ExecStop is itself broken when $MAINPID comes through
     empty (pgrep prints its usage text, kill then gets no pid at all,
     the unit fails with status=2/INVALIDARGUMENT). Steam survived a
-    real SIGTERM for six hours straight that way, while `steam
-    -shutdown` -- Steam's own documented shutdown request, which works
-    the same for native and Flatpak installs -- brought it down in
-    about a second. SIGTERM stays as a fallback for anything that
-    doesn't respond to the official request.
+    real SIGTERM for six hours straight that way, while the shutdown
+    request brought it down in about a second. SIGTERM stays as a
+    fallback for anything that doesn't respond to the official request,
+    which is also what every non-SteamOS install relied on before this
+    and is known to work there.
+
+    The request is addressed to whichever Steam is actually installed
+    (see _shutdown_argv) rather than assuming a host `steam` binary:
+    on a Flatpak-only install there is no such binary at all, which
+    would otherwise mean not just a failed request but a raised
+    FileNotFoundError when SelfSteam itself isn't sandboxed (host_exec.
+    wrap only prefixes flatpak-spawn when it is).
     """
     if not is_steam_running():
         return True
 
-    subprocess.run(host_exec.wrap(["steam", "-shutdown"]), capture_output=True)
+    argv = _shutdown_argv()
+    if argv:
+        try:
+            subprocess.run(host_exec.wrap(argv), capture_output=True)
+        except OSError:
+            # No usable shutdown command on this host -- fall straight
+            # through to SIGTERM below rather than failing the commit.
+            pass
     waited = 0.0
     while is_steam_running() and waited < POLL_TIMEOUT:
         time.sleep(POLL_INTERVAL)
