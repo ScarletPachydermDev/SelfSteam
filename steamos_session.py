@@ -64,9 +64,19 @@ def is_game_mode_active():
     claims XDG_CURRENT_DESKTOP=gamescope long after the user has
     switched to a plain KDE desktop session, so trusting it reports
     Game Mode when the real session env says KDE/plasma and no
-    gamescope process exists at all."""
+    gamescope process exists at all.
+
+    Matched by name *prefix*, not `pgrep -x gamescope`: confirmed live
+    in a real Game Mode session that the compositor's own process name
+    is "gamescope-wl", so an exact match finds nothing and reports
+    desktop mode while Game Mode is plainly running -- which would
+    have sent exit_maintenance_mode() down the desktop relaunch path
+    and brought Steam back as a windowed app instead of Game Mode.
+    The looser match also covers start-gamescope-session, which only
+    exists while a gamescope session is coming up or running anyway,
+    so it isn't a false positive for this question."""
     result = subprocess.run(
-        host_exec.wrap(["pgrep", "-x", "gamescope"]),
+        host_exec.wrap(["pgrep", "gamescope"]),
         capture_output=True,
     )
     return result.returncode == 0
