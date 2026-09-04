@@ -26,6 +26,19 @@
   </categories>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="0.1.22" date="2026-09-05">
+      <description>
+        <ul>
+          <li>Fix creating a shortcut appearing to do nothing on a SteamOS desktop session -- Steam was never actually restarted, so the new shortcut stayed invisible to it until Steam was quit and reopened by hand</li>
+          <li>Fix SelfSteam switching Steam into Big Picture whenever it applied changes on a desktop session, even though Steam had been running as an ordinary window</li>
+          <li>Fix a failure to stop Steam being silently ignored -- changes were written behind a still-running Steam and reported as successful; that now stops and explains what happened instead</li>
+          <li>Fix Game Mode being misdetected, which could bring Steam back as a desktop window instead of Game Mode</li>
+          <li>Fix shortcut creation failing outright on setups where Steam is installed only as a Flatpak</li>
+          <li>The "Enable preflight" controller check now works with both Ryubing AppImage builds (regular and Canary), not just the Flathub one</li>
+          <li>Shortcuts now launch through a script named launch.sh rather than launch-browser.sh, which is what shows in Steam's own shortcut properties -- existing shortcuts keep working unchanged</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.21" date="2026-09-03">
       <description>
         <ul>
