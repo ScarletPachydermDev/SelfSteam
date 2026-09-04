@@ -737,24 +737,32 @@ def _extract_standalone_emulator_info(launch_options):
         index = _ROMFILE_ARGS_INDEX.get(name)
         return argv[args_start + index] if index is not None and index >= 0 else argv[-1]
 
-    def _flathub_shape(argv):
+    def _parse_argv(argv):
+        """(emulator_name, romfile) for a real launch argv, or (None,
+        None). Covers both install shapes, so the Preflight branch below
+        can reuse it wholesale rather than only understanding the
+        Flathub one -- an earlier version did exactly that, which meant
+        a Preflight-enabled *AppImage* shortcut failed to reverse-parse
+        and its Edit link fell through to the URL tab instead of
+        restoring the Emulators tab."""
+        if not argv:
+            return None, None
         if len(argv) >= 3 and os.path.basename(argv[0]) == "flatpak" and argv[1] == "run":
             app_id = argv[2]
             for name, entry in standalone_emulators.EMULATORS.items():
                 if entry.get("app_id") == app_id:
                     return name, _romfile_at(name, 3, argv)
+            return None, None
+        for name, entry in standalone_emulators.EMULATORS.items():
+            if entry.get("install_type") == "binary" and standalone_emulators.binary_path(name) == argv[0]:
+                return name, _romfile_at(name, 1, argv)
         return None, None
 
     if os.path.basename(tokens[0]) == "preflight.sh" and len(tokens) >= 2 and tokens[1] == "--":
-        name, romfile = _flathub_shape(tokens[2:])
+        name, romfile = _parse_argv(tokens[2:])
         return (name, romfile, True) if name else (None, None, False)
-    name, romfile = _flathub_shape(tokens)
-    if name:
-        return name, romfile, False
-    for name, entry in standalone_emulators.EMULATORS.items():
-        if entry.get("install_type") == "binary" and standalone_emulators.binary_path(name) == tokens[0]:
-            return name, _romfile_at(name, 1, tokens), False
-    return None, None, False
+    name, romfile = _parse_argv(tokens)
+    return (name, romfile, False) if name else (None, None, False)
 
 
 def _extract_apps_info(launch_options):

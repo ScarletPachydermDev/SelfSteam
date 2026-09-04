@@ -564,13 +564,13 @@ def ensure_preflight_installed():
     return dest
 
 
-# Catalog entries Preflight can actually launch -- just "Ryubing" (the
-# Flathub build), not either AppImage variant: Preflight's own
-# launch() always execs `flatpak run <app_id>` to hand off to the real
-# emulator once its own controller-registration screen finishes (see
-# find_app_id()/launch() in its own preflight.py), with no path for a
-# bare AppImage binary at all.
-PREFLIGHT_EMULATORS = {"Ryubing"}
+# Catalog entries Preflight can actually launch. Every Ryubing build,
+# not just the Flathub one: Preflight used to build its own `flatpak
+# run <app_id>` command internally (find_app_id()/launch()), which had
+# no path for a bare AppImage binary, but its CLI is now
+# `preflight.sh -- <full command>` and execs whatever it is handed --
+# so an AppImage command works just as well as a Flatpak one.
+PREFLIGHT_EMULATORS = {"Ryubing", "Ryubing (AppImage)", "Ryubing Canary (AppImage)"}
 
 
 # Every Ryubing catalog entry -- the "Ryubing" family specifically,
@@ -3154,18 +3154,43 @@ def launch_args(name, romfile, zrif=None, preflight=False):
     if not entry:
         return None
     # NSZ->NSP conversion -- Ryubing and Eden alike, whichever install
-    # type, so this has to happen before the install_type branch below
-    # splits into "binary" (the AppImage builds) vs "flathub" (Ryubing's
-    # own Flathub build) -- unlike shadPS4's own single-flathub-only
-    # .pkg swap further down, since shadPS4 has no AppImage variant in
-    # this catalog to also cover. Runs before the preflight branch below
-    # too, so a preflight-enabled shortcut with an .nsz ROM still gets a
-    # real .nsp path handed to preflight.sh, not the original .nsz.
+    # type, so this has to happen before the per-entry argv is built.
+    # Runs before the Preflight wrap below too, so a preflight-enabled
+    # shortcut with an .nsz ROM still gets a real .nsp path handed to
+    # preflight.sh, not the original .nsz.
     if romfile.lower().endswith(".nsz") and name in (SWITCH_DLC_UPDATE_EMULATORS | EDEN_DLC_UPDATE_EMULATORS):
         converted = convert_nsz_to_nsp(romfile)
         if not converted:
             return None
         romfile = converted
+
+    args = _emulator_argv(name, entry, romfile, zrif)
+    if args is None:
+        return None
+
+    # Preflight wraps the real launch command instead of replacing it,
+    # per its own CLI: `preflight.sh -- <full command>` runs its own
+    # controller-registration screen, then execs whatever follows `--`
+    # verbatim, rather than (its older shape) building a Ryujinx-
+    # specific `flatpak run` command internally. Applied here, once,
+    # after both install types have built their own argv -- an earlier
+    # version wrapped only inside the flathub branch, so the toggle
+    # silently did nothing on either Ryubing AppImage entry even once
+    # they were listed in PREFLIGHT_EMULATORS.
+    if preflight and name in PREFLIGHT_EMULATORS:
+        preflight_dir = ensure_preflight_installed()
+        preflight_sh = os.path.join(preflight_dir, "preflight.sh")
+        if not os.path.isfile(preflight_sh):
+            return None
+        return [shlex.quote(preflight_sh), "--", *args]
+    return args
+
+
+def _emulator_argv(name, entry, romfile, zrif):
+    """The real launch argv for one emulator entry, before any Preflight
+    wrapping -- split out of launch_args so both install types build
+    their command through one path and the wrap can be applied once at
+    the end, rather than each branch returning its own finished argv."""
     if entry["install_type"] == "binary":
         path = _binary_path(name, entry)
         if not os.path.isfile(path):
@@ -3186,12 +3211,13 @@ def launch_args(name, romfile, zrif=None, preflight=False):
         # plain " ".join (see register_steam_shortcut), so every element
         # needs to already be shell-safe going in. Confirmed live: an
         # unquoted path with spaces/parens/an em-dash in it (e.g. "Eden
-        # (Legacy amd64 — pre-Ryzen/pre-Haswell CPUs)") broke the
+        # (Legacy amd64 -- pre-Ryzen/pre-Haswell CPUs)") broke the
         # wrapper script's own shell parsing with a real "syntax error
         # near unexpected token" -- the flathub branch below never hit
         # this because `flatpak` and an app_id are never anything but
         # plain, space-free tokens.
         return [shlex.quote(path), *entry["args"](romfile)]
+
     if entry["install_type"] != "flathub":
         return None
     flatpak = host_exec.which("flatpak")
@@ -3204,24 +3230,7 @@ def launch_args(name, romfile, zrif=None, preflight=False):
     # case above, just without a title-id round trip.
     if name == "shadPS4" and romfile.lower().endswith(".pkg"):
         romfile = extract_shadps4_pkg(romfile)
-    args = [flatpak, "run", entry["app_id"], *entry["args"](romfile)]
-    # Preflight -- wraps the real launch command instead of replacing
-    # it, per its own current real CLI: `preflight.sh -- <full command>`
-    # runs its own controller-registration screen, then execs whatever
-    # follows `--` verbatim once that finishes, rather than (its older
-    # shape) building a Ryujinx-specific `flatpak run` command itself
-    # internally. Deliberately emulator-agnostic on Preflight's own side
-    # now (its own words: "this is for when preflight supports other
-    # emulators"), so this wraps whatever args() already built rather
-    # than special-casing Ryubing's own shape -- Ryubing (Flathub) is
-    # just the only PREFLIGHT_EMULATORS entry today.
-    if preflight and name in PREFLIGHT_EMULATORS:
-        preflight_dir = ensure_preflight_installed()
-        preflight_sh = os.path.join(preflight_dir, "preflight.sh")
-        if not os.path.isfile(preflight_sh):
-            return None
-        return [shlex.quote(preflight_sh), "--", *args]
-    return args
+    return [flatpak, "run", entry["app_id"], *entry["args"](romfile)]
 
 
 def configure_game_dir(name, game_dir):
