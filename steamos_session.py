@@ -30,6 +30,7 @@ POLL_TIMEOUT = 30
 # Functions:
 #   is_gamescope_session() -- True if steam-launcher.service exists (SteamOS install; both modes).
 #   is_game_mode_active() -- True only if a gamescope compositor is actually running.
+#   steam_is_the_session_client() -- True when stopping Steam would tear down the whole session.
 #   _systemctl(*args) -- one `systemctl --user` call.
 #   enter_maintenance_mode() -- mask + stop Steam so shortcuts.vdf/artwork writes can't be clobbered.
 #   exit_maintenance_mode() -- bring Steam back (unmask+start on gamescope, restart_steam elsewhere).
@@ -86,12 +87,66 @@ def _systemctl(*args):
     return subprocess.run(host_exec.wrap(["systemctl", "--user", *args]), capture_output=True, text=True)
 
 
+def steam_is_the_session_client():
+    """True when Game Mode is running but Steam is the gamescope
+    session's own foreground client rather than its own systemd
+    service -- i.e. stopping Steam would take the whole session down
+    with it, not just Steam.
+
+    Confirmed by reading the real session scripts (2026-09-05).
+    ChimeraOS's gamescope-session-plus -- which Bazzite and Nobara both
+    ship too -- runs Steam in the foreground and then tears the
+    compositor down the moment it returns:
+
+        $CLIENTCMD          # Steam, in the foreground
+        ...
+        # When the client exits, kill gamescope nicely
+        kill $gamescope_pid
+
+    So `steam -shutdown` there ends the entire Game Mode session, and
+    whether the user lands back in it depends on their display manager
+    restarting the session -- the unit itself declares no Restart=.
+    That is a far worse outcome than the missing shortcut this whole
+    stop/restart dance exists to avoid, so SelfSteam refuses rather
+    than risking it.
+
+    SteamOS and CachyOS are NOT this shape: both ship a real
+    steam-launcher.service that owns Steam independently of the
+    session, so stopping it leaves the session up (verified live on
+    SteamOS, and CachyOS's own unit is near-identical). Keyed on that
+    unit's absence for exactly that reason."""
+    return is_game_mode_active() and not is_gamescope_session()
+
+
+# Deliberately does NOT promise the changes will show up on their own.
+# enter_maintenance_mode raises before apply_fn ever runs, so
+# shortcuts.vdf is untouched -- only the pending queue survives (it is
+# cleared after a successful commit, not before). Telling someone their
+# changes would appear "next time Steam restarts" would reproduce the
+# exact symptom this whole area exists to fix: waiting for a shortcut
+# that was never written.
+_SESSION_CLIENT_MESSAGE = (
+    "On this system Steam is its own Game Mode session's client, so SelfSteam "
+    "can't restart it without closing the whole session. Nothing was changed and "
+    "your queued changes are still here -- exit Game Mode, or quit Steam yourself, "
+    "then apply them again."
+)
+
+
 def enter_maintenance_mode():
     """Mask + stop Steam so file writes to shortcuts.vdf/grid artwork
     can't be clobbered by Steam's own background re-save. Falls back to
     the plain kill/relaunch instrumentation on non-gamescope desktop
     sessions, where there's no Upholds= to fight and no clobbering
     concern once Steam is actually down."""
+    # Checked before either branch: on these systems Steam *is* the
+    # session, so there is no safe way to stop it here at all (see
+    # steam_is_the_session_client). Raising leaves Steam running and
+    # the queue intact, so nothing is written behind a live Steam and
+    # nothing is lost.
+    if steam_is_the_session_client():
+        raise steam_restart.SteamStopError(_SESSION_CLIENT_MESSAGE)
+
     if not is_gamescope_session():
         # steam_restart.stop_steam(), not a bare `kill -15` -- see its
         # own docstring for why SIGTERM alone is useless on a real
