@@ -990,7 +990,19 @@ input[type=file]::file-selector-button {
   .selfsteam-header-title strong {
     display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 1.05rem;
   }
-  .queue-actions { gap: 0.6rem; }
+  /* The queue counter is a fixed-width sibling to the right of the
+     button, so centering .queue-actions as a whole actually centers
+     the [button+counter] *pair* -- the button itself lands (counter
+     width + gap)/2 left of that shared center, confirmed live as
+     exactly the "restart button sits too far left of the SGDB badge"
+     the badge's own row has no such asymmetric sibling pulling it off
+     center. position:absolute takes the counter out of the flex width
+     calculation entirely, so the button (now the only thing
+     .queue-actions centers) lands on the same center line as the
+     other two rows/the badge, with the counter still visually
+     anchored in the exact same spot beside it as before. */
+  .queue-actions { position: relative; }
+  .queue-counter { position: absolute; left: 100%; margin-left: 0.6rem; top: 50%; transform: translateY(-50%); }
   .selfsteam-header-actions { gap: 0.6rem; }
   .restart-btn { padding: 0.5rem 0.9rem; font-size: 0.8rem; }
   /* _PLACEHOLDER_ROW_COUNT (30 fixed rows) exists to fill a viewport-
