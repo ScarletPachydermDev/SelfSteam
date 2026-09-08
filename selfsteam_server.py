@@ -702,6 +702,26 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
 #tab-apps:target ~ .selfsteam-columns .right-panel-url { display: none; }
 #tab-apps:target ~ .selfsteam-columns .middle-panel-apps,
 #tab-apps:target ~ .selfsteam-columns .right-panel-apps { display: flex; }
+/* Create box (Name field + Create button): its own card, a sibling of
+   .selfsteam-columns rather than nested inside it -- see render_page's
+   own comment on why (mobile stacking puts it after all three columns
+   that way, instead of partway down inside the left one). Same
+   :target show/hide pattern as middle/right above, just against this
+   sibling instead of a descendant of .selfsteam-columns -- URL is
+   still the default-visible one, same convention. */
+.selfsteam-create-box { display: flex; flex-direction: column; gap: 0.9rem; margin-top: 1rem; }
+/* Matches .selfsteam-columns' own "gap: 1rem" between the left/middle/
+   right columns -- main has no gap of its own between its two direct
+   children (.selfsteam-columns and this box), so without this they sat
+   flush against each other, inconsistent with the spacing everywhere
+   else on the page. */
+.create-box-apps, .create-box-retroarch, .create-box-emulators { display: none; }
+#tab-retroarch:target ~ .selfsteam-create-box .create-box-url,
+#tab-emulators:target ~ .selfsteam-create-box .create-box-url,
+#tab-apps:target ~ .selfsteam-create-box .create-box-url { display: none; }
+#tab-retroarch:target ~ .selfsteam-create-box .create-box-retroarch { display: block; }
+#tab-emulators:target ~ .selfsteam-create-box .create-box-emulators { display: block; }
+#tab-apps:target ~ .selfsteam-create-box .create-box-apps { display: block; }
 .coming-soon { color: var(--text-dim); font-size: 0.85rem; padding: 1rem 0; text-align: center; }
 /* Apps tab: the category dropdown + the Flathub app grid both live in
    the left column (browseable, protected from Install/Remove clicks by
@@ -971,13 +991,27 @@ input[type=file]::file-selector-button {
      width), same trick .placeholder-row's own removal doesn't need but
      this does. */
   header.selfsteam-header { flex-wrap: wrap; padding: 0.8rem 1rem; gap: 0.6rem; }
-  .selfsteam-header-left { flex-wrap: wrap; gap: 0.5rem; min-width: 0; flex: 1 1 auto; }
-  .selfsteam-header-title { min-width: 0; overflow: hidden; flex: 1 1 auto; text-align: center; }
+  /* All 3 rows now share max-width+margin:auto (below) so they read as
+     one aligned centered column instead of 3 independently-centered
+     rows of different natural widths -- confirmed live as a real
+     inconsistency: hostname/restart-button/badge-row each centered
+     across the *full* row width on their own, so nothing about them
+     visually lined up with each other despite all being "centered".
+     .selfsteam-header-left picks up flex:1 1 100% + justify-content:
+     center here too (previously just flex:1 1 auto, sized to its own
+     content) so the back-button+title pair centers as a group the same
+     way the other two rows already did, instead of sitting off to one
+     side of this shared column. */
+  .selfsteam-header-left, .queue-actions, .selfsteam-header-actions {
+    flex: 1 1 100%; justify-content: center; max-width: 85%; margin: 0 auto;
+  }
+  .selfsteam-header-left { flex-wrap: wrap; gap: 0.5rem; min-width: 0; }
+  .selfsteam-header-title { min-width: 0; overflow: hidden; flex: 0 1 auto; text-align: center; }
   .selfsteam-header-title strong {
     display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 1.05rem;
   }
-  .queue-actions { flex: 1 1 100%; justify-content: center; }
-  .selfsteam-header-actions { flex: 1 1 100%; justify-content: center; gap: 0.6rem; }
+  .queue-actions { gap: 0.6rem; }
+  .selfsteam-header-actions { gap: 0.6rem; }
   .restart-btn { padding: 0.5rem 0.9rem; font-size: 0.8rem; }
   /* _PLACEHOLDER_ROW_COUNT (30 fixed rows) exists to fill a viewport-
      bound desktop column's real height -- once columns stack instead
@@ -1328,7 +1362,7 @@ function selfsteamUploadFetch(input, swapIds) {
 
 var SELFSTEAM_URL_SWAP_IDS = [
   "selfsteam-url-tab-panel", "selfsteam-url-middle", "selfsteam-url-right",
-  "selfsteam-add-form-slot", "selfsteam-add-button",
+  "selfsteam-url-name-slot", "selfsteam-add-form-slot", "selfsteam-add-button",
 ];
 
 // Picking a different SGDB match used to be a plain <a href> -- a real
@@ -1346,7 +1380,7 @@ function selfsteamUrlNav(a) {
 
 var SELFSTEAM_RA_SWAP_IDS = [
   "selfsteam-ra-tab-panel", "selfsteam-ra-middle", "selfsteam-ra-right",
-  "selfsteam-add-form-slot", "selfsteam-add-button",
+  "selfsteam-ra-name-slot", "selfsteam-add-form-slot", "selfsteam-add-button",
 ];
 
 function selfsteamRaFetch(url) { selfsteamTabFetch(url, SELFSTEAM_RA_SWAP_IDS); }
@@ -1432,7 +1466,7 @@ function selfsteamRaConsoleCoreChanged(select) {
 
 var SELFSTEAM_EM_SWAP_IDS = [
   "selfsteam-em-tab-panel", "selfsteam-em-middle", "selfsteam-em-right",
-  "selfsteam-add-form-slot", "selfsteam-add-button",
+  "selfsteam-em-name-slot", "selfsteam-add-form-slot", "selfsteam-add-button",
 ];
 
 function selfsteamEmFetch(url) { selfsteamTabFetch(url, SELFSTEAM_EM_SWAP_IDS); }
@@ -2082,7 +2116,7 @@ def _url_tab_panel_html(query="", couch_mode=False, browser="", chosen=None, nam
     # the state really was gone. em_* gets the same preservation.
     other_qs = "&".join(q for q in (_ra_qs(ra_state) if ra_state else "", _em_qs(em_state) if em_state else "") if q)
     clear_href = f"/new?{other_qs}" if other_qs else "/new"
-    return f"""
+    return name_field, f"""
   <div class="field-group">
     <label class="field-label">Streaming service or URL <span class="required-asterisk">*</span></label>
     <div class="search-field-row">
@@ -2096,8 +2130,7 @@ def _url_tab_panel_html(query="", couch_mode=False, browser="", chosen=None, nam
   {couch_row}
   {hint}
   {_url_browser_picker_html(browser)}
-  <div class="selfsteam-spacer"></div>
-  {name_field}"""
+"""
 
 
 # RetroArch tab: all its own state lives on /new's query string
@@ -2616,7 +2649,7 @@ def _retroarch_tab_panel_html(state, chosen=None):
     </div>
   </div>"""
 
-    return f"""
+    return name_field, f"""
   <form method="get" action="/new#tab-retroarch" style="margin:0;display:flex;flex-direction:column;gap:0.9rem">
     {hidden_fields}
     <input type="hidden" name="ra_console" id="ra-console-hidden" value="{html.escape(console)}">
@@ -2659,8 +2692,7 @@ def _retroarch_tab_panel_html(state, chosen=None):
   </form>
   {bios_block}
   {rom_block}
-  <div class="selfsteam-spacer"></div>
-  {name_field}"""
+"""
 
 
 # Emulators tab: standalone (non-RetroArch) emulators, same picker/AJAX
@@ -3355,14 +3387,12 @@ def _apps_tab_panel_html(state, hits, total_pages):
     </div>
   </div>"""
 
-    # Grid gets its own scroll container (flex:1;min-height:0;overflow-
-    # y:auto), separate from the outer field-group -- name_field below
-    # is a sibling of that whole field-group, not nested inside the
-    # scrolling part of it, so it stays pinned right above the (always-
-    # present) Create button the same way RA/Emulators' own Name field
-    # does, instead of requiring a scroll through the entire (possibly
-    # long, infinite-scrolling) app grid to reach it.
-    return f"""
+    # name_field now lives in the shared create-box (see render_page),
+    # not nested inside this tab's own scrolling grid -- keeps it
+    # reachable without scrolling through the (possibly long,
+    # infinite-scrolling) app grid to get there, same reasoning as
+    # before, just relocated rather than solved locally.
+    return name_field, f"""
   {category_select}
   <div class="field-group" style="flex:1;min-height:0;display:flex;flex-direction:column">
     <div class="apps-grid-scroll" style="flex:1;min-height:0;overflow-y:auto">
@@ -3370,7 +3400,6 @@ def _apps_tab_panel_html(state, hits, total_pages):
       {sentinel}
     </div>
   </div>
-  <div id="selfsteam-apps-name-slot">{name_field}</div>
 """
 
 
@@ -4168,7 +4197,7 @@ def _emulators_tab_panel_html(state, chosen=None):
     </div>
   </div>"""
 
-    return f"""
+    return name_field, f"""
   <div class="field-group">
     {source_toggle}
     <form method="get" action="/new#tab-emulators" style="margin:0">
@@ -4184,9 +4213,8 @@ def _emulators_tab_panel_html(state, chosen=None):
   {rom_block}
   {dlc_block}
   {zrif_block}
-  <div class="selfsteam-spacer"></div>
   {rpcs3_firmware_warning}
-  {name_field}"""
+"""
 
 
 def _em_display_term(state, chosen=None):
@@ -5146,6 +5174,11 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
     # "never touched" without JS to track that).
     name_reset_href = f"/search?{_state_qs(query, couch_mode, browser, ra_state, em_state, sgdb_q=sgdb_q)}&match_index={match_index}"
 
+    url_name_field, url_main_html = _url_tab_panel_html(query, couch_mode, browser, chosen, name_reset_href, ra_state, em_state)
+    apps_name_field, apps_main_html = _apps_tab_panel_html(apps_state, apps_hits, apps_total_pages)
+    ra_name_field, ra_main_html = _retroarch_tab_panel_html(ra_state, ra_chosen)
+    em_name_field, em_main_html = _emulators_tab_panel_html(em_state, em_chosen)
+
     left = f"""
 <div class="card">
   {_tab_bar_html()}
@@ -5154,19 +5187,42 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
       <form action="/search" method="get" style="display:flex;flex-direction:column;gap:0.9rem;flex:1;min-height:0">
         {_ra_hidden_fields(ra_state)}
         {_ra_hidden_fields(em_state)}
-        {_url_tab_panel_html(query, couch_mode, browser, chosen, name_reset_href, ra_state, em_state)}
+        {url_main_html}
       </form>
     </div>
     <div class="tab-panel tab-panel-apps" id="selfsteam-apps-tab-panel">
-      {_apps_tab_panel_html(apps_state, apps_hits, apps_total_pages)}
+      {apps_main_html}
     </div>
     <div class="tab-panel tab-panel-retroarch" id="selfsteam-ra-tab-panel">
-      {_retroarch_tab_panel_html(ra_state, ra_chosen)}
+      {ra_main_html}
     </div>
     <div class="tab-panel tab-panel-emulators" id="selfsteam-em-tab-panel">
-      {_emulators_tab_panel_html(em_state, em_chosen)}
+      {em_main_html}
     </div>
   </div>
+</div>
+"""
+
+    # A separate card, not part of the left column's own -- so on mobile
+    # (where .selfsteam-columns stacks top to bottom, see its own media
+    # query) this lands after ALL THREE columns, at the very bottom of
+    # the page, instead of appearing partway down inside the left
+    # column's stack the way it would if it were still nested there.
+    # Each tab's Name field/create-box-* class name mirrors the exact
+    # same :target show/hide pattern already used for the middle/right
+    # columns (URL is the default-visible one) -- see the CSS above.
+    # The Name field's own onclick=selfsteamXxxNav handlers (Clear/Reset
+    # buttons) still work after this move because those already submit
+    # via form="{_ADD_FORM_ID}" rather than DOM nesting inside any
+    # particular tab's own <form>, and their swap-id lists now include
+    # each field's own slot id (see PAGE_TAIL) so the AJAX swap still
+    # finds and updates it here instead of in its old location.
+    create_box = f"""
+<div class="card selfsteam-create-box">
+  <div class="create-box-url" id="selfsteam-url-name-slot">{url_name_field}</div>
+  <div class="create-box-apps" id="selfsteam-apps-name-slot">{apps_name_field}</div>
+  <div class="create-box-retroarch" id="selfsteam-ra-name-slot">{ra_name_field}</div>
+  <div class="create-box-emulators" id="selfsteam-em-name-slot">{em_name_field}</div>
   {add_button}
 </div>
 """
@@ -5260,6 +5316,7 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
   <div class="selfsteam-middle">{middle_url}{ra_middle_html}{em_middle_html}{apps_middle_html}</div>
   <div class="selfsteam-right">{right_url}{right_ra}{right_em}{right_apps}</div>
 </div>
+{create_box}
 """, extra_head=extra_head)
 
 
