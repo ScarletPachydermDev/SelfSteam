@@ -971,13 +971,27 @@ input[type=file]::file-selector-button {
      width), same trick .placeholder-row's own removal doesn't need but
      this does. */
   header.selfsteam-header { flex-wrap: wrap; padding: 0.8rem 1rem; gap: 0.6rem; }
-  .selfsteam-header-left { flex-wrap: wrap; gap: 0.5rem; min-width: 0; flex: 1 1 auto; }
-  .selfsteam-header-title { min-width: 0; overflow: hidden; flex: 1 1 auto; text-align: center; }
+  /* All 3 rows now share max-width+margin:auto (below) so they read as
+     one aligned centered column instead of 3 independently-centered
+     rows of different natural widths -- confirmed live as a real
+     inconsistency: hostname/restart-button/badge-row each centered
+     across the *full* row width on their own, so nothing about them
+     visually lined up with each other despite all being "centered".
+     .selfsteam-header-left picks up flex:1 1 100% + justify-content:
+     center here too (previously just flex:1 1 auto, sized to its own
+     content) so the back-button+title pair centers as a group the same
+     way the other two rows already did, instead of sitting off to one
+     side of this shared column. */
+  .selfsteam-header-left, .queue-actions, .selfsteam-header-actions {
+    flex: 1 1 100%; justify-content: center; max-width: 85%; margin: 0 auto;
+  }
+  .selfsteam-header-left { flex-wrap: wrap; gap: 0.5rem; min-width: 0; }
+  .selfsteam-header-title { min-width: 0; overflow: hidden; flex: 0 1 auto; text-align: center; }
   .selfsteam-header-title strong {
     display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 1.05rem;
   }
-  .queue-actions { flex: 1 1 100%; justify-content: center; }
-  .selfsteam-header-actions { flex: 1 1 100%; justify-content: center; gap: 0.6rem; }
+  .queue-actions { gap: 0.6rem; }
+  .selfsteam-header-actions { gap: 0.6rem; }
   .restart-btn { padding: 0.5rem 0.9rem; font-size: 0.8rem; }
   /* _PLACEHOLDER_ROW_COUNT (30 fixed rows) exists to fill a viewport-
      bound desktop column's real height -- once columns stack instead
