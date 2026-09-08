@@ -709,16 +709,7 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
    :target show/hide pattern as middle/right above, just against this
    sibling instead of a descendant of .selfsteam-columns -- URL is
    still the default-visible one, same convention. */
-/* max-width matches .selfsteam-left's own flex-basis (300px) -- without
-   it this stretched across the full width of all three columns
-   combined, confirmed live as not what "stays where it is on desktop"
-   meant: roughly the left column's own width, just no longer nested
-   inside it. Not centered (a block element's default is to start at
-   its container's left edge), so it lines up under the left column
-   rather than sitting in the middle of the page. Reset back to full
-   width on mobile, in the @media (max-width: 960px) block below, same
-   as .selfsteam-left/middle/right's own flex-basis:100% there. */
-.selfsteam-create-box { display: flex; flex-direction: column; gap: 0.9rem; margin-top: 1rem; max-width: 300px; }
+.selfsteam-create-box { display: flex; flex-direction: column; gap: 0.9rem; margin-top: 1rem; }
 /* Matches .selfsteam-columns' own "gap: 1rem" between the left/middle/
    right columns -- main has no gap of its own between its two direct
    children (.selfsteam-columns and this box), so without this they sat
@@ -979,7 +970,6 @@ input[type=file]::file-selector-button {
   main { min-height: auto; }
   .selfsteam-columns { align-items: flex-start; min-height: auto; flex-wrap: wrap; }
   .selfsteam-left, .selfsteam-middle, .selfsteam-right { flex-basis: 100%; min-height: auto; }
-  .selfsteam-create-box { max-width: none; }
   .card { overflow-y: visible; }
   .selfsteam-spacer { flex: 0 0 0; }
   /* The header itself was never given a narrow-screen pass -- its own
