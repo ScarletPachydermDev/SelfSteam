@@ -30,10 +30,11 @@ POLL_TIMEOUT = 30
 # Functions:
 #   is_gamescope_session() -- True if steam-launcher.service exists (SteamOS install; both modes).
 #   is_game_mode_active() -- True only if a gamescope compositor is actually running.
-#   steam_is_the_session_client() -- True when stopping Steam would tear down the whole session.
+#   steam_is_the_session_client() -- True when stopping Steam alone would tear down the whole session.
+#   _active_gamescope_session_plus_unit() -- the running gamescope-session-plus@<instance>.service, or None.
 #   _systemctl(*args) -- one `systemctl --user` call.
-#   enter_maintenance_mode() -- mask + stop Steam so shortcuts.vdf/artwork writes can't be clobbered.
-#   exit_maintenance_mode() -- bring Steam back (unmask+start on gamescope, restart_steam elsewhere).
+#   enter_maintenance_mode() -- stop Steam (or the whole session, on that shape) so writes can't be clobbered.
+#   exit_maintenance_mode(session_client_unit=None) -- bring Steam (or the session) back the way it was.
 
 
 def is_gamescope_session():
@@ -87,6 +88,24 @@ def _systemctl(*args):
     return subprocess.run(host_exec.wrap(["systemctl", "--user", *args]), capture_output=True, text=True)
 
 
+def _active_gamescope_session_plus_unit():
+    """Full unit name of the running gamescope-session-plus@<instance>.
+    service, or None if none is active. The instance name isn't fixed
+    (seen "ogui-steam" -- Bazzite's OpenGamepadUI-fronted session -- on
+    real hardware 2026-09-08; ChimeraOS/Nobara may use a plain "steam"
+    one), so this discovers it live via systemctl rather than
+    hardcoding a guess that would silently miss a different flavor."""
+    result = subprocess.run(
+        host_exec.wrap(["systemctl", "--user", "list-units", "--no-legend", "--plain", "gamescope-session-plus@*.service"]),
+        capture_output=True, text=True,
+    )
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        if parts and parts[0].startswith("gamescope-session-plus@") and parts[0].endswith(".service"):
+            return parts[0]
+    return None
+
+
 def steam_is_the_session_client():
     """True when Game Mode is running but Steam is the gamescope
     session's own foreground client rather than its own systemd
@@ -103,12 +122,17 @@ def steam_is_the_session_client():
         # When the client exits, kill gamescope nicely
         kill $gamescope_pid
 
-    So `steam -shutdown` there ends the entire Game Mode session, and
-    whether the user lands back in it depends on their display manager
-    restarting the session -- the unit itself declares no Restart=.
-    That is a far worse outcome than the missing shortcut this whole
-    stop/restart dance exists to avoid, so SelfSteam refuses rather
-    than risking it.
+    So `steam -shutdown` alone there would end the entire Game Mode
+    session with nothing bringing it back (the unit declares no
+    Restart=) -- but the session-owning unit itself
+    (gamescope-session-plus@<instance>.service) CAN be stopped and
+    started back up deliberately, which is what enter_/exit_
+    maintenance_mode do for this shape instead of just restarting
+    Steam. Verified live (2026-09-08) on real Bazzite Game Mode
+    hardware: stopping and restarting that unit brings Steam and
+    gamescope back in the same login session (a visible restart-like
+    transition, not a login-screen logout), with the outer session-
+    launcher process itself never dying.
 
     SteamOS and CachyOS are NOT this shape: both ship a real
     steam-launcher.service that owns Steam independently of the
@@ -118,17 +142,17 @@ def steam_is_the_session_client():
     return is_game_mode_active() and not is_gamescope_session()
 
 
-# Deliberately does NOT promise the changes will show up on their own.
-# enter_maintenance_mode raises before apply_fn ever runs, so
-# shortcuts.vdf is untouched -- only the pending queue survives (it is
-# cleared after a successful commit, not before). Telling someone their
-# changes would appear "next time Steam restarts" would reproduce the
-# exact symptom this whole area exists to fix: waiting for a shortcut
-# that was never written.
+# Only reached if the session-client path below can't even find the
+# unit to stop -- a real refusal is still better than guessing at a
+# systemctl target that might tear down something unrelated. Deliberately
+# does NOT promise the changes will show up on their own: nothing gets
+# written in this case, so claiming otherwise would reproduce the exact
+# symptom this whole area exists to fix -- waiting for a shortcut that
+# was never written.
 _SESSION_CLIENT_MESSAGE = (
-    "On this system Steam is its own Game Mode session's client, so SelfSteam "
-    "can't restart it without closing the whole session. Nothing was changed and "
-    "your queued changes are still here -- exit Game Mode, or quit Steam yourself, "
+    "On this system Steam is its own Game Mode session's client, and SelfSteam "
+    "couldn't find that session to restart safely. Nothing was changed and your "
+    "queued changes are still here -- exit Game Mode, or quit Steam yourself, "
     "then apply them again."
 )
 
@@ -138,14 +162,32 @@ def enter_maintenance_mode():
     can't be clobbered by Steam's own background re-save. Falls back to
     the plain kill/relaunch instrumentation on non-gamescope desktop
     sessions, where there's no Upholds= to fight and no clobbering
-    concern once Steam is actually down."""
+    concern once Steam is actually down.
+
+    Returns the gamescope-session-plus unit name if that's the path
+    taken (see steam_is_the_session_client), or None for every other
+    path -- exit_maintenance_mode needs to know which to undo, and by
+    the time it runs, gamescope is down, so the live checks that decide
+    here can no longer tell it apart from a plain desktop session."""
     # Checked before either branch: on these systems Steam *is* the
-    # session, so there is no safe way to stop it here at all (see
-    # steam_is_the_session_client). Raising leaves Steam running and
-    # the queue intact, so nothing is written behind a live Steam and
-    # nothing is lost.
+    # session, so a plain stop_steam() would take gamescope down with
+    # it and nothing would bring it back. Stopping the session's own
+    # unit instead -- verified live (2026-09-08) to survive as a
+    # visible restart, not a login-screen logout -- lets the write
+    # happen with Steam verifiably down while still having a real way
+    # back up afterward.
     if steam_is_the_session_client():
-        raise steam_restart.SteamStopError(_SESSION_CLIENT_MESSAGE)
+        unit = _active_gamescope_session_plus_unit()
+        if not unit:
+            raise steam_restart.SteamStopError(_SESSION_CLIENT_MESSAGE)
+        _systemctl("stop", unit)
+        waited = 0.0
+        while steam_restart.is_steam_running() and waited < POLL_TIMEOUT:
+            time.sleep(POLL_INTERVAL)
+            waited += POLL_INTERVAL
+        if steam_restart.is_steam_running():
+            raise steam_restart.SteamStopError(_SESSION_CLIENT_MESSAGE)
+        return unit
 
     if not is_gamescope_session():
         # steam_restart.stop_steam(), not a bare `kill -15` -- see its
@@ -194,20 +236,27 @@ def enter_maintenance_mode():
         )
 
 
-def exit_maintenance_mode():
+def exit_maintenance_mode(session_client_unit=None):
     """Bring Steam back the way it was actually running.
 
-    The systemd unit is only used when Game Mode is genuinely active
-    (is_game_mode_active, a live gamescope check -- not
-    is_gamescope_session, which is also True on a SteamOS *desktop*
-    session). Confirmed live (2026-09-04) why that distinction matters:
-    `systemctl start steam-launcher.service` launches Steam through
-    SteamOS's own launcher, which adds `-steamos3 -steampal` and drops
-    `-silent`, so Steam comes back up in Big Picture. On a desktop
-    session where Steam had been running as an ordinary windowed app,
-    that silently converted it to Big Picture every time SelfSteam
-    applied changes. The plain restart_steam() path relaunches it as a
-    normal desktop app instead, which is what it was.
+    session_client_unit is enter_maintenance_mode's own return value --
+    when set, this is the gamescope-session-plus shape, and starting
+    that unit back up is the only path (there's no Steam process left
+    for is_game_mode_active()/is_gamescope_session() to key off, since
+    the whole compositor came down with it).
+
+    Otherwise, the steam-launcher.service unit is only used when Game
+    Mode is genuinely active (is_game_mode_active, a live gamescope
+    check -- not is_gamescope_session, which is also True on a SteamOS
+    *desktop* session). Confirmed live (2026-09-04) why that
+    distinction matters: `systemctl start steam-launcher.service`
+    launches Steam through SteamOS's own launcher, which adds
+    `-steamos3 -steampal` and drops `-silent`, so Steam comes back up
+    in Big Picture. On a desktop session where Steam had been running
+    as an ordinary windowed app, that silently converted it to Big
+    Picture every time SelfSteam applied changes. The plain
+    restart_steam() path relaunches it as a normal desktop app instead,
+    which is what it was.
 
     Still unmasks the unit either way -- enter_maintenance_mode masks
     it regardless of mode, so leaving it masked would strand Steam
@@ -223,6 +272,10 @@ def exit_maintenance_mode():
     config.vdf's UI scale factors (exactly halved, a rendering artifact
     of Big Picture's own scale, not a mode flag). So relaunching as a
     desktop app *is* the faithful behaviour here, not a shortfall."""
+    if session_client_unit:
+        _systemctl("start", session_client_unit)
+        return
+
     if is_gamescope_session():
         _systemctl("unmask", SERVICE)
 

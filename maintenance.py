@@ -26,8 +26,13 @@ def run_with_steam_stopped(apply_fn, message="Applying changes…"):
     apply_fn() with Steam verifiably down, then restart Steam.
     apply_fn's return value is passed through. Steam is always
     restarted, even if apply_fn raises."""
-    on_gamescope = steamos_session.is_gamescope_session()
-    steamos_session.enter_maintenance_mode()
+    # steam_is_the_session_client() is checked before the splash decision
+    # too: on that shape the whole compositor is about to come down along
+    # with Steam, so there's no gamescope session left to foreground a
+    # splash inside -- gamescope_splash would just fail against a
+    # compositor that's mid-teardown.
+    on_gamescope = steamos_session.is_gamescope_session() and not steamos_session.steam_is_the_session_client()
+    maintenance_state = steamos_session.enter_maintenance_mode()
 
     splash_proc = None
     baselayer_prior = None
@@ -47,4 +52,4 @@ def run_with_steam_stopped(apply_fn, message="Applying changes…"):
                 splash_proc.kill()
         if baselayer_prior is not None:
             gamescope_splash.restore(baselayer_prior)
-        steamos_session.exit_maintenance_mode()
+        steamos_session.exit_maintenance_mode(maintenance_state)
