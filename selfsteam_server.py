@@ -308,6 +308,12 @@ header.selfsteam-header {
   flex-wrap: wrap; gap: 1rem; flex: 0 0 auto;
 }
 .selfsteam-header-left { display: flex; align-items: center; gap: 1rem; }
+/* Only meaningful inside the mobile header redesign (see its own CSS
+   comment) -- a real, always-present element rather than a media-query
+   trick alone, so it needs an explicit inert default here for desktop,
+   where .selfsteam-header-left stays a real flex box and this would
+   otherwise render as a bare zero-content flex item taking up space. */
+.selfsteam-header-break { display: none; }
 .selfsteam-header-title strong { font-size: 1.2rem; font-weight: 700; letter-spacing: -0.01em; }
 .selfsteam-header-actions { display: flex; gap: 0.6rem; align-items: center; }
 .icon-btn-round {
@@ -952,58 +958,53 @@ input[type=file]::file-selector-button {
   .selfsteam-left, .selfsteam-middle, .selfsteam-right { flex-basis: 100%; min-height: auto; }
   .card { overflow-y: visible; }
   .selfsteam-spacer { flex: 0 0 0; }
-  /* The header itself was never given a narrow-screen pass -- its own
-     flex-wrap (needed on desktop for a very long hostname/page title)
-     let .selfsteam-header-actions wrap unpredictably against
-     .selfsteam-header-left on a real phone width, reading as
-     misaligned icons rather than a deliberate layout. Rebuilt as 3
-     explicit rows instead, via flex-wrap + flex-basis:100% on the two
-     pieces that need their own line -- no HTML restructuring needed,
-     since .queue-actions and .selfsteam-header-actions are already
-     real elements, just forced onto their own full-width line each:
-       1. back button + title (unchanged, stays put -- .selfsteam-
-          header-left's own children fit on one line already)
-       2. .queue-actions (the restart button + its counter), centered
-       3. .selfsteam-header-actions (favorite/key badge/dark toggle),
-          centered
-     flex-basis:100% is what forces each onto a fresh line (nothing
-     else fits alongside something that already claims the full row
-     width), same trick .placeholder-row's own removal doesn't need but
-     this does. */
-  header.selfsteam-header { flex-wrap: wrap; padding: 0.8rem 1rem; gap: 0.6rem; }
-  /* All 3 rows now share max-width+margin:auto (below) so they read as
-     one aligned centered column instead of 3 independently-centered
-     rows of different natural widths -- confirmed live as a real
-     inconsistency: hostname/restart-button/badge-row each centered
-     across the *full* row width on their own, so nothing about them
-     visually lined up with each other despite all being "centered".
-     .selfsteam-header-left picks up flex:1 1 100% + justify-content:
-     center here too (previously just flex:1 1 auto, sized to its own
-     content) so the back-button+title pair centers as a group the same
-     way the other two rows already did, instead of sitting off to one
-     side of this shared column. */
-  .selfsteam-header-left, .queue-actions, .selfsteam-header-actions {
-    flex: 1 1 100%; justify-content: center; max-width: 85%; margin: 0 auto;
-  }
-  .selfsteam-header-left { flex-wrap: wrap; gap: 0.5rem; min-width: 0; }
-  .selfsteam-header-title { min-width: 0; overflow: hidden; flex: 0 1 auto; text-align: center; }
+  /* Two rows: back button + a bigger title on row 1, restart button
+     (left) and badge/heart/dark-toggle (right) on row 2 -- see the
+     .selfsteam-header-left/.selfsteam-header-break comments just below
+     for how the split actually happens. gap is the space *between*
+     the two wrapped rows, not just general breathing room -- kept
+     tight deliberately, this is a header band, not page content. */
+  header.selfsteam-header { flex-wrap: wrap; padding: 0.5rem 1rem; gap: 0.2rem; }
+  /* Redesign (2026-09-08), not a tweak on the old 3-centered-rows
+     layout: row 1 is back button + a bigger title, left-aligned; row 2
+     is the restart button at the left edge and badge/heart/dark-toggle
+     at the right edge of the same row.
+
+     display:contents dissolves .selfsteam-header-left's own box
+     (without touching the DOM) so its children -- the back button,
+     title, and .queue-actions -- become direct flex items of header
+     itself, sitting alongside .selfsteam-header-actions instead of
+     being trapped inside a separate nested container. That's what
+     lets .queue-actions and .selfsteam-header-actions share row 2 at
+     all: two items nested in different parents can never share a row
+     through CSS alone, only actual siblings can. Desktop is untouched
+     -- .selfsteam-header-left stays a real flex box there. */
+  .selfsteam-header-left { display: contents; }
+  /* Forces everything after it onto a new flex line, regardless of
+     whether the actual content widths would have wrapped there on
+     their own -- the standard "N items on this line, rest go to the
+     next" flexbox trick. Without it, .queue-actions would sit right
+     after a short title on row 1 instead of starting row 2. Real,
+     always-present element (see the header markup's own comment on
+     why), inert on desktop via its own base-CSS display:none. */
+  /* display:block, not just flex-basis:100% -- the base (desktop) rule
+     is display:none, and leaving that unset here meant the break never
+     actually became a flex item at all, so it did nothing: title and
+     the restart button ended up sharing row 1 (both narrow enough to
+     fit together) while badge/heart/toggle wrapped alone to row 2,
+     confirmed live via screen recording as exactly this. */
+  .selfsteam-header-break { display: block; flex-basis: 100%; height: 0; }
+  .selfsteam-header-title { min-width: 0; overflow: hidden; flex: 1 1 auto; text-align: left; }
   .selfsteam-header-title strong {
-    display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 1.05rem;
+    display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 1.35rem;
   }
-  /* The queue counter is a fixed-width sibling to the right of the
-     button, so centering .queue-actions as a whole actually centers
-     the [button+counter] *pair* -- the button itself lands (counter
-     width + gap)/2 left of that shared center, confirmed live as
-     exactly the "restart button sits too far left of the SGDB badge"
-     the badge's own row has no such asymmetric sibling pulling it off
-     center. position:absolute takes the counter out of the flex width
-     calculation entirely, so the button (now the only thing
-     .queue-actions centers) lands on the same center line as the
-     other two rows/the badge, with the counter still visually
-     anchored in the exact same spot beside it as before. */
-  .queue-actions { position: relative; }
-  .queue-counter { position: absolute; left: 100%; margin-left: 0.6rem; top: 50%; transform: translateY(-50%); }
-  .selfsteam-header-actions { gap: 0.6rem; }
+  /* Row 2's own two remaining items after the break -- distributed by
+     header's own justify-content:space-between, which (per the flex
+     spec) applies *per wrapped line*, not just once across the whole
+     container, so this falls out for free once these two are the only
+     things left on line 2. */
+  .queue-actions { flex: 0 1 auto; }
+  .selfsteam-header-actions { flex: 0 1 auto; gap: 0.6rem; }
   .restart-btn { padding: 0.5rem 0.9rem; font-size: 0.8rem; }
   /* _PLACEHOLDER_ROW_COUNT (30 fixed rows) exists to fill a viewport-
      bound desktop column's real height -- once columns stack instead
@@ -1092,6 +1093,11 @@ input[type=file]::file-selector-button {
     <div class="selfsteam-header-title">
       <strong><!--PAGE_TITLE--></strong>
     </div>
+    <!-- Mobile-only line break -- see .selfsteam-header-break's own CSS
+         comment for why this has to be a real element rather than a
+         media-query trick alone. display:none on desktop, so it's
+         inert there. -->
+    <div class="selfsteam-header-break"></div>
     <!--QUEUE_ACTIONS-->
   </div>
   <div class="selfsteam-header-actions">
