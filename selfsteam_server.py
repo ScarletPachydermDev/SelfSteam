@@ -2744,9 +2744,10 @@ _EM_STATE_KEYS = [
     # last browsed, not the root, so adding several files from the same
     # folder doesn't mean re-navigating there every single time.
     "em_dlc_picker_open",
-    # Ryubing-only (see standalone_emulators.PREFLIGHT_EMULATORS) --
-    # routes the shortcut through github.com/ScarletPachydermDev/
-    # Preflight's own launch wrapper instead of a direct `flatpak run`.
+    # Only for the emulators Preflight supports (see standalone_
+    # emulators.PREFLIGHT_EMULATORS) -- routes the shortcut through
+    # github.com/ScarletPachydermDev/Preflight's own launch wrapper
+    # instead of running the emulator's own command directly.
     # A plain checkbox tied straight to the Add form (form="{_ADD_FORM_
     # ID}", see _emulators_tab_panel_html's own preflight_block), not a
     # live-nav-triggered link the way most other em_ toggles here are --
@@ -4162,8 +4163,8 @@ def _emulators_tab_panel_html(state, chosen=None):
     </div>
   </div>"""
 
-    # Ryubing-only -- see standalone_emulators.PREFLIGHT_EMULATORS's own
-    # comment on why the AppImage variants can't use this. A plain
+    # Only for the emulators Preflight itself supports -- see
+    # standalone_emulators.PREFLIGHT_EMULATORS's own comment. A plain
     # checkbox on the shared Add form (form="{_ADD_FORM_ID}"), same
     # "no reason to round-trip the server just to flip it" reasoning as
     # em_match_name/em_zrif -- nothing else on the page reacts to this.
@@ -7308,13 +7309,13 @@ def _check_preflight_update_on_selfsteam_version_change():
     docstring) -- a SelfSteam update is exactly the moment a user is
     already thinking "what's new," so Preflight staying in sync with it
     reads as one coherent update instead of a second, invisible one
-    that only ever happens to land on whoever next touches a Ryubing
-    shortcut. One-shot at startup, not a poll loop -- there's nothing
+    that only ever happens to land on whoever next touches a
+    preflight-enabled shortcut. One-shot at startup, not a poll loop -- there's nothing
     to keep watching for between here and the next process restart.
 
     Only updates an *already*-installed Preflight -- never installs it
     fresh for a user who's never enabled the preflight toggle on any
-    Ryubing shortcut; that first install still only ever happens lazily,
+    shortcut; that first install still only ever happens lazily,
     at that shortcut's own Create/Save (see ensure_preflight_installed's
     own docstring)."""
     current_version = _selfsteam_version()

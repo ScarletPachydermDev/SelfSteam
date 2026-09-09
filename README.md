@@ -19,7 +19,7 @@ A headless companion, a small web UI for adding Steam shortcuts (with SteamGridD
 + Install emulators from flathub and appimages from developers source
 + Auto update flatpak
 + Convert .nsz Switch roms to .nsp automatically so Ryujinx/Eden can load them
-+ Optional [Preflight](https://github.com/ScarletPachydermDev/Preflight) integration for Ryubing (Flathub and AppImage builds alike): a pre-launch controller check for local multiplayer Switch games, installed and kept up to date automatically. Preflight catches up to whatever's newest the next time SelfSteam updates
++ Optional [Preflight](https://github.com/ScarletPachydermDev/Preflight) integration for Ryubing (Flathub and AppImage builds alike) and Dolphin: a pre-launch controller check for local multiplayer games, installed and kept up to date automatically. Preflight catches up to whatever's newest the next time SelfSteam updates
   
 ## To be done
 - [ ] App icon

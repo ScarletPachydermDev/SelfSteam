@@ -49,7 +49,7 @@ def _save(items):
 
 
 def add(name, url, couch_mode, asset_paths, browser_app_id=None, launch_args=None, steam_input_enabled=None):
-    # steam_input_enabled: Ryubing-preflight shortcuts only (see
+    # steam_input_enabled: preflight-enabled shortcuts only (see
     # selfsteam_server.py's own em_preflight handling) -- True/False to
     # set create_webapp.set_steam_input_enabled once the shortcut's real
     # appid is known at commit time, None (every other shortcut) to

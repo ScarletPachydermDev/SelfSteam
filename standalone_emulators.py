@@ -441,9 +441,9 @@ def nsz_conversion_needed(romfile):
 
 
 # github.com/ScarletPachydermDev/Preflight -- a separate, actively-
-# developed project (a pre-launch controller-registration check for
-# Ryubing, so local multiplayer pads land in the right player slot
-# instead of scrambling) this app points a Ryubing shortcut's own
+# developed project (a pre-launch controller-registration check, so
+# local multiplayer pads land in the right player slot instead of
+# scrambling) this app points a preflight-enabled shortcut's own
 # Target/Launch Options at, rather than something bundled/vendored
 # here. Confirmed live it has no GitHub Releases or tags at all yet
 # (just commits on its own default branch, "master"), so unlike
@@ -503,7 +503,7 @@ def _preflight_remote_commit():
 
 def ensure_preflight_installed():
     """Installs or updates Preflight at _preflight_dir(), returning that
-    path -- called right before a preflight-enabled Ryubing shortcut's
+    path -- called right before a preflight-enabled shortcut's
     own Create/Save, same "cheap once already done, real work only
     when something's actually missing/stale" shape as every other
     install_* helper here. Compares the branch's own latest commit SHA
@@ -564,13 +564,18 @@ def ensure_preflight_installed():
     return dest
 
 
-# Catalog entries Preflight can actually launch. Every Ryubing build,
-# not just the Flathub one: Preflight used to build its own `flatpak
-# run <app_id>` command internally (find_app_id()/launch()), which had
-# no path for a bare AppImage binary, but its CLI is now
+# Catalog entries Preflight can actually launch -- whichever emulators
+# Preflight itself has grown support for, nothing about the install
+# shape limits it: Preflight used to build its own `flatpak run
+# <app_id>` command internally (find_app_id()/launch()), which had no
+# path for a bare AppImage binary, but its CLI is now
 # `preflight.sh -- <full command>` and execs whatever it is handed --
-# so an AppImage command works just as well as a Flatpak one.
-PREFLIGHT_EMULATORS = {"Ryubing", "Ryubing (AppImage)", "Ryubing Canary (AppImage)"}
+# so an AppImage command works just as well as a Flatpak one, and a
+# non-Switch emulator just as well as Ryubing.
+PREFLIGHT_EMULATORS = {
+    "Ryubing", "Ryubing (AppImage)", "Ryubing Canary (AppImage)",
+    "Dolphin",
+}
 
 
 # Every Ryubing catalog entry -- the "Ryubing" family specifically,

@@ -450,9 +450,9 @@ def register_steam_shortcut(name, url, asset_paths, user_id=None, couch_mode=Fal
     steam_input_enabled (True/False, or None to leave it alone) sets
     localconfig.vdf's own per-app Steam Input override for this exact
     appid right after it's assigned -- see set_steam_input_enabled's
-    own docstring. Currently only Ryubing-preflight shortcuts ever pass
+    own docstring. Currently only preflight-enabled shortcuts ever pass
     this (preflight needs Steam Input ON to tell same-model controllers
-    apart -- see ryu-preflight's own README)."""
+    apart -- see Preflight's own README)."""
     browser_args = launch_args if launch_args is not None else build_browser_launch_args(url, couch_mode, browser_app_id)
 
     userdata_dir = steam_paths.find_userdata_dir(user_id)
@@ -878,8 +878,8 @@ def list_gridge_shortcuts():
     ra_console/ra_romfile are None for anything but a RetroArch shortcut
     (see _extract_retroarch_info), em_emulator/em_romfile are None for
     anything but a standalone-emulator shortcut (em_preflight is always
-    False alongside them, real only for a Ryubing shortcut routed
-    through Preflight -- see _extract_standalone_emulator_info),
+    False alongside them, real only for a shortcut routed through
+    Preflight -- see _extract_standalone_emulator_info),
     apps_app_id is None for
     anything but an Apps-tab shortcut (see _extract_apps_info), url is
     None when LaunchOptions doesn't look like a browser launch at all --
