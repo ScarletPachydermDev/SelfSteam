@@ -26,6 +26,15 @@
   </categories>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="0.1.23" date="2026-09-09">
+      <description>
+        <ul>
+          <li>Fix creating a shortcut doing nothing on Bazzite, ChimeraOS and Nobara in Game Mode -- on those systems Steam is the Game Mode session itself, so SelfSteam now restarts that whole session properly instead of either failing silently or closing it with no way back</li>
+          <li>The "Enable preflight" controller check now works with Dolphin (GameCube/Wii) as well as Ryubing, so local multiplayer pads land in the right player slot instead of scrambling</li>
+          <li>Rework the header on phones: back button and a bigger title on the first row, the save/restart button and the SteamGridDB key badge on the second -- less wasted vertical space and no more misaligned rows</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.22" date="2026-09-05">
       <description>
         <ul>
