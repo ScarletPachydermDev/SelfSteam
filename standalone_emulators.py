@@ -21,6 +21,7 @@ AppImage toggle:
 import configparser
 import json
 import os
+import platform
 import re
 import struct
 import shlex
@@ -44,6 +45,8 @@ import steamos_session
 #
 # Public catalog/dispatch API (used by selfsteam_server.py):
 #   by_install_type(install_type) -- emulator names filtered to "flathub" or "binary".
+#   picker_emulator_names(install_type) -- the same, minus the Eden CPU-target
+#     variants this machine's own CPU can't use (see detect_eden_variant).
 #   installed(name) / install(name) -- whether/how to install an entry's own app.
 #   flathub_app_id_installed(app_id) / install_flathub_app_id(app_id) -- same, for a bare Flathub app_id not in EMULATORS (the Apps tab).
 #   installed_flathub_app_ids() -- every installed Flatpak app id in one call (the Apps tab's own browse grid, avoids a subprocess per card).
@@ -564,6 +567,24 @@ def ensure_preflight_installed():
     return dest
 
 
+# Eden's own release matrix ships one AppImage per CPU target, all
+# built from the same source tree -- the split is purely which
+# instruction set the compiler was allowed to assume (see each entry's
+# own comment in EMULATORS). Keyed by the slug Eden itself uses in its
+# asset names, so detect_eden_variant can map a detected target
+# straight to a catalog name, and collected into one set so the
+# several places that mean "every Eden entry" stop each re-listing
+# them.
+_EDEN_CPU_TARGETS = {
+    "rog-ally": "Eden (Zen 4 — AMD Z1/Z2, ROG Ally X, Legion Go S, Steam Machine)",
+    "steamdeck": "Eden (Zen 2 — Steam Deck)",
+    "amd64": "Eden (amd64 — Intel/AMD desktop)",
+    "legacy": "Eden (Legacy amd64 — pre-Ryzen/pre-Haswell CPUs)",
+}
+
+EDEN_EMULATORS = frozenset(_EDEN_CPU_TARGETS.values())
+
+
 # Catalog entries Preflight can actually launch -- whichever emulators
 # Preflight itself has grown support for, nothing about the install
 # shape limits it: Preflight used to build its own `flatpak run
@@ -575,7 +596,7 @@ def ensure_preflight_installed():
 PREFLIGHT_EMULATORS = {
     "Ryubing", "Ryubing (AppImage)", "Ryubing Canary (AppImage)",
     "Dolphin",
-}
+} | EDEN_EMULATORS
 
 
 # Every Ryubing catalog entry -- the "Ryubing" family specifically,
@@ -739,12 +760,7 @@ def switch_registered_dlc_and_updates(entry, title_id_base_hex):
 # itself -- no per-file JSON metadata needed the way dlc.json/
 # updates.json are for Ryubing, just getting the real file into a
 # directory Eden already knows to scan.
-EDEN_DLC_UPDATE_EMULATORS = {
-    "Eden (amd64 — Intel/AMD desktop)",
-    "Eden (Legacy amd64 — pre-Ryzen/pre-Haswell CPUs)",
-    "Eden (Zen 2 — Steam Deck)",
-    "Eden (Zen 4 — AMD Z1/Z2, ROG Ally X, Legion Go S, Steam Machine)",
-}
+EDEN_DLC_UPDATE_EMULATORS = set(EDEN_EMULATORS)
 
 
 def _eden_config_path():
@@ -2813,6 +2829,98 @@ def by_install_type(install_type):
     """Emulator names filtered to one install_type -- what the Emulators
     tab's Flathub/AppImage toggle actually switches between."""
     return [name for name, entry in EMULATORS.items() if entry["install_type"] == install_type]
+
+
+def _cpuinfo_vendor_family_flags():
+    """(vendor_id, cpu family as an int, set of feature flags) read off
+    /proc/cpuinfo's first processor block, or (None, None, set()) when
+    it can't be read or carries none of them. Every core reports the
+    same CPU, so the first block is enough.
+
+    This is the real host CPU even under Flatpak -- the sandbox mounts
+    the host's own /proc -- and it's the machine SelfSteam is running
+    on, not the phone/laptop driving the web UI, which is exactly the
+    one that has to run the emulator."""
+    vendor, family, flags = None, None, set()
+    try:
+        with open("/proc/cpuinfo", "r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                if not line.strip():
+                    if flags:
+                        break
+                    continue
+                key, _, value = line.partition(":")
+                key, value = key.strip(), value.strip()
+                if key == "vendor_id" and vendor is None:
+                    vendor = value
+                elif key == "cpu family" and family is None:
+                    try:
+                        family = int(value)
+                    except ValueError:
+                        pass
+                elif key == "flags" and not flags:
+                    flags = set(value.split())
+    except OSError:
+        return None, None, set()
+    return vendor, family, flags
+
+
+def detect_eden_variant():
+    """Which of the Eden CPU-target entries this machine should
+    actually be running, or None when that can't be determined (not
+    x86_64, or an unreadable/unparseable /proc/cpuinfo) -- callers fall
+    back to offering all of them rather than guessing.
+
+    Deliberately built so that every branch which could be *wrong* is
+    wrong towards a slower-but-working build and never a crashing one.
+    The only variant that can actually fault on the wrong hardware is
+    the Zen 4 one, since it's the only build assuming AVX-512, and
+    that's gated on the avx512f flag being present directly rather than
+    on any family/model table that could go stale on a new part."""
+    if platform.machine() != "x86_64":
+        # Eden publishes an aarch64 AppImage too, but there's no
+        # catalog entry for it, so there's nothing here to pick.
+        return None
+    vendor, family, flags = _cpuinfo_vendor_family_flags()
+    if not flags:
+        return None
+    if vendor == "AuthenticAMD":
+        if "avx512f" in flags:
+            # Zen 4 and newer. Intel parts that have AVX-512 fall
+            # through to the generic build on purpose: this one is
+            # tuned -march=znver4, which is the wrong target for them.
+            return _EDEN_CPU_TARGETS["rog-ally"]
+        if family == 23 and "clwb" in flags:
+            # Family 23 covers Zen/Zen+/Zen 2; CLWB is the Zen 2
+            # addition that separates it from Zen 1. The Steam Deck's
+            # own Van Gogh APU is family 23 as well, so it lands here,
+            # which is what this build is named for.
+            return _EDEN_CPU_TARGETS["steamdeck"]
+    if {"avx2", "bmi2", "fma"} <= flags:
+        # Haswell (2013) and Zen 1 onwards -- what the plain "amd64"
+        # build assumes. Zen 1 and Zen 3 land here too: both run it
+        # fine and neither has a target of its own in Eden's matrix.
+        return _EDEN_CPU_TARGETS["amd64"]
+    return _EDEN_CPU_TARGETS["legacy"]
+
+
+def picker_emulator_names(install_type):
+    """by_install_type, minus the Eden CPU-target variants this machine
+    can't use -- the Emulators tab's own picker listed all four on
+    every visit even though which one is right is a fixed hardware
+    fact, not a preference, so it was a re-decision every single time.
+
+    Any variant that's already installed stays listed no matter what
+    was detected, so a build picked before this existed never silently
+    disappears out from under an existing shortcut."""
+    names = by_install_type(install_type)
+    wanted = detect_eden_variant()
+    if wanted is None:
+        return names
+    return [
+        n for n in names
+        if n not in EDEN_EMULATORS or n == wanted or installed(n)
+    ]
 
 
 # Real per-emulator icons for the Emulators tab's own picker (see

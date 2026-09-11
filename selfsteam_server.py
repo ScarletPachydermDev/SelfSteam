@@ -4014,7 +4014,7 @@ def _emulators_tab_panel_html(state, chosen=None):
     # grouping, this tab's own label is "EmulatorName - Console", so
     # alphabetical-by-emulator is what the user actually asked for here.
     names = sorted(
-        standalone_emulators.by_install_type(install_source),
+        standalone_emulators.picker_emulator_names(install_source),
         key=lambda n: n.lower(),
     )
     emulator_picker_html = _emulator_picker_html(names, emulator)
