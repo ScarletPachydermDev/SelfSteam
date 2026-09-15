@@ -26,6 +26,19 @@
   </categories>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="0.1.24" date="2026-09-15">
+      <description>
+        <ul>
+          <li>Play Mario Kart Retro Rewind: pick a Mario Kart Wii backup in the Emulators tab and SelfSteam installs Wheel Wizard and Dolphin, checks the disc is really Mario Kart Wii, points both at it, and creates the shortcut -- Wheel Wizard then downloads Retro Rewind itself on first launch (around 1.8 GB, and its window needs a mouse and keyboard or a trackpad controller, which the tab now warns about)</li>
+          <li>Browse ROMs on external drives: the RetroArch, emulator and DLC pickers now find drives under /media, /mnt, /run/media and /var/mnt and cycle between them and your home folder, instead of only ever showing home</li>
+          <li>The "Enable preflight" controller check now works with Eden and with apps from the Apps tab, and the emulator picker marks which entries support it</li>
+          <li>Eden now lists only the build that matches your machine's CPU, instead of making you pick the right one of four every single time</li>
+          <li>Dolphin now starts fullscreen and stops asking whether it may report usage statistics every time it opens -- that dialog was close to undismissable with only a controller in Game Mode</li>
+          <li>Fix the "Enable preflight" toggle switching itself back off while browsing folders in the ROM or DLC picker</li>
+          <li>Emulator and RetroArch file pickers: a little more space between the file icon and the filename</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.23" date="2026-09-09">
       <description>
         <ul>
