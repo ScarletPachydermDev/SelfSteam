@@ -761,6 +761,8 @@ def _extract_standalone_emulator_info(launch_options):
             app_id = argv[2]
             for name, entry in standalone_emulators.EMULATORS.items():
                 if entry.get("app_id") == app_id:
+                    if name == standalone_emulators.WHEEL_WIZARD_NAME:
+                        return name, standalone_emulators.wheelwizard_game_path()
                     return name, _romfile_at(name, 3, argv)
             return None, None
         for name, entry in standalone_emulators.EMULATORS.items():
@@ -776,7 +778,7 @@ def _extract_standalone_emulator_info(launch_options):
 
 
 def _extract_apps_info(launch_options):
-    """Pulls (app_id, source) back out of an Apps-tab shortcut's own
+    """Pulls (app_id, source, preflight) back out of an Apps-tab shortcut's own
     LaunchOptions -- two shapes, matching the Apps tab's own two
     sources (see selfsteam_server.py's _apps_source_launch_args):
     "<flatpak> run <app_id>" for a real Flathub app_id (same shape
@@ -784,23 +786,27 @@ def _extract_apps_info(launch_options):
     entry -- see its own docstring on the real absolute-path-vs-bare-
     "flatpak" gotcha -- but for an *uncurated* app_id instead), or a
     bare AppImage path matching one of appimage_apps.APPS' own
-    binary_path()s. Neither ever has extra argv after it the way an
-    emulator's own args() does (no romfile to also recover here).
+    binary_path()s. Both may also be wrapped by Preflight's
+    ``preflight.sh --`` prefix. Neither ever has extra argv after it the
+    way an emulator's own args() does (no romfile to also recover here).
     Checked only after _extract_standalone_emulator_info's own
     EMULATORS match fails (see list_gridge_shortcuts' call order) so a
     real curated emulator's shortcut is never double-claimed as a
-    generic Apps one instead. Returns (None, None) for anything else."""
+    generic Apps one instead. Returns (None, None, False) for anything else."""
     try:
         tokens = shlex.split(launch_options)
     except ValueError:
-        return None, None
+        return None, None, False
+    preflight = len(tokens) >= 2 and os.path.basename(tokens[0]) == "preflight.sh" and tokens[1] == "--"
+    if preflight:
+        tokens = tokens[2:]
     if len(tokens) == 3 and os.path.basename(tokens[0]) == "flatpak" and tokens[1] == "run":
-        return tokens[2], "flathub"
+        return tokens[2], "flathub", preflight
     if len(tokens) == 1:
         for app_id in appimage_apps.APPS:
             if appimage_apps.binary_path(app_id) == tokens[0]:
-                return app_id, "appimage"
-    return None, None
+                return app_id, "appimage", preflight
+    return None, None, False
 
 
 def find_grid_image_path(grid_dir, appid):
@@ -913,7 +919,9 @@ def list_gridge_shortcuts():
             # that's the right order (a real emulator shortcut should
             # never fall through and get double-claimed as a generic
             # Apps one instead).
-            apps_app_id, apps_source = _extract_apps_info(launch_options) if em_emulator is None else (None, None)
+            apps_app_id, apps_source, apps_preflight = (
+                _extract_apps_info(launch_options) if em_emulator is None else (None, None, False)
+            )
             results.append({
                 "appid": _field(entry, "appid", "AppID"),
                 "name": _field(entry, "appname", "AppName") or "",
@@ -925,6 +933,7 @@ def list_gridge_shortcuts():
                 "em_preflight": em_preflight,
                 "apps_app_id": apps_app_id,
                 "apps_source": apps_source,
+                "apps_preflight": apps_preflight,
                 "user_id": uid,
                 "managed": is_gridge_launch_wrapper(exe),
                 # Raw fields, used to pre-fill /custom's Target/Start In/

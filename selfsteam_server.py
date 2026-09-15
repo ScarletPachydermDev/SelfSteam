@@ -36,6 +36,7 @@ import http.cookies
 import json
 import os
 import re
+import shlex
 import socket
 import subprocess
 import threading
@@ -736,6 +737,13 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
 .apps-card-name { font-weight: 600; font-size: 0.9rem; }
 .apps-card-summary { font-size: 0.8rem; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .apps-card-install { flex: 0 0 auto; }
+/* Right-hand tag on an .apps-card row -- currently the Emulators tab's
+   own picker marking which entries Preflight can launch (see
+   standalone_emulators.PREFLIGHT_EMULATORS). Sits after
+   .apps-card-text, which is the flex:1 that pushes it to the edge. */
+.picker-tag { flex: 0 0 auto; font-size: 0.7rem; font-weight: 600; letter-spacing: 0.02em;
+  padding: 0.15rem 0.45rem; border-radius: 999px; color: var(--text-dim);
+  background: rgba(0,0,0,0.07); }
 /* Sits before .apps-card-install in the markup (checkmark + homepage
    link to the left of Remove). */
 .apps-card-extras { flex: 0 0 auto; display: flex; align-items: center; gap: 0.5rem; margin-right: 0.5rem; }
@@ -817,7 +825,16 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
 .breadcrumbs { font-size: 0.8rem; color: var(--text-dim); margin-bottom: 0.5rem; }
 .breadcrumbs a { color: var(--accent); text-decoration: none; }
 .breadcrumbs a:hover { text-decoration: underline; }
-.folder-icon, .file-icon { flex: 0 0 auto; width: 1rem; text-align: center; }
+.picker-location-row { display: flex; align-items: center; gap: 0.45rem; margin-bottom: 0.45rem; min-width: 0; }
+.picker-location-row .breadcrumbs { flex: 1 1 auto; min-width: 0; margin-bottom: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 0.78rem; font-weight: 600; }
+.picker-location-button { position: relative; display: inline-flex; align-items: center; justify-content: center;
+  flex: 0 0 6rem; width: 6rem; height: 1.9rem; padding: 0 1.5rem 0 0.35rem; border: 1px solid #1976d2;
+  border-radius: 5px; background: #1976d2; color: #fff; font-size: 0.78rem; font-weight: 600;
+  text-align: center; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.picker-location-button:hover { background: #1565b3; color: #fff; }
+.picker-location-cycle-icon { position: absolute; right: 0.3rem; width: 1rem; height: 1rem; }
+.folder-icon, .file-icon { flex: 0 0 auto; width: 1rem; text-align: center; margin-right: 0.45rem; }
 /* Was tightened to 130px to avoid the tab itself needing to scroll --
    reverted taller now that scrolling in the tab is an accepted
    tradeoff (the panel itself scrolls cleanly, see .tab-panel's own
@@ -1165,6 +1182,27 @@ function selfsteamToggleSource(prefix, mode, stateKey) {
   var tabPrefix = prefix.split("-")[0];
   var hidden = document.getElementById(tabPrefix + "-console-form-" + stateKey);
   if (hidden) hidden.value = mode;
+  // Folder links are server-rendered with the source state from the
+  // previous request. Keep them in sync with a toggle made after that
+  // render, otherwise the next folder click falls back to the default
+  // source and can unexpectedly reopen the Upload panel.
+  var paramsKey = stateKey;
+  var encoded = encodeURIComponent(paramsKey);
+  var localLinks = local.querySelectorAll("a[href], option");
+  localLinks.forEach(function (item) {
+    var attribute = item.tagName === "OPTION" ? "value" : "href";
+    var value = item.getAttribute(attribute);
+    if (!value) return;
+    var hash = "";
+    var hashIndex = value.indexOf("#");
+    if (hashIndex >= 0) { hash = value.slice(hashIndex); value = value.slice(0, hashIndex); }
+    var separator = value.indexOf("?") >= 0 ? "&" : "?";
+    var pattern = new RegExp("([?&])" + encoded + "=[^&]*");
+    value = pattern.test(value)
+      ? value.replace(pattern, "$1" + encoded + "=" + encodeURIComponent(mode))
+      : value + separator + encoded + "=" + encodeURIComponent(mode);
+    item.setAttribute(attribute, value + hash);
+  });
 }
 
 // Called directly from the file input's own onchange, right before it
@@ -1231,8 +1269,13 @@ function selfsteamShowCreating(form) {
   var browserRadio = (!form.dataset.emulator && !form.dataset.appName)
     ? document.querySelector('input[name="browser"]:checked')
     : null;
-  if (form.dataset.emulator && !form.dataset.installed) {
-    button.innerHTML = "Downloading " + form.dataset.emulator + '<span class="spinner"></span>';
+  if (form.dataset.installing) {
+    // Whatever Create is really about to fetch, not just the picked
+    // emulator: a first Wheel Wizard shortcut installs Dolphin too, and
+    // saying only "Downloading Wheel Wizard" through a two-Flatpak wait
+    // reads as a hang. Server-rendered, already filtered to what is
+    // actually missing (see em_pending_installs).
+    button.innerHTML = "Downloading " + form.dataset.installing + '<span class="spinner"></span>';
   } else if (form.dataset.pkgExtract) {
     button.innerHTML = "Extracting PKG" + '<span class="spinner"></span>';
   } else if (form.dataset.nszConvert) {
@@ -1349,10 +1392,12 @@ function selfsteamTabFetch(url, swapIds, onDone) {
 // in-place swap every other tab interaction already gets, with the same
 // graceful real-navigation fallback if fetch throws (JS half-broken,
 // network weirdness) rather than leaving the picked file stuck nowhere.
-function selfsteamUploadFetch(input, swapIds) {
+function selfsteamUploadFetch(input, swapIds, urlFn) {
   var form = input.form;
   var data = new FormData(form);
-  fetch(form.getAttribute("action"), { method: "POST", body: data })
+  var action = form.getAttribute("action");
+  if (urlFn) action = urlFn(action);
+  fetch(action, { method: "POST", body: data })
     .then(function (r) { if (!r.ok) throw new Error("bad status"); return r.text().then(function (t) { return {text: t, url: r.url}; }); })
     .then(function (result) { selfsteamApplySwap(result.text, result.url, swapIds); })
     .catch(function () { form.submit(); });
@@ -1467,7 +1512,39 @@ var SELFSTEAM_EM_SWAP_IDS = [
   "selfsteam-add-form-slot", "selfsteam-add-button",
 ];
 
-function selfsteamEmFetch(url) { selfsteamTabFetch(url, SELFSTEAM_EM_SWAP_IDS); }
+// The Preflight toggle is a plain checkbox hung off the shared Add
+// form and is never round-tripped on its own (see _EM_STATE_KEYS'
+// em_preflight comment), so the DOM is the only place its real value
+// lives -- while every href on this tab was built server-side from
+// whatever state the *current* request carried. Clicking a folder in
+// either file picker therefore re-rendered the checkbox from a state
+// that had never heard of it, silently switching Preflight back off
+// mid-browse. Folding the checkbox's live value into the URL here
+// fixes that for every nav on the tab at once (folder clicks,
+// breadcrumbs, remove buttons, the DLC add-row, the source pills)
+// without introducing a nav of its own -- deliberately not solved by
+// making the toggle round-trip on change, which would have wiped any
+// name typed into em_match_name, another DOM-only field.
+function selfsteamEmPreflightUrl(href) {
+  var box = document.getElementById("em-preflight-toggle");
+  if (!box) return href;
+  var hash = "";
+  var h = href.indexOf("#");
+  if (h >= 0) { hash = href.slice(h); href = href.slice(0, h); }
+  var q = href.indexOf("?");
+  var base = q >= 0 ? href.slice(0, q) : href;
+  var params = new URLSearchParams(q >= 0 ? href.slice(q + 1) : "");
+  if (box.checked) params.set("em_preflight", "1");
+  else params.delete("em_preflight");
+  var qs = params.toString();
+  return base + (qs ? "?" + qs : "") + hash;
+}
+
+function selfsteamEmFetch(url) { selfsteamTabFetch(selfsteamEmPreflightUrl(url), SELFSTEAM_EM_SWAP_IDS); }
+
+function selfsteamEmUploadFetch(input) {
+  selfsteamUploadFetch(input, SELFSTEAM_EM_SWAP_IDS, selfsteamEmPreflightUrl);
+}
 
 function selfsteamEmNav(a) {
   selfsteamEmFetch(a.getAttribute("href"));
@@ -1495,7 +1572,22 @@ var SELFSTEAM_APPS_SWAP_IDS = [
   "selfsteam-add-form-slot", "selfsteam-add-button",
 ];
 
-function selfsteamAppsFetch(url) { selfsteamTabFetch(url, SELFSTEAM_APPS_SWAP_IDS); }
+function selfsteamAppsPreflightUrl(href) {
+  var box = document.getElementById("apps-preflight-toggle");
+  if (!box) return href;
+  var hash = "";
+  var h = href.indexOf("#");
+  if (h >= 0) { hash = href.slice(h); href = href.slice(0, h); }
+  var q = href.indexOf("?");
+  var base = q >= 0 ? href.slice(0, q) : href;
+  var params = new URLSearchParams(q >= 0 ? href.slice(q + 1) : "");
+  if (box.checked) params.set("apps_preflight", "1");
+  else params.delete("apps_preflight");
+  var qs = params.toString();
+  return base + (qs ? "?" + qs : "") + hash;
+}
+
+function selfsteamAppsFetch(url) { selfsteamTabFetch(selfsteamAppsPreflightUrl(url), SELFSTEAM_APPS_SWAP_IDS); }
 
 function selfsteamAppsNav(a) {
   selfsteamAppsFetch(a.getAttribute("href"));
@@ -2170,6 +2262,107 @@ _RA_ROOT = "/"
 _RA_DEFAULT_RELPATH = os.path.relpath(_HOME_DIR, _RA_ROOT)
 
 
+def _mountinfo_unescape(value):
+    return re.sub(r"\\([0-7]{3})", lambda match: chr(int(match.group(1), 8)), value)
+
+
+def _picker_locations():
+    """Return Home plus mounted locations that are likely user media.
+
+    Mount locations differ across Linux distributions.  The mountinfo
+    source is more reliable than checking only /media or /run/media:
+    removable filesystems may be mounted under /mnt, and SteamOS commonly
+    uses /run/media.  Pseudo-filesystems are excluded so the picker does
+    not become a list of kernel implementation details.
+    """
+    locations = [("home", _HOME_DIR)]
+    seen = {_HOME_DIR}
+    pseudo_filesystems = {
+        "autofs", "cgroup", "cgroup2", "devpts", "fusectl", "mqueue",
+        "proc", "pstore", "securityfs", "sysfs", "tmpfs", "tracefs",
+    }
+    try:
+        with open("/proc/self/mountinfo", encoding="utf-8") as mounts:
+            for line in mounts:
+                fields = line.rstrip("\n").split(" - ", 1)
+                if len(fields) != 2:
+                    continue
+                mount_fields = fields[0].split()
+                filesystem_fields = fields[1].split()
+                if len(mount_fields) < 5 or len(filesystem_fields) < 2:
+                    continue
+                filesystem = filesystem_fields[0]
+                mountpoint = _mountinfo_unescape(mount_fields[4])
+                source = _mountinfo_unescape(filesystem_fields[1])
+                internal_prefixes = (
+                    "/dev", "/proc", "/sys", "/run/host", "/run/user",
+                )
+                if (
+                    mountpoint == "/"
+                    or mountpoint in seen
+                    or any(mountpoint == prefix or mountpoint.startswith(prefix + "/") for prefix in internal_prefixes)
+                    or filesystem in pseudo_filesystems
+                    or not os.path.isdir(mountpoint)
+                    or not (
+                        mountpoint.startswith("/media/")
+                        or mountpoint.startswith("/mnt/")
+                        or mountpoint.startswith("/run/media/")
+                        or mountpoint.startswith("/var/mnt/")
+                        or (
+                            mountpoint in ("/media", "/mnt", "/run/media", "/var/mnt")
+                            and source.startswith("/dev/")
+                            and not source.startswith("/dev/mapper/")
+                        )
+                    )
+                ):
+                    continue
+                try:
+                    with os.scandir(mountpoint) as entries:
+                        if next(entries, None) is None:
+                            continue
+                except OSError:
+                    continue
+                seen.add(mountpoint)
+                label = os.path.basename(mountpoint.rstrip("/")) or mountpoint
+                locations.append((label, mountpoint))
+    except OSError:
+        # The picker still works from Home when proc mount metadata is
+        # unavailable in a restricted environment.
+        return locations
+
+    return locations
+
+
+def _picker_location_html(state, path_key, url_builder, current_rel_path, nav_function):
+    current_abs_path = _ra_safe_join(current_rel_path) or _HOME_DIR
+    locations = _picker_locations()
+    current_real = os.path.realpath(current_abs_path)
+    active_index = 0
+    active_depth = -1
+    for index, (_label, mountpoint) in enumerate(locations):
+        mount_real = os.path.realpath(mountpoint)
+        if current_real == mount_real or current_real.startswith(mount_real.rstrip("/") + "/"):
+            if len(mount_real) > active_depth:
+                active_index = index
+                active_depth = len(mount_real)
+    next_index = (active_index + 1) % len(locations)
+    active_label, _active_mountpoint = locations[active_index]
+    next_label, next_mountpoint = locations[next_index]
+    relative = os.path.relpath(next_mountpoint, _RA_ROOT)
+    value = "/" if relative == "." else relative
+    href = url_builder("/new", state, **{path_key: value})
+    return (
+        f'<a class="picker-location-button" href="{html.escape(href, quote=True)}" '
+        f'title="Switch to {html.escape(next_label)}" onclick="return {nav_function}(this)">'
+        f'{html.escape(active_label)}'
+        '<svg class="picker-location-cycle-icon" viewBox="0 0 24 24" fill="none" '
+        'stroke="white" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+        '<path d="M20 11a8 8 0 0 0-14.7-4L3 10"></path><path d="M3 5v5h5"></path>'
+        '<path d="M4 13a8 8 0 0 0 14.7 4L21 14"></path><path d="M21 19v-5h-5"></path>'
+        '</svg></a>'
+    )
+
+
 def _ra_resolve_relpath(raw):
     # raw == "" covers two different real cases that both want the same
     # default: a genuinely fresh picker (path_key was never set), and
@@ -2419,7 +2612,8 @@ def _ra_picker_section(prefix, label, state, already_installed=None):
         rel_path = _RA_DEFAULT_RELPATH
         abs_path = _ra_safe_join(rel_path) or _RA_ROOT
     local_panel = (
-        f'<div class="breadcrumbs">{_ra_breadcrumbs_html(rel_path, state, path_key)}</div>'
+        f'<div class="picker-location-row"><div class="breadcrumbs">{_ra_breadcrumbs_html(rel_path, state, path_key)}</div>'
+        f'{_picker_location_html(state, path_key, _ra_url, rel_path, "selfsteamRaNav")}</div>'
         f'<div class="picker-list"><div class="boxed-list">{_ra_list_rows(abs_path, rel_path, state, path_key, file_key)}</div></div>'
     )
 
@@ -2752,7 +2946,13 @@ _EM_STATE_KEYS = [
     # ID}", see _emulators_tab_panel_html's own preflight_block), not a
     # live-nav-triggered link the way most other em_ toggles here are --
     # nothing else on the page needs to react to it changing, so there's
-    # no reason to round-trip the server just to flip it.
+    # no reason to round-trip the server just to flip it. It's still
+    # listed here because a nav triggered by something *else* (a folder
+    # click in either file picker, say) re-renders the checkbox from
+    # server state, so the value has to survive the round trip even
+    # though flipping it doesn't cause one -- selfsteamEmPreflightUrl
+    # folds the live DOM value into every nav URL on the tab to make
+    # that true.
     "em_preflight",
     # Same reasoning as _RA_STATE_KEYS' own ra_edit_appid/ra_edit_name.
     "em_edit_appid", "em_edit_name",
@@ -3017,6 +3217,7 @@ _APPS_STATE_KEYS = [
     "apps_category", "apps_page", "apps_source", "apps_search_q",
     "apps_app_id", "apps_app_name", "apps_preview", "apps_resolved",
     "apps_sgdb_q", "apps_match_index", "apps_name_cleared", "apps_match_name",
+    "apps_preflight",
     # Same reasoning as _RA_STATE_KEYS' own ra_edit_appid/ra_edit_name --
     # carries an existing shortcut's identity forward from the gallery's
     # own Edit link (see _poster_card_html) so Create becomes "Save
@@ -3025,6 +3226,12 @@ _APPS_STATE_KEYS = [
     # submitting.
     "apps_edit_appid", "apps_edit_name",
 ]
+
+_PREFLIGHT_APP_IDS = {"io.github.TeamWheelWizard.WheelWizard"}
+
+
+def _apps_preflight_supported(app_id):
+    return app_id in _PREFLIGHT_APP_IDS
 
 
 def _apps_state_from_params(params):
@@ -3171,7 +3378,9 @@ def _apps_card_html(hit, state, category, page, installed_ids, source="flathub",
     card_link_href = _apps_url(
         "/new", state, apps_category=category, apps_page=page, apps_source=source,
         apps_app_id=app_id, apps_app_name=name, apps_preview="1",
-        **({} if same_app else {"apps_sgdb_q": "", "apps_match_index": ""}),
+        **({} if same_app else {
+            "apps_sgdb_q": "", "apps_match_index": "", "apps_preflight": "",
+        }),
     )
     # Remove only ever shows once actually installed -- nothing to
     # remove otherwise. data-source tells /apps/uninstall which real
@@ -3377,6 +3586,29 @@ def _apps_tab_panel_html(state, hits, total_pages):
     name_default = "" if name_cleared else state.get("apps_app_name", "")
     name_reset_href = _apps_url("/new", state, apps_name_cleared=("" if name_cleared else "1"))
     name_reset_title = "Reset to app name" if name_cleared else "Clear"
+    apps_preflight_block = ""
+    if _apps_preflight_supported(state.get("apps_app_id", "")):
+        preflight_checked = "checked" if state.get("apps_preflight") else ""
+        preflight_tooltip = (
+            "Helpful for multiplayer games, helps you coordinate settings when multiple "
+            "controllers are paired."
+        )
+        preflight_link = (
+            f'<a href="https://github.com/ScarletPachydermDev/Preflight" target="_blank" rel="noopener" '
+            f'style="display:inline-flex;align-items:center;justify-content:center;vertical-align:middle;'
+            f'position:relative;top:-0.15rem;color:var(--text-dim)" title="Preflight on GitHub">{_EXTERNAL_LINK_ICON_SVG}</a>'
+        )
+        apps_preflight_block = f"""
+  <div class="field-group" style="margin-bottom:0.55rem">
+    <div style="display:flex;align-items:center;gap:0.5rem">
+      <label class="toggle-switch">
+        <input type="checkbox" name="apps_preflight" id="apps-preflight-toggle" form="{_ADD_FORM_ID}" {preflight_checked}>
+        <span class="toggle-switch-track"></span>
+        Enable preflight {_info_tooltip_icon_html(preflight_tooltip)}
+      </label>
+      {preflight_link}
+    </div>
+  </div>"""
     name_field = f"""
   <div class="field-group">
     <label class="field-label" for="apps-name-field">Name</label>
@@ -3403,7 +3635,7 @@ def _apps_tab_panel_html(state, hits, total_pages):
       {sentinel}
     </div>
   </div>
-  <div id="selfsteam-apps-name-slot">{name_field}</div>
+  <div id="selfsteam-apps-name-slot">{apps_preflight_block}{name_field}</div>
 """
 
 
@@ -3557,7 +3789,15 @@ def _em_list_rows(abs_path, rel_path, state, path_key, file_key):
                 overrides["em_sgdb_cleared"] = ""
                 overrides["em_name_cleared"] = ""
             href = _em_url("/new", state, **overrides)
-            rows.append(f'<a href="{href}" onclick="return selfsteamEmNav(this)"><span class="file-icon">&#128190;</span>{html.escape(entry.name)}</a>')
+            # ROM selection must force a full navigation: the response is
+            # a loading page followed by an artwork-resolution refresh,
+            # not a stable picker fragment for the AJAX swapper.
+            nav = (
+                ' onclick="window.location.href=this.href; return false;"'
+                if file_key == "em_romfile"
+                else ' onclick="return selfsteamEmNav(this)"'
+            )
+            rows.append(f'<a href="{href}"{nav}><span class="file-icon">&#128190;</span>{html.escape(entry.name)}</a>')
     return "".join(rows)
 
 
@@ -3647,6 +3887,7 @@ def _em_picker_section(prefix, label, state, already_installed=None, info_toolti
             _em_romfile_display_name(state.get("em_emulator", ""), selected_file)
             if prefix == "rom" else os.path.basename(selected_file)
         )
+        abs_selected = _ra_safe_join(selected_file)
         # A real Switch key dump usually has title.keys sitting right
         # alongside the picked prod.keys -- install_keys already copies
         # it too automatically when it's there (see its own docstring),
@@ -3654,15 +3895,22 @@ def _em_picker_section(prefix, label, state, already_installed=None, info_toolti
         # one file the user actually clicked. Ryubing-specific (Cemu's
         # own keys.txt has no sibling-file concept at all).
         if prefix == "keys" and state.get("em_emulator") == "Ryubing":
-            abs_selected = _ra_safe_join(selected_file)
             if abs_selected:
                 sibling = os.path.join(os.path.dirname(abs_selected), "title.keys")
                 if os.path.basename(abs_selected) != "title.keys" and os.path.isfile(sibling):
                     display_name = f"{display_name}, title.keys"
+        rom_validation_html = ""
+        if prefix == "rom" and state.get("em_emulator") == standalone_emulators.WHEEL_WIZARD_NAME:
+            valid_mkwii = bool(abs_selected and standalone_emulators.is_mario_kart_wii(abs_selected))
+            if valid_mkwii:
+                rom_validation_html = '<span style="flex:0 0 auto;padding:0.15rem 0.6rem;border-radius:10px;font-size:0.75rem;font-weight:700;color:var(--success-text);background:var(--success-bg);border:1px solid var(--success-border)">Verified</span>'
+            else:
+                rom_validation_html = '<span style="flex:0 0 auto;padding:0.15rem 0.6rem;border-radius:10px;font-size:0.75rem;font-weight:700;color:#8a6d1a;background:#fdf3d9;border:1px solid #f0d68a">Unverified</span>'
         label_row = f"""
     <label class="field-label" style="display:flex;align-items:center;gap:0.4rem;min-width:0">
       <span style="flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{label_text}</span>
       <span class="selected-file-name">&#10003; {html.escape(display_name)}</span>
+      {rom_validation_html}
       <a href="{remove_href}" class="remove-file-btn" title="Remove file" onclick="return selfsteamEmNav(this)">{_X_ICON_SVG}</a>
       {upload_status}
     </label>"""
@@ -3685,7 +3933,7 @@ def _em_picker_section(prefix, label, state, already_installed=None, info_toolti
     upload_action = f"/new/upload-em?{_em_qs(state)}&slot={prefix}#tab-emulators"
     upload_panel = f"""
     <form method="post" enctype="multipart/form-data" action="{upload_action}">
-      <input type="file" name="file" onchange="selfsteamShowUploading('{dom_prefix}'); selfsteamUploadFetch(this, SELFSTEAM_EM_SWAP_IDS)">
+      <input type="file" name="file" onchange="selfsteamShowUploading('{dom_prefix}'); selfsteamEmUploadFetch(this)">
     </form>"""
 
     abs_path = _ra_safe_join(rel_path)
@@ -3693,7 +3941,8 @@ def _em_picker_section(prefix, label, state, already_installed=None, info_toolti
         rel_path = _RA_DEFAULT_RELPATH
         abs_path = _ra_safe_join(rel_path) or _RA_ROOT
     local_panel = (
-        f'<div class="breadcrumbs">{_em_breadcrumbs_html(rel_path, state, path_key)}</div>'
+        f'<div class="picker-location-row"><div class="breadcrumbs">{_em_breadcrumbs_html(rel_path, state, path_key)}</div>'
+        f'{_picker_location_html(state, path_key, _em_url, rel_path, "selfsteamEmNav")}</div>'
         f'<div class="picker-list"><div class="boxed-list">{_em_list_rows(abs_path, rel_path, state, path_key, file_key)}</div></div>'
     )
 
@@ -3901,7 +4150,7 @@ def _em_dlc_picker_section(state):
         upload_panel = f"""
     <form method="post" enctype="multipart/form-data" action="{upload_action}">
       <input type="file" name="file"
-             onchange="selfsteamShowUploading('em-dlc'); selfsteamUploadFetch(this, SELFSTEAM_EM_SWAP_IDS)">
+             onchange="selfsteamShowUploading('em-dlc'); selfsteamEmUploadFetch(this)">
     </form>"""
 
         dlc_rel_path = _ra_resolve_relpath(state.get("em_dlcpath", ""))
@@ -3910,7 +4159,8 @@ def _em_dlc_picker_section(state):
             dlc_rel_path = _RA_DEFAULT_RELPATH
             dlc_abs_path = _ra_safe_join(dlc_rel_path) or _RA_ROOT
         local_panel = (
-            f'<div class="breadcrumbs">{_em_breadcrumbs_html(dlc_rel_path, state, "em_dlcpath")}</div>'
+            f'<div class="picker-location-row"><div class="breadcrumbs">{_em_breadcrumbs_html(dlc_rel_path, state, "em_dlcpath")}</div>'
+            f'{_picker_location_html(state, "em_dlcpath", _em_url, dlc_rel_path, "selfsteamEmNav")}</div>'
             f'<div class="picker-list"><div class="boxed-list">{_em_dlc_list_rows(dlc_abs_path, dlc_rel_path, state)}</div></div>'
         )
 
@@ -3960,6 +4210,13 @@ def _emulator_picker_html(names, current_emulator):
     def _row(name):
         icon_url = standalone_emulators.emulator_icon_url(name)
         consoles = standalone_emulators.EMULATORS.get(name, {}).get("consoles", "")
+        # Flags the entries whose shortcuts can be routed through
+        # Preflight, so that's visible while picking rather than only
+        # after picking (the toggle itself only appears further down
+        # the form, once an emulator that supports it is chosen).
+        tag = ""
+        if name in standalone_emulators.PREFLIGHT_EMULATORS:
+            tag = '<span class="picker-tag">Preflight</span>'
         return f"""
       <div class="apps-card console-picker-row" data-value="{html.escape(name)}" onclick="selfsteamEmEmulatorPicked(this)">
         <img class="apps-card-icon" src="{html.escape(icon_url)}" alt="" loading="lazy">
@@ -3967,6 +4224,7 @@ def _emulator_picker_html(names, current_emulator):
           <div class="apps-card-name">{html.escape(_display_name(name))}</div>
           <div class="apps-card-summary">{html.escape(consoles)}</div>
         </div>
+        {tag}
       </div>"""
 
     rows = "".join(_row(n) for n in names)
@@ -4145,8 +4403,12 @@ def _emulators_tab_panel_html(state, chosen=None):
     # (Program)", etc.) -- a useful disambiguator in a match list, but
     # not something that belongs in the actual shortcut name.
     name_default = "" if name_cleared else (
-        sgdb.clean_sgdb_name(chosen["name"]) if chosen
-        else (_ra_guess_name_from_filename(_em_romfile_display_name(emulator, romfile)) if romfile else "")
+        standalone_emulators.WHEEL_WIZARD_SHORTCUT_NAME
+        if emulator == standalone_emulators.WHEEL_WIZARD_NAME
+        else (
+            sgdb.clean_sgdb_name(chosen["name"]) if chosen
+            else (_ra_guess_name_from_filename(_em_romfile_display_name(emulator, romfile)) if romfile else "")
+        )
     )
     name_reset_href = _em_url("/new", state, em_name_cleared=("" if name_cleared else "1"))
     name_reset_title = "Reset to guessed name" if name_cleared else "Clear"
@@ -4168,6 +4430,42 @@ def _emulators_tab_panel_html(state, chosen=None):
     # checkbox on the shared Add form (form="{_ADD_FORM_ID}"), same
     # "no reason to round-trip the server just to flip it" reasoning as
     # em_match_name/em_zrif -- nothing else on the page reacts to this.
+    # Two things about Wheel Wizard that only bite after the shortcut is
+    # created, so they have to be said before it is.
+    #
+    # The input one is NOT first-run-only, which is why it shows
+    # whenever Wheel Wizard is picked: Wheel Wizard's window is the only
+    # way to start the game at all. Its Program.Main hands argv straight
+    # to Avalonia without parsing a launch flag of its own, and the one
+    # wheelwizard:// URL command (mod install) is registered under
+    # SOFTWARE\Classes behind #if WINDOWS, so it does not exist on
+    # Linux. Every launch therefore goes through a desktop GUI that a
+    # standard gamepad cannot drive. Deliberately not "fixed" by giving
+    # the shortcut a mouse-emulation Steam Input config -- rebinding the
+    # stick to a cursor would wreck the actual racing controls.
+    #
+    # The download one is first-run-only: Wheel Wizard ships no game
+    # content and fetches the Retro Rewind distribution itself on first
+    # launch (~2.0 GB on disk when measured here), outside SelfSteam
+    # entirely, so without warning it just looks like a hang.
+    wheelwizard_notice = ""
+    if emulator == standalone_emulators.WHEEL_WIZARD_NAME:
+        notice_rows = []
+        if not standalone_emulators.installed(emulator):
+            notice_rows.append(
+                "First launch downloads Mario Kart Retro Rewind, roughly 1.8&nbsp;GB, "
+                "inside Wheel Wizard itself. Leave it connected until it finishes."
+            )
+        notice_rows.append(
+            "Wheel Wizard opens its own window to start the game, and a standard gamepad "
+            "cannot navigate it. You may need a mouse and keyboard, or a controller with a "
+            "trackpad. This applies every time the shortcut runs, not just the first."
+        )
+        rows_html = "".join(f'\n    <div class="hint-row">{r}</div>' for r in notice_rows)
+        wheelwizard_notice = f"""
+  <div class="field-group">{rows_html}
+  </div>"""
+
     preflight_block = ""
     if emulator in standalone_emulators.PREFLIGHT_EMULATORS:
         preflight_checked = "checked" if state.get("em_preflight") else ""
@@ -4193,7 +4491,7 @@ def _emulators_tab_panel_html(state, chosen=None):
   <div class="field-group">
     <div style="display:flex;align-items:center;gap:0.5rem">
       <label class="toggle-switch">
-        <input type="checkbox" name="em_preflight" form="{_ADD_FORM_ID}" {preflight_checked}>
+        <input type="checkbox" name="em_preflight" id="em-preflight-toggle" form="{_ADD_FORM_ID}" {preflight_checked}>
         <span class="toggle-switch-track"></span>
         Enable preflight {_info_tooltip_icon_html(preflight_tooltip)}
       </label>
@@ -4210,6 +4508,7 @@ def _emulators_tab_panel_html(state, chosen=None):
       {emulator_picker_html}
     </form>
   </div>
+  {wheelwizard_notice}
   {preflight_block}
   {bios_block}
   {keys_block}
@@ -4235,6 +4534,8 @@ def _em_display_term(state, chosen=None):
     # "cleared" search term stick, but the box's own displayed value
     # kept reverting to the freshly re-resolved game name anyway, which
     # read as "Clear doesn't actually clear it."
+    if state.get("em_emulator") == standalone_emulators.WHEEL_WIZARD_NAME:
+        return standalone_emulators.WHEEL_WIZARD_SHORTCUT_NAME.lower()
     if state.get("em_sgdb_q"):
         return state["em_sgdb_q"].lower()
     if state.get("em_sgdb_cleared"):
@@ -5011,6 +5312,16 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
             if em_entry.get("needs_firmware") else True
         )
     )
+    # Wheel Wizard drives a real Mario Kart Wii disc and nothing else,
+    # so an unverified pick can only ever fail. /add already refuses one
+    # (see _add_standalone_emulator_shortcut), but letting Create be
+    # clicked first meant finding out via an error page instead of the
+    # Unverified badge already sitting next to the filename.
+    if em_state.get("em_emulator") == standalone_emulators.WHEEL_WIZARD_NAME:
+        em_rom_abs = _ra_safe_join(em_state.get("em_romfile", "")) if em_state.get("em_romfile") else None
+        if not (em_rom_abs and standalone_emulators.is_mario_kart_wii(em_rom_abs)):
+            em_prereqs_ready = False
+
     em_ready = em_prereqs_ready and bool(em_state.get("em_resolved"))
     em_awaiting_artwork = em_prereqs_ready and not em_state.get("em_resolved")
 
@@ -5077,7 +5388,13 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
         # the more specific wording is for. Checked fresh at render
         # time; /add re-checks it again for real regardless of what
         # this says.
-        em_already_installed = standalone_emulators.installed(em_emulator)
+        # Names every entry Create will install, not just the picked
+        # one -- Wheel Wizard also pulls in Dolphin (see
+        # standalone_emulators.install_prerequisites). Empty once they
+        # are all present, which is what makes the button fall through
+        # to the generic "Creating Shortcut" spinner. Checked fresh at
+        # render time; /add re-checks for real regardless.
+        em_pending_installs = standalone_emulators.pending_installs(em_emulator)
         em_edit_appid = em_state.get("em_edit_appid", "")
         # shadPS4-only: a .pkg romfile that hasn't been extracted yet is
         # a real, sometimes-multi-minute blocking step inside /add (see
@@ -5095,7 +5412,8 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
         em_nsz_convert_needed = standalone_emulators.nsz_conversion_needed(em_state.get("em_romfile", ""))
         add_form = f"""
 <form id="{_ADD_FORM_ID}" action="/add" method="post" onsubmit="selfsteamShowCreating(this)"
-      data-emulator="{html.escape(em_emulator)}" data-installed="{"1" if em_already_installed else ""}"
+      data-emulator="{html.escape(em_emulator)}"
+      data-installing="{html.escape(", ".join(standalone_emulators.EMULATORS.get(n, {}).get("display_name", n) for n in em_pending_installs))}"
       data-pkg-extract="{"1" if em_pkg_extract_needed else ""}"
       data-nsz-convert="{"1" if em_nsz_convert_needed else ""}">
   <input type="hidden" name="em_emulator" value="{html.escape(em_emulator)}">
@@ -5131,6 +5449,7 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
       data-app-name="{html.escape(apps_state.get('apps_app_name') or apps_app_id)}" data-installed="{"1" if apps_already_installed else ""}">
   <input type="hidden" name="apps_app_id" value="{html.escape(apps_app_id)}">
   <input type="hidden" name="apps_source" value="{html.escape(apps_state.get('apps_source', ''))}">
+  <input type="hidden" name="apps_preflight" value="{html.escape(apps_state.get('apps_preflight', ''))}">
   <input type="hidden" name="apps_edit_appid" value="{html.escape(apps_edit_appid)}">
   <input type="hidden" name="apps_edit_name" value="{html.escape(apps_state.get('apps_edit_name', ''))}">
 </form>
@@ -5622,6 +5941,7 @@ def _poster_card_html(shortcut, pending_removal_appids):
         edit_href = _apps_url("/new", {
             "apps_app_id": shortcut["apps_app_id"], "apps_app_name": name, "apps_preview": "1",
             "apps_source": shortcut.get("apps_source") or "flathub",
+            "apps_preflight": "1" if shortcut.get("apps_preflight") else "",
             "apps_edit_appid": str(appid), "apps_edit_name": name,
         })
     elif shortcut.get("managed"):
@@ -6039,9 +6359,14 @@ class Handler(BaseHTTPRequestHandler):
             em_chosen = None
             em_candidates = {}
             if em_romfile:
-                em_guessed = _ra_guess_name_from_filename(
-                    _em_romfile_display_name(em_state.get("em_emulator", ""), em_romfile)
-                )
+                if em_state.get("em_emulator") == standalone_emulators.WHEEL_WIZARD_NAME:
+                    # Wheel Wizard's shortcut title is intentionally
+                    # independent of the selected ISO/WBFS filename.
+                    em_guessed = standalone_emulators.WHEEL_WIZARD_SHORTCUT_NAME
+                else:
+                    em_guessed = _ra_guess_name_from_filename(
+                        _em_romfile_display_name(em_state.get("em_emulator", ""), em_romfile)
+                    )
                 em_matches = _resolve_matches(
                     em_guessed, service_resolver.Resolved(name=em_guessed), em_state.get("em_sgdb_q"),
                 )
@@ -6707,15 +7032,26 @@ class Handler(BaseHTTPRequestHandler):
         em_zrif = (params.get("em_zrif") or [""])[0].strip()
         em_preflight = bool(params.get("em_preflight"))
         match_name = (
-            (params.get("em_match_name") or [""])[0]
-            or _ra_guess_name_from_filename(_em_romfile_display_name(em_emulator, em_romfile))
-            or em_emulator
+            standalone_emulators.WHEEL_WIZARD_SHORTCUT_NAME
+            if em_emulator == standalone_emulators.WHEEL_WIZARD_NAME
+            else (
+                (params.get("em_match_name") or [""])[0]
+                or _ra_guess_name_from_filename(_em_romfile_display_name(em_emulator, em_romfile))
+                or em_emulator
+            )
         )
 
         romfile_abs = _ra_safe_join(em_romfile)
         if romfile_abs is None or not os.path.isfile(romfile_abs):
             self._send_html(render_done(match_name, ok=False, error="ROM file not found -- please pick it again"))
             return
+        if em_emulator == standalone_emulators.WHEEL_WIZARD_NAME:
+            if not standalone_emulators.is_mario_kart_wii(romfile_abs):
+                self._send_html(render_done(
+                    match_name, ok=False,
+                    error="The selected file is not a recognized Mario Kart Wii ISO or WBFS image",
+                ))
+                return
         # Vita3K .pkg specifically needs a zRIF key alongside it to
         # install at all -- see standalone_emulators.install_vita3k_pkg's
         # own docstring. Checked here (not gating the Create button
@@ -6756,6 +7092,13 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         try:
+            if em_emulator == standalone_emulators.WHEEL_WIZARD_NAME:
+                if not standalone_emulators.installed("Dolphin"):
+                    standalone_emulators.install("Dolphin")
+                if not standalone_emulators.installed(em_emulator):
+                    standalone_emulators.install(em_emulator)
+                standalone_emulators.configure_wheelwizard(romfile_abs)
+
             # Installing the emulator itself is a one-time cost (same
             # deliberate v1 tradeoff as RetroArch's own install above:
             # blocking here keeps this simple, at the cost of the first
@@ -6981,6 +7324,15 @@ class Handler(BaseHTTPRequestHandler):
             if not _apps_source_installed(apps_source, apps_app_id):
                 _apps_source_install(apps_source, apps_app_id)
             launch_args = _apps_source_launch_args(apps_source, apps_app_id)
+            apps_preflight = bool(params.get("apps_preflight")) and _apps_preflight_supported(apps_app_id)
+            steam_input_enabled = None
+            if apps_preflight:
+                preflight_dir = standalone_emulators.ensure_preflight_installed()
+                preflight_sh = os.path.join(preflight_dir, "preflight.sh")
+                if not os.path.isfile(preflight_sh):
+                    raise RuntimeError("Preflight is installed incompletely -- please try again")
+                launch_args = [shlex.quote(preflight_sh), "--", *launch_args]
+                steam_input_enabled = True
 
             slug = create_webapp.slugify(match_name)
             selections = {}
@@ -6991,7 +7343,10 @@ class Handler(BaseHTTPRequestHandler):
                 selections[basename] = {"url": selection_url} if selection_url else None
             asset_paths = create_webapp.download_selected_assets(slug, selections)
             _queue_edit_rename_cleanup(params, "apps", match_name)
-            pending_queue.add(match_name, None, False, asset_paths, launch_args=launch_args)
+            pending_queue.add(
+                match_name, None, False, asset_paths,
+                launch_args=launch_args, steam_input_enabled=steam_input_enabled,
+            )
             # Category/page carried forward, same reasoning as
             # _add_standalone_emulator_shortcut's own em_install_source/
             # em_rompath carry-forward -- lets someone install several

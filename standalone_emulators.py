@@ -121,6 +121,255 @@ def _dolphin_args(romfile):
     return ["-b", "-C", "Dolphin.Display.Fullscreen=True", "-e", shlex.quote(romfile)]
 
 
+WHEEL_WIZARD_APP_ID = "io.github.TeamWheelWizard.WheelWizard"
+WHEEL_WIZARD_NAME = "Wheel Wizard"
+WHEEL_WIZARD_SHORTCUT_NAME = "Mario Kart Retro Rewind"
+_MARIO_KART_WII_IDS = {"RMCE01", "RMCP01", "RMCJ01", "RMCK01"}
+
+
+# Every Wii disc header carries this magic word 0x18 bytes in. It's
+# what lets a six-byte game ID be trusted as an actual disc header
+# rather than six bytes that merely happen to spell one -- an earlier
+# version searched a 1MB prefix for the bare ID string, which would
+# match any disc that so much as mentions Mario Kart Wii's ID
+# somewhere in its own data.
+_WII_MAGIC = b"\x5d\x1c\x9e\xa3"
+_WII_MAGIC_OFFSET = 0x18
+_WII_HEADER_SCAN_BYTES = 0x100000
+
+
+def _wii_game_id_at(buf, start):
+    """The six-byte Wii disc ID at start, but only when the magic word
+    really sits at start+0x18 -- otherwise None."""
+    if start < 0 or start + _WII_MAGIC_OFFSET + len(_WII_MAGIC) > len(buf):
+        return None
+    if buf[start + _WII_MAGIC_OFFSET:start + _WII_MAGIC_OFFSET + len(_WII_MAGIC)] != _WII_MAGIC:
+        return None
+    try:
+        return buf[start:start + 6].decode("ascii")
+    except UnicodeDecodeError:
+        return None
+
+
+def is_mario_kart_wii(path):
+    """Recognize Mario Kart Wii from its Wii disc header, not its filename."""
+    if os.path.splitext(path)[1].lower() not in {".iso", ".wbfs"}:
+        return False
+    try:
+        with open(path, "rb") as f:
+            prefix = f.read(_WII_HEADER_SCAN_BYTES)
+    except (OSError, ValueError):
+        return False
+
+    # A plain ISO keeps the disc header at zero; a WBFS container keeps
+    # its copy of it at 0x200, straight after the WBFS header itself.
+    # Those two cover every ordinary dump.
+    for start in (0x0, 0x200):
+        if _wii_game_id_at(prefix, start) in _MARIO_KART_WII_IDS:
+            return True
+
+    # Anything laid out differently (WBFS tools vary in what they keep
+    # up front) still gets found: locate a real disc header anywhere in
+    # the bounded prefix by its magic word, then read the ID back from
+    # the header that magic belongs to.
+    at = prefix.find(_WII_MAGIC)
+    while at != -1:
+        if _wii_game_id_at(prefix, at - _WII_MAGIC_OFFSET) in _MARIO_KART_WII_IDS:
+            return True
+        at = prefix.find(_WII_MAGIC, at + 1)
+    return False
+
+
+def _dolphin_configure_for_shortcut(ini_path, iso_dir):
+    """Point a Dolphin.ini at one ROM directory and make it behave like
+    a Steam shortcut should, leaving every other setting untouched.
+
+    Three things, all in one read-modify-write so the file is only
+    rewritten once:
+
+    * the ROM directory joins [General]'s ISOPath list;
+    * [Display] Fullscreen -- a shortcut launched from Steam (Game Mode
+      especially) should fill the screen, not open a window. This is a
+      separate setting from GFX.ini's InternalResolution, which is the
+      internal *render* scale: raising that in Wheel Wizard sharpens the
+      image but never changes the window mode, which is why the scale
+      control there appears to do nothing;
+    * [Analytics] PermissionAsked -- Dolphin re-asks its "may we report
+      usage statistics" question on every single startup until this is
+      set, and the dialog is close to undismissable with only a
+      controller in Game Mode. Enabled is written only when the file
+      does not already carry a choice, and it opts *out*: suppressing
+      the prompt is what the shortcut needs, and silently opting
+      somebody into telemetry on their behalf is not ours to do.
+
+    Dolphin stores the list as contiguous ISOPath0..ISOPathN-1 keys
+    plus an ISOPaths count. The existing entries are discovered by
+    walking the ISOPath<n> keys themselves rather than trusting the
+    stored count -- a wrong or missing ISOPaths would otherwise make us
+    drop real paths the user had configured. Already-present
+    directories are left alone instead of being added twice, so
+    re-creating the same shortcut is a no-op.
+    """
+    cp = configparser.ConfigParser(interpolation=None)
+    cp.optionxform = str
+    if os.path.isfile(ini_path):
+        cp.read(ini_path)
+    if not cp.has_section("General"):
+        cp.add_section("General")
+
+    paths, i = [], 0
+    while cp.has_option("General", f"ISOPath{i}"):
+        value = cp.get("General", f"ISOPath{i}")
+        if value:
+            paths.append(value)
+        i += 1
+    if iso_dir not in paths:
+        paths.append(iso_dir)
+
+    for n, value in enumerate(paths):
+        cp.set("General", f"ISOPath{n}", value)
+    cp.set("General", "ISOPaths", str(len(paths)))
+    # Any stale higher-numbered keys left behind by a previously longer
+    # list would otherwise still be read back by the loop above next
+    # time, resurrecting a path that was meant to be gone.
+    n = len(paths)
+    while cp.has_option("General", f"ISOPath{n}"):
+        cp.remove_option("General", f"ISOPath{n}")
+        n += 1
+
+    if not cp.has_section("Display"):
+        cp.add_section("Display")
+    cp.set("Display", "Fullscreen", "True")
+
+    if not cp.has_section("Analytics"):
+        cp.add_section("Analytics")
+    cp.set("Analytics", "PermissionAsked", "True")
+    if not cp.has_option("Analytics", "Enabled"):
+        cp.set("Analytics", "Enabled", "False")
+
+    parent = os.path.dirname(ini_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    with open(ini_path, "w") as f:
+        cp.write(f, space_around_delimiters=True)
+
+
+def _wheelwizard_configure(entry, game_path):
+    """Write only Wheel Wizard's game/Dolphin paths, preserving its profiles."""
+    config_path = _flatpak_config_dir(entry["app_id"], "CT-MKWII", "config.json")
+    os.makedirs(os.path.dirname(config_path), exist_ok=True)
+    data = {}
+    if os.path.isfile(config_path):
+        try:
+            with open(config_path) as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                data = loaded
+        except (OSError, ValueError):
+            raise RuntimeError("Wheel Wizard's config.json is unreadable")
+    dolphin_app_id = EMULATORS["Dolphin"]["app_id"]
+    # Wheel Wizard validates three settings, not two. Without
+    # UserFolderPath it logs "InvalidUserFolderPath (UserFolderPath)"
+    # and keeps asking for Dolphin's config directory on every launch,
+    # however correct the other two are.
+    #
+    # It has to be the Flatpak's *data* dir specifically: Wheel Wizard
+    # matches this value against its own
+    # ^\.var/app/(?<AppId>...)/data/dolphin-emu/?$ pattern and recovers
+    # which Dolphin Flatpak to launch from the AppId inside the path
+    # (see its ExtractDolphinFlatpakAppIdOverrideFromUserFolder).
+    # Confirmed by reading that regex out of WheelWizard.dll and then
+    # watching its own log go from InvalidUserFolderPath to no
+    # validation warnings at all once this was written.
+    #
+    # Created if missing -- Wheel Wizard rejects a path that isn't
+    # there, and on a fresh install Dolphin hasn't made it yet.
+    user_folder = os.path.expanduser(f"~/.var/app/{dolphin_app_id}/data/dolphin-emu")
+    os.makedirs(user_folder, exist_ok=True)
+    data["GameLocation"] = game_path
+    data["DolphinLocation"] = f"flatpak run {dolphin_app_id}"
+    data["UserFolderPath"] = user_folder
+    with open(config_path, "w") as f:
+        json.dump(data, f, indent=2)
+
+    # Only the real Dolphin's own config is written. Wheel Wizard's
+    # ~/.var/app/<ww>/config-dolphin-emu/dolphin-emu is deliberately
+    # NOT touched: Wheel Wizard creates that path itself, as a relative
+    # *symlink* to the Dolphin user folder, every time it launches
+    # (FileHelper.EnsureRelativeSymlink, called from
+    # DolphinLaunchHelper.LaunchDolphin). An earlier version wrote a
+    # Dolphin.ini there, which meant creating it as a real directory --
+    # and Wheel Wizard then refused to start the game at all:
+    #   "Should have created a symlink at '.../config-dolphin-emu/
+    #    dolphin-emu', but a directory already existed at this path!"
+    # Since that symlink resolves to this same Dolphin anyway, writing
+    # here covers both views of the config.
+    #
+    # Read and rewritten in place rather than replaced -- an earlier
+    # version wrote one ConfigParser over both files, silently
+    # replacing a real Dolphin's entire configuration (controllers,
+    # graphics backend, every other ISO path). That never showed up in
+    # testing because the test machine had Dolphin's user data wiped
+    # before each run, so there was nothing there to destroy.
+    _dolphin_configure_for_shortcut(
+        _flatpak_config_dir(EMULATORS["Dolphin"]["app_id"], "dolphin-emu", "Dolphin.ini"),
+        os.path.dirname(game_path),
+    )
+
+
+def install_prerequisites(name):
+    """Every catalog entry that has to be installed before `name`'s own
+    shortcut can work, in the order the Create flow installs them.
+
+    Only Wheel Wizard has any: it drives a separate Dolphin rather than
+    emulating anything itself, so a first Wheel Wizard shortcut installs
+    two Flatpaks, not one. The Create button reads this to name what it
+    is actually downloading instead of claiming it is only fetching
+    Wheel Wizard (see selfsteam_server's own em_pending_installs).
+    """
+    if name == WHEEL_WIZARD_NAME:
+        return ["Dolphin", WHEEL_WIZARD_NAME]
+    return [name]
+
+
+def pending_installs(name):
+    """install_prerequisites minus whatever is already on disk."""
+    return [n for n in install_prerequisites(name) if not installed(n)]
+
+
+def wheelwizard_game_path():
+    config_path = _flatpak_config_dir(WHEEL_WIZARD_APP_ID, "CT-MKWII", "config.json")
+    try:
+        with open(config_path) as f:
+            value = json.load(f).get("GameLocation", "")
+    except (OSError, ValueError, AttributeError):
+        return ""
+    return value if isinstance(value, str) else ""
+
+
+def configure_wheelwizard(game_path):
+    """Point Wheel Wizard and its bundled Dolphin at one Mario Kart Wii file."""
+    _wheelwizard_configure(EMULATORS[WHEEL_WIZARD_NAME], game_path)
+    flatpak = host_exec.which("flatpak")
+    if not flatpak:
+        raise RuntimeError("flatpak isn't available on this host")
+    game_dir = os.path.dirname(game_path)
+    for app_id in (WHEEL_WIZARD_APP_ID, EMULATORS["Dolphin"]["app_id"]):
+        result = subprocess.run(
+            host_exec.wrap([flatpak, "override", "--user", app_id, f"--filesystem={game_dir}:ro"]),
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"could not grant {app_id} access to the Mario Kart Wii directory: "
+                f"{result.stderr.strip() or result.stdout.strip()}"
+            )
+
+
+def _wheelwizard_args(_romfile):
+    return []
+
+
 def _dolphin_configure_game_dir(entry, game_dir):
     # Dolphin.ini, [General] section, count-then-indexed-keys pattern
     # (ISOPaths=<count>, ISOPath0=..., ISOPath1=..., ...) -- confirmed
@@ -595,7 +844,7 @@ EDEN_EMULATORS = frozenset(_EDEN_CPU_TARGETS.values())
 # non-Switch emulator just as well as Ryubing.
 PREFLIGHT_EMULATORS = {
     "Ryubing", "Ryubing (AppImage)", "Ryubing Canary (AppImage)",
-    "Dolphin",
+    "Dolphin", WHEEL_WIZARD_NAME,
 } | EDEN_EMULATORS
 
 
@@ -2291,6 +2540,16 @@ EMULATORS = {
         "args": _dolphin_args,
         "configure_game_dir": _dolphin_configure_game_dir,
     },
+    WHEEL_WIZARD_NAME: {
+        "install_type": "flathub",
+        "app_id": WHEEL_WIZARD_APP_ID,
+        "consoles": "Load your Mario Kart Wii backup file for Mario Kart Retro Rewind shortcut",
+        "needs_bios": False,
+        "needs_keys": False,
+        "needs_firmware": False,
+        "args": _wheelwizard_args,
+        "display_name": WHEEL_WIZARD_NAME,
+    },
     "Ryubing": {
         "install_type": "flathub",
         "app_id": "io.github.ryubing.Ryujinx",
@@ -2939,6 +3198,7 @@ def picker_emulator_names(install_type):
 # variant.
 EMULATOR_ICON_SLUGS = {
     "Dolphin": "dolphin",
+    WHEEL_WIZARD_NAME: "wheelwizard",
     "Ryubing": "ryujinx",
     "Cemu": "cemu",
     "Flycast": "flycast",
