@@ -26,6 +26,20 @@
   </categories>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="0.1.25" date="2026-09-17">
+      <description>
+        <ul>
+          <li>Eden can now be installed from Flathub as well as its AppImage builds -- one entry, no CPU target to pick, since Flathub sorts that out itself</li>
+          <li>Fix Nintendo 64 games not filling the screen: new N64 shortcuts use ParaLLEl N64, which renders fullscreen, instead of Mupen64Plus-Next, which draws the game inset with black on all four sides (existing shortcuts are unchanged -- edit one and pick ParaLLEl N64 if it looks wrong)</li>
+          <li>RetroArch games can now be controlled without a keyboard: click both sticks (L3 + R3) to open RetroArch's own menu, where you can change core options or quit properly</li>
+          <li>RetroArch games now resume where you stopped, instead of restarting from the title screen every time</li>
+          <li>The Create button now says what it is actually installing at that moment, one step at a time, rather than naming everything at once and then sitting still -- a first Wheel Wizard shortcut reads "Downloading Dolphin", then "Downloading Wheel Wizard", then "Configuring Wheel Wizard"</li>
+          <li>Fix the Create button on the RetroArch tab claiming it was downloading a web browser when it was really fetching RetroArch and a core</li>
+          <li>Removing an app no longer opens a popup to tell you it worked -- the change goes to the queue and the counter in the header updates, same as every other queued change</li>
+          <li>Apps tab: Remove is now only offered on apps SelfSteam can actually remove. Apps installed system-wide show an "Installed" tag instead of a Remove button that always failed, and apps SelfSteam can remove are listed first</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.24" date="2026-09-15">
       <description>
         <ul>
