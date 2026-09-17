@@ -800,6 +800,15 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
    vertical padding) despite .apps-btn-remove's own rule looking
    correct in isolation. */
 .apps-grid-list { display: flex; flex-direction: column; gap: 6px; }
+/* Sized to match .apps-btn-remove below, not .picker-tag -- it stands
+   in for that button on a system-wide app and sits in the same slot, so
+   a 0.7rem pill next to 0.85rem buttons read as an afterthought rather
+   than as the card's own installed state. Muted rather than red: it is
+   a status, not an action. */
+.apps-installed-tag { display: inline-flex; align-items: center; justify-content: center;
+  padding: 0.5rem 0.9rem; font-size: 0.85rem; line-height: 1; border-radius: 6px;
+  font-weight: 600; color: var(--text-dim); background: rgba(0,0,0,0.08);
+  border: 1px solid rgba(0,0,0,0.12); cursor: default; }
 .apps-btn-remove { display: inline-flex; align-items: center; justify-content: center;
   padding: 0.5rem 0.9rem; font-size: 0.85rem; line-height: 1; border-radius: 6px;
   text-decoration: none; color: #fff; font-weight: 600; border: none; cursor: pointer;
@@ -1245,6 +1254,26 @@ function selfsteamShowUploading(prefix) {
 // Steam stop/splash/write/restart maintenance cycle) is real, visible-
 // on-a-slow-connection-or-slow-Steam-restart blocking time too, and
 // previously gave zero feedback that the click registered at all.
+// Follows the server's own current step while Create's POST is still
+// in flight -- same poll-a-JSON-status shape as render_restarting's own
+// /commit/status loop. No stop condition on purpose: the POST's
+// response navigates the page away, which ends this with it. A failed
+// poll just retries, since a missed tick only costs one stale label.
+function selfsteamPollInstallStep(button) {
+  var tick = function () {
+    fetch("/install/status").then(function (r) { return r.json(); }).then(function (s) {
+      // textContent-equivalent care: s.step is server-built from
+      // catalog names, but keep it out of innerHTML's reach anyway.
+      if (s.step) {
+        button.textContent = s.step;
+        button.insertAdjacentHTML("beforeend", '<span class="spinner"></span>');
+      }
+      setTimeout(tick, 700);
+    }).catch(function () { setTimeout(tick, 700); });
+  };
+  setTimeout(tick, 700);
+}
+
 function selfsteamShowCreating(form) {
   var button = document.getElementById("selfsteam-add-button");
   if (!button) return;
@@ -1266,16 +1295,22 @@ function selfsteamShowCreating(form) {
   // Chrome's own radio (unrelated, just first/default-checked in the
   // URL tab's own always-present markup) happened to satisfy this
   // branch purely because it matched :checked somewhere on the page.
-  var browserRadio = (!form.dataset.emulator && !form.dataset.appName)
+  // data-ra closes the same hole for the RetroArch tab, whose form sets
+  // neither of the other two and so still showed a browser's name while
+  // really fetching RetroArch and a core.
+  var browserRadio = (!form.dataset.emulator && !form.dataset.appName && !form.dataset.ra)
     ? document.querySelector('input[name="browser"]:checked')
     : null;
   if (form.dataset.installing) {
-    // Whatever Create is really about to fetch, not just the picked
-    // emulator: a first Wheel Wizard shortcut installs Dolphin too, and
-    // saying only "Downloading Wheel Wizard" through a two-Flatpak wait
-    // reads as a hang. Server-rendered, already filtered to what is
-    // actually missing (see em_pending_installs).
-    button.innerHTML = "Downloading " + form.dataset.installing + '<span class="spinner"></span>';
+    // data-installing is the whole list Create is about to fetch, in
+    // the order the server installs it. Only the FIRST one is shown
+    // here, as an immediate label so the button never sits blank, and
+    // from then on /install/status drives it: a first Wheel Wizard
+    // shortcut goes "Downloading Dolphin" then "Downloading Wheel
+    // Wizard" then "Configuring Wheel Wizard", rather than naming
+    // everything at once and saying nothing about what is running.
+    button.innerHTML = "Downloading " + form.dataset.installing.split(", ")[0] + '<span class="spinner"></span>';
+    selfsteamPollInstallStep(button);
   } else if (form.dataset.pkgExtract) {
     button.innerHTML = "Extracting PKG" + '<span class="spinner"></span>';
   } else if (form.dataset.nszConvert) {
@@ -1630,9 +1665,33 @@ function selfsteamAppsCardClick(a) {
 // this one button (see _apps_card_html's own remove_btn markup: Remove
 // only renders at all once already_installed) is the whole thing. If a
 // Steam shortcut already existed for this app, the server has also
-// queued its removal (see /apps/uninstall's own comment) -- surfaced
-// here with a plain alert since there's no other UI on this tab for
-// "this needs a Steam restart to take effect".
+// queued its removal (see /apps/uninstall's own comment).
+//
+// That used to be announced with an alert(), which is the only modal
+// in the app and reads as a confirmation nobody asked for. The queue
+// counter in the header is already the place that says "there are
+// changes waiting on a Steam restart", for every other queued action,
+// so the removal just goes there and the counter is refreshed in
+// place. Same destination as before, one less thing to dismiss.
+// Re-reads just the header's queue block from the server. Needed
+// because a fetch-only action (the Apps tab's Remove) never navigates
+// or swaps a panel, so nothing else would notice the queue grew --
+// every other queued action gets this for free from its own page load
+// or panel swap. Failure is ignored on purpose: a stale counter until
+// the next navigation is a far better outcome than an error dialog.
+function selfsteamRefreshQueueCounter() {
+  var slot = document.getElementById("selfsteam-queue-actions");
+  if (!slot) return;
+  fetch(window.location.pathname + window.location.search)
+    .then(function (r) { return r.text(); })
+    .then(function (text) {
+      var doc = new DOMParser().parseFromString(text, "text/html");
+      var fresh = doc.getElementById("selfsteam-queue-actions");
+      if (fresh) slot.replaceWith(fresh);
+    })
+    .catch(function () {});
+}
+
 function selfsteamAppsUninstall(btn) {
   var appId = btn.getAttribute("data-app-id");
   var source = btn.getAttribute("data-source") || "flathub";
@@ -1648,7 +1707,7 @@ function selfsteamAppsUninstall(btn) {
       if (result.ok) {
         btn.style.display = "none";
         if (result.shortcut_removed) {
-          alert("App removed. Its Steam shortcut is queued for removal on next Steam restart.");
+          selfsteamRefreshQueueCounter();
         }
       } else {
         btn.disabled = false;
@@ -1977,7 +2036,7 @@ def _queue_actions_html():
     disabled = "" if n else " disabled"
     counter_class = "queue-counter" if n else "queue-counter empty"
     return f"""
-<div class="queue-actions">
+<div class="queue-actions" id="selfsteam-queue-actions">
   <form action="/commit" method="post" style="margin:0">
     <button type="submit" class="restart-btn"{disabled}>Save changes and restart Steam</button>
   </form>
@@ -3345,7 +3404,8 @@ def _apps_url(path, state, **overrides):
     return f"{path}?{_apps_qs(state, **overrides)}#tab-apps"
 
 
-def _apps_card_html(hit, state, category, page, installed_ids, source="flathub", shortcut_app_ids=frozenset()):
+def _apps_card_html(hit, state, category, page, installed_ids, source="flathub", shortcut_app_ids=frozenset(),
+                    removable_ids=None):
     # One card's markup -- shared by _apps_tab_panel_html's own first
     # page and /apps/more's incremental scroll fetch (see
     # selfsteamAppsObserveScroll in PAGE_TAIL), so a page loaded via
@@ -3382,14 +3442,45 @@ def _apps_card_html(hit, state, category, page, installed_ids, source="flathub",
             "apps_sgdb_q": "", "apps_match_index": "", "apps_preflight": "",
         }),
     )
-    # Remove only ever shows once actually installed -- nothing to
-    # remove otherwise. data-source tells /apps/uninstall which real
-    # uninstall function to call (see selfsteamAppsUninstall).
-    remove_btn = (
-        f'<button type="button" class="apps-btn-remove" data-app-id="{html.escape(app_id)}" data-source="{html.escape(source)}" '
-        f'onclick="return selfsteamAppsUninstall(this)">Remove</button>'
-        if already_installed else ""
+    # This slot is the ONLY thing on a card that says "installed" --
+    # there is no separate installed marker (apps-card-shortcut-check
+    # below means a Steam shortcut exists, which is a different
+    # question). So an installed app must always render something here,
+    # and which one depends on whether this user can actually remove it:
+    #
+    #   user-scope    -> a real Remove button
+    #   system-scope  -> an "Installed" tag, and no button
+    #
+    # A system-wide Flatpak is genuinely installed but removing one
+    # needs root, which means a polkit prompt on the machine's own
+    # screen that nobody can answer from a web UI, and that is worse
+    # than useless in Game Mode. Offering Remove anyway just produced
+    # flatpak's own "No installed refs found for <id>" every time
+    # (confirmed live on a Steam Deck, where 20 of 26 installed apps
+    # are system-scope). Hiding the slot outright was worse still: it
+    # made those 20 apps look uninstalled.
+    #
+    # removable_ids=None means the caller did not resolve scope, so fall
+    # back to the old "installed implies removable" behaviour rather
+    # than mislabelling everything. AppImage entries are always ours to
+    # delete, so scope never applies to them.
+    # data-source tells /apps/uninstall which real uninstall function to
+    # call (see selfsteamAppsUninstall).
+    removable = already_installed and (
+        source != "flathub" or removable_ids is None or app_id in removable_ids
     )
+    if removable:
+        remove_btn = (
+            f'<button type="button" class="apps-btn-remove" data-app-id="{html.escape(app_id)}" data-source="{html.escape(source)}" '
+            f'onclick="return selfsteamAppsUninstall(this)">Remove</button>'
+        )
+    elif already_installed:
+        remove_btn = (
+            f'<span class="apps-installed-tag" title="Installed system-wide, so removing it needs administrator '
+            f'rights. On the machine itself: sudo flatpak uninstall --system -y {html.escape(app_id)}">Installed</span>'
+        )
+    else:
+        remove_btn = ""
     icon_html = f'<img class="apps-card-icon" src="{html.escape(icon)}" alt="" loading="lazy">' if icon else '<span class="apps-card-icon"></span>'
     # title on the link itself (not a separate icon) -- a native
     # browser tooltip on hover, same zero-JS mechanism
@@ -3515,6 +3606,14 @@ def _apps_tab_panel_html(state, hits, total_pages):
         {app_id for app_id in appimage_apps.APPS if appimage_apps.installed(app_id)}
         if apps_source == "appimage" else standalone_emulators.installed_flathub_app_ids()
     )
+    # Which of those this user can actually remove. Resolved once per
+    # render, not per card (see user_installed_flathub_app_ids). An
+    # AppImage is always ours to delete, so there installed and
+    # removable are the same set.
+    removable_ids = (
+        installed_ids if apps_source == "appimage"
+        else standalone_emulators.user_installed_flathub_app_ids()
+    )
     # Installed apps first -- sorted() is stable, so within "installed"
     # and "not installed" each keeps Flathub's own trending/relevance
     # order, this only ever reorders across that one boundary. Only
@@ -3522,10 +3621,18 @@ def _apps_tab_panel_html(state, hits, total_pages):
     # selfsteam-apps-grid-boundary below for how a later page's own
     # installed apps still end up ahead of an earlier page's
     # not-yet-installed ones once scrolled in.
-    hits = sorted(hits, key=lambda hit: hit.get("app_id") not in installed_ids)
+    # Three tiers, not two: the apps SelfSteam can actually act on come
+    # first, then ones that are installed but system-wide (it can only
+    # report those, not remove them), then everything else. False sorts
+    # before True, hence the negations.
+    hits = sorted(hits, key=lambda hit: (
+        hit.get("app_id") not in removable_ids,
+        hit.get("app_id") not in installed_ids,
+    ))
     shortcut_app_ids = _apps_shortcut_app_ids()
     cards = [
-        _apps_card_html(hit, state, category, page, installed_ids, source=apps_source, shortcut_app_ids=shortcut_app_ids)
+        _apps_card_html(hit, state, category, page, installed_ids, source=apps_source,
+                        shortcut_app_ids=shortcut_app_ids, removable_ids=removable_ids)
         for hit in hits
     ]
     # A stable insertion point, always present once there's at least
@@ -5359,8 +5466,17 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
     # (with stale data) instead of actually searching.
     if ra_ready:
         ra_edit_appid = ra_state.get("ra_edit_appid", "")
+        # Same data-installing contract as the Emulators tab's own form
+        # below: RetroArch and the picked core, filtered to whichever is
+        # actually missing. data-ra additionally marks this form so the
+        # browser-radio branch in selfsteamShowCreating cannot claim it
+        # (see its own comment -- the URL tab's always-present markup
+        # means a :checked browser radio exists page-wide regardless of
+        # which tab is being used).
+        ra_pending_installs = retroarch_cores.pending_installs(ra_console)
         add_form = f"""
-<form id="{_ADD_FORM_ID}" action="/add" method="post" onsubmit="selfsteamShowCreating(this)">
+<form id="{_ADD_FORM_ID}" action="/add" method="post" onsubmit="selfsteamShowCreating(this)"
+      data-ra="1" data-installing="{html.escape(", ".join(ra_pending_installs))}">
   <input type="hidden" name="ra_console" value="{html.escape(ra_console)}">
   <input type="hidden" name="ra_romfile" value="{html.escape(ra_state.get('ra_romfile', ''))}">
   <input type="hidden" name="ra_biosfile" value="{html.escape(ra_state.get('ra_biosfile', ''))}">
@@ -5682,6 +5798,25 @@ def render_done(name, ok, error=None):
 # the duration instead of nothing.
 _commit_status = {"running": False, "done": False, "ok": None, "label": "", "error": None}
 _commit_status_lock = threading.Lock()
+
+# What Create is doing right this second, for the button to show while
+# its own POST is still blocked. Same shape as _commit_status above and
+# polled the same way -- a first Wheel Wizard shortcut fetches two
+# Flatpaks one after the other, and naming both at once ("Downloading
+# Dolphin, Wheel Wizard") says nothing about which is actually running.
+# Safe to read from another thread mid-POST because the server is a
+# ThreadingHTTPServer, so the poll is handled on its own thread.
+_install_status = {"step": ""}
+_install_status_lock = threading.Lock()
+
+
+def _set_install_step(step):
+    with _install_status_lock:
+        _install_status["step"] = step
+
+
+def _em_display_name(name):
+    return standalone_emulators.EMULATORS.get(name, {}).get("display_name", name)
 
 
 def _run_commit_in_background(items, label):
@@ -6485,7 +6620,9 @@ class Handler(BaseHTTPRequestHandler):
             apps_hits = sorted(apps_hits, key=lambda hit: hit.get("app_id") not in installed_ids)
             state = {"apps_category": apps_category, "apps_page": str(apps_page), "apps_search_q": apps_search_q}
             cards_html = "".join(
-                _apps_card_html(hit, state, apps_category, apps_page, installed_ids, shortcut_app_ids=shortcut_app_ids)
+                _apps_card_html(hit, state, apps_category, apps_page, installed_ids,
+                                shortcut_app_ids=shortcut_app_ids,
+                                removable_ids=standalone_emulators.user_installed_flathub_app_ids())
                 for hit in apps_hits
             )
             self._send_json({"html": cards_html, "has_more": apps_page < apps_total_pages, "next_page": apps_page + 1})
@@ -6512,7 +6649,9 @@ class Handler(BaseHTTPRequestHandler):
             apps_hits = sorted(apps_hits, key=lambda hit: hit.get("app_id") not in installed_ids)
             state = {"apps_category": (params.get("apps_category") or ["game"])[0], "apps_page": "1", "apps_search_q": apps_search_q}
             cards_html = "".join(
-                _apps_card_html(hit, state, state["apps_category"], 1, installed_ids, shortcut_app_ids=shortcut_app_ids)
+                _apps_card_html(hit, state, state["apps_category"], 1, installed_ids,
+                                shortcut_app_ids=shortcut_app_ids,
+                                removable_ids=standalone_emulators.user_installed_flathub_app_ids())
                 for hit in apps_hits
             )
             self._send_json({
@@ -6531,6 +6670,12 @@ class Handler(BaseHTTPRequestHandler):
 
         if parsed.path == "/restarting":
             self._send_html(render_restarting())
+            return
+
+        if parsed.path == "/install/status":
+            with _install_status_lock:
+                step = _install_status["step"]
+            self._send_json({"step": step})
             return
 
         if parsed.path == "/commit/status":
@@ -6986,9 +7131,17 @@ class Handler(BaseHTTPRequestHandler):
             # are fast (a few MB each from libretro's buildbot) and
             # don't have this concern.
             if not retroarch_cores.retroarch_installed():
+                _set_install_step("Downloading RetroArch")
                 retroarch_cores.install_retroarch()
             if not retroarch_cores.core_installed(ra_console):
+                _, _, core_display = ra_console.partition(" - ")
+                _set_install_step(f"Downloading {core_display or ra_console}")
                 retroarch_cores.install_core(ra_console)
+            # Tried on every Create rather than only on a fresh
+            # install -- the gaps this fills are just as real on a
+            # RetroArch installed before this existed. It writes at
+            # most once ever and then no-ops, see its own docstring.
+            retroarch_cores.configure_for_shortcuts()
             if biosfile_abs:
                 retroarch_cores.install_bios(biosfile_abs)
 
@@ -7093,10 +7246,11 @@ class Handler(BaseHTTPRequestHandler):
 
         try:
             if em_emulator == standalone_emulators.WHEEL_WIZARD_NAME:
-                if not standalone_emulators.installed("Dolphin"):
-                    standalone_emulators.install("Dolphin")
-                if not standalone_emulators.installed(em_emulator):
-                    standalone_emulators.install(em_emulator)
+                for prereq in standalone_emulators.install_prerequisites(em_emulator):
+                    if not standalone_emulators.installed(prereq):
+                        _set_install_step(f"Downloading {_em_display_name(prereq)}")
+                        standalone_emulators.install(prereq)
+                _set_install_step("Configuring Wheel Wizard")
                 standalone_emulators.configure_wheelwizard(romfile_abs)
 
             # Installing the emulator itself is a one-time cost (same
@@ -7106,6 +7260,7 @@ class Handler(BaseHTTPRequestHandler):
             # installed check short-circuits every time after that.
             was_already_installed = standalone_emulators.installed(em_emulator)
             if not was_already_installed:
+                _set_install_step(f"Downloading {_em_display_name(em_emulator)}")
                 standalone_emulators.install(em_emulator)
                 # Only right after SelfSteam itself did a fresh install --
                 # never for an emulator the user already had, whose own
@@ -7204,7 +7359,7 @@ class Handler(BaseHTTPRequestHandler):
                     if row["kind"] in ("update", "dlc")
                 ]
                 dlc_update_abs_paths = [p for p in dlc_update_abs_paths if p]
-                standalone_emulators.install_eden_dlc_and_updates(dlc_update_abs_paths)
+                standalone_emulators.install_eden_dlc_and_updates(dlc_update_abs_paths, em_emulator)
             elif em_emulator in standalone_emulators.PS4_DLC_UPDATE_EMULATORS:
                 em_dlc_state = _em_state_from_params(params)
                 dlc_rows = _em_dlc_classify_ps4(em_dlc_state)

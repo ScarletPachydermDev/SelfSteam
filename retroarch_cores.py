@@ -94,8 +94,21 @@ _CONSOLE_ENTRIES = [
     # ("bsnes") and mesen-s_libretro.info ("Mesen-S").
     ("Super Nintendo", "bsnes", False, "bsnes", True),
     ("Super Nintendo", "mesen-s", False, "Mesen-S", False),
-    ("Nintendo 64", "mupen64plus_next", False, "Mupen64Plus-Next", True),
-    ("Nintendo 64", "parallel_n64", False, "ParaLLEl N64", False),
+    # ParaLLEl N64 is the default rather than Mupen64Plus-Next:
+    # confirmed live on a Steam Deck (2026-09-17) that Mupen64Plus-Next
+    # renders inset, letterboxed on all four sides, instead of filling
+    # the screen, while ParaLLEl N64 fills it correctly with everything
+    # else identical -- same shortcut launcher, same RetroArch config,
+    # and both cores reporting the same 640x480 geometry at aspect
+    # 1.333 into the same 1024x1024 HW-render framebuffer. The drawn
+    # area stayed pinned at ~1025x624 no matter what was changed
+    # (aspect_ratio_index core-provided vs explicit 4:3, the core's own
+    # 43screensize from 640x480 to 1280x960, which really did move its
+    # reported geometry and double the framebuffer), so the cause is
+    # inside Mupen64Plus-Next's own presentation and not anything
+    # SelfSteam or RetroArch config can reach.
+    ("Nintendo 64", "mupen64plus_next", False, "Mupen64Plus-Next", False),
+    ("Nintendo 64", "parallel_n64", False, "ParaLLEl N64", True),
     ("Game Boy", "gambatte", False, "Gambatte", True),
     ("Game Boy Color", "gambatte", False, "Gambatte", True),
     # corename confirmed via libretro-core-info's own sameboy_libretro.info
@@ -274,6 +287,98 @@ def default_label_for_group(group):
     return entries[0][1]
 
 
+# Settings SelfSteam fills in on a RetroArch it creates shortcuts for.
+#
+# input_menu_toggle_gamepad_combo -- 2 is L3 + R3, clicking both
+# sticks. RetroArch's full option list, read out of its own binary
+# rather than recalled: Down+Y+L1+R1, L3+R3, L1+R1+Start+Select,
+# L3+R1, Hold Start, Hold Select (there is no bare Start+Select).
+# L3+R3 is the safest of them for this catalog's consoles -- nothing
+# before the sixth generation has stick clicks at all, so on an N64,
+# SNES or Mega Drive core there is no game input it can collide with.
+# Without it there is no controller route to RetroArch's menu at all:
+# it ships menu toggle on F1 and quit on Escape, combo at 0 and every
+# hotkey _btn at "nul", which is keyboard-only and therefore useless in
+# Game Mode.
+#
+# savestate_auto_save / savestate_auto_load -- resume each game where
+# it was left. Confirmed live on a Steam Deck that the state really is
+# written when the game is closed through Steam's own Exit Game, not
+# just through RetroArch's menu, so this does not quietly fail for the
+# way most people will actually exit.
+#
+# savestate_auto_index is deliberately NOT set: left at false, each
+# game keeps one auto state that is overwritten, rather than
+# accumulating a numbered pile. Starting a game fresh then means
+# loading a different state or clearing that one from RetroArch's own
+# menu, which is the accepted trade for resuming by default.
+_SHORTCUT_SETTINGS = {
+    "input_menu_toggle_gamepad_combo": "2",
+    "savestate_auto_save": "true",
+    "savestate_auto_load": "true",
+}
+
+
+def _retroarch_config_path():
+    return os.path.expanduser(f"~/.var/app/{RETROARCH_APP_ID}/config/retroarch/retroarch.cfg")
+
+
+def _shortcut_settings_marker():
+    # SelfSteam-owned, beside RetroArch's own config -- the leading dot
+    # (unlike every real file RetroArch writes there) marks it as ours,
+    # same convention as standalone_emulators' own preflight marker.
+    return os.path.join(os.path.dirname(_retroarch_config_path()), ".selfsteam-defaults")
+
+
+def configure_for_shortcuts():
+    """Apply _SHORTCUT_SETTINGS to RetroArch's own config, once ever.
+
+    Once, not every Create, and that is the whole reason the marker
+    exists. These are ordinary booleans whose "off" value is also
+    RetroArch's default, so there is no way to tell a user who
+    deliberately turned autosave off from one who never touched it.
+    Re-applying on every Create would silently overrule that choice
+    every time they made it. Writing once and recording that we did
+    means SelfSteam sets a better starting point and then stays out of
+    the way permanently.
+
+    Line-level edit of a large, hand-tuned file, same care as
+    standalone_emulators._eden_register_external_content_dir -- every
+    line other than the ones named here is preserved byte for byte.
+    """
+    marker = _shortcut_settings_marker()
+    if os.path.exists(marker):
+        return
+
+    path = _retroarch_config_path()
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            lines = fh.readlines()
+    except FileNotFoundError:
+        # RetroArch has never run. A config holding only these keys is
+        # valid -- RetroArch fills in every default it does not find.
+        lines = []
+    except OSError:
+        return
+
+    remaining = dict(_SHORTCUT_SETTINGS)
+    for i, line in enumerate(lines):
+        key = line.split("=", 1)[0].strip()
+        if key in remaining:
+            lines[i] = f'{key} = "{remaining.pop(key)}"\n'
+    for key, value in remaining.items():
+        lines.append(f'{key} = "{value}"\n')
+
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.writelines(lines)
+        with open(marker, "w", encoding="utf-8") as fh:
+            fh.write("applied\n")
+    except OSError:
+        return
+
+
 def _cores_dir():
     # Where RetroArch's own Flatpak sandbox looks for cores -- same
     # ~/.var/app/<app-id>/... layout every Flatpak app's persistent data
@@ -327,6 +432,25 @@ def install_retroarch():
         host_exec.wrap([flatpak, "install", "--user", "-y", "flathub", RETROARCH_APP_ID]),
         check=True,
     )
+
+
+def pending_installs(console):
+    """RetroArch itself and this console's core, whichever of the two
+    is not on disk yet, named the way the Create button should say them
+    -- the same job standalone_emulators.pending_installs does for the
+    Emulators tab. Empty once both are present, which is what lets the
+    button fall through to its generic "Creating Shortcut" wording.
+    """
+    pending = []
+    if not retroarch_installed():
+        pending.append("RetroArch")
+    if not core_installed(console):
+        # CONSOLES labels are "<group> - <core display>" (see the
+        # comprehension that builds them), and it is the core being
+        # fetched, not the console.
+        _, _, core_display = console.partition(" - ")
+        pending.append(core_display or console)
+    return pending
 
 
 def install_core(console):

@@ -515,6 +515,10 @@ def _switch_keys_dirs():
         _flatpak_config_dir("io.github.ryubing.Ryujinx", "Ryujinx", "system"),
         _xdg_config_dir("Ryujinx", "system"),
         _xdg_data_dir("eden", "keys"),
+        # Flathub Eden is sandboxed, so it cannot see the AppImage
+        # builds' real ~/.local/share/eden/keys at all -- same
+        # sandboxed-vs-real split this list already makes for Ryubing.
+        _flatpak_data_dir(EDEN_FLATHUB_APP_ID, "eden", "keys"),
     ]
 
 
@@ -833,6 +837,15 @@ _EDEN_CPU_TARGETS = {
 
 EDEN_EMULATORS = frozenset(_EDEN_CPU_TARGETS.values())
 
+# Eden's own Flathub build, published later than the AppImages above.
+# Deliberately NOT part of EDEN_EMULATORS: that set exists to drive the
+# CPU-target filtering (see picker_emulator_names), and there is only
+# one Flatpak build to choose from -- Flathub resolves the right binary
+# itself. It is still Eden for every other purpose, so it joins the
+# Preflight and DLC sets below.
+EDEN_FLATHUB_NAME = "Eden"
+EDEN_FLATHUB_APP_ID = "dev.eden_emu.eden"
+
 
 # Catalog entries Preflight can actually launch -- whichever emulators
 # Preflight itself has grown support for, nothing about the install
@@ -845,7 +858,7 @@ EDEN_EMULATORS = frozenset(_EDEN_CPU_TARGETS.values())
 PREFLIGHT_EMULATORS = {
     "Ryubing", "Ryubing (AppImage)", "Ryubing Canary (AppImage)",
     "Dolphin", WHEEL_WIZARD_NAME,
-} | EDEN_EMULATORS
+} | EDEN_EMULATORS | {EDEN_FLATHUB_NAME}
 
 
 # Every Ryubing catalog entry -- the "Ryubing" family specifically,
@@ -1009,16 +1022,19 @@ def switch_registered_dlc_and_updates(entry, title_id_base_hex):
 # itself -- no per-file JSON metadata needed the way dlc.json/
 # updates.json are for Ryubing, just getting the real file into a
 # directory Eden already knows to scan.
-EDEN_DLC_UPDATE_EMULATORS = set(EDEN_EMULATORS)
+EDEN_DLC_UPDATE_EMULATORS = set(EDEN_EMULATORS) | {EDEN_FLATHUB_NAME}
 
 
-def _eden_config_path():
-    # Same real host path regardless of which of the 4 CPU-target
-    # AppImage variants above is picked -- they're all the same
-    # codebase/config layout, just different build targets, and none
-    # of them are Flatpak-sandboxed (install_type "binary" for all 4),
-    # so there's no Flathub-vs-AppImage split to make here the way
-    # _switch_games_dir has to for Ryubing.
+def _eden_config_path(name=None):
+    # The 4 CPU-target AppImage variants all share one real host path:
+    # same codebase and config layout, just different build targets,
+    # none of them sandboxed. Flathub Eden is sandboxed though, so it
+    # reads its own ~/.var/app/<app-id>/config/eden instead -- the same
+    # Flathub-vs-AppImage split _switch_games_dir already makes for
+    # Ryubing. Defaults to the unsandboxed path when no name is given.
+    entry = EMULATORS.get(name or "", {})
+    if entry.get("install_type") == "flathub":
+        return _flatpak_config_dir(entry["app_id"], "eden", "qt-config.ini")
     return _xdg_config_dir("eden", "qt-config.ini")
 
 
@@ -1037,7 +1053,7 @@ def eden_external_content_dir():
     return _xdg_data_dir("selfsteam", "eden-external-content")
 
 
-def _eden_register_external_content_dir():
+def _eden_register_external_content_dir(name=None):
     """Idempotently ensures eden_external_content_dir() is one of
     Eden's own configured external_content_dirs. A real line-level edit
     of qt-config.ini, confirmed against a genuine installed one (not
@@ -1057,7 +1073,7 @@ def _eden_register_external_content_dir():
     missing-config-file case: Qt would need this file in an exact,
     fully-populated shape to avoid silently discarding a hand-crafted
     partial one the next time Eden actually starts."""
-    config_path = _eden_config_path()
+    config_path = _eden_config_path(name)
     if not os.path.isfile(config_path):
         return
     target_dir = eden_external_content_dir()
@@ -1095,7 +1111,7 @@ def _eden_register_external_content_dir():
         f.writelines(lines)
 
 
-def install_eden_dlc_and_updates(abs_paths):
+def install_eden_dlc_and_updates(abs_paths, name=None):
     """Copies each picked DLC/update file into Eden's own registered
     external-content directory (see eden_external_content_dir) and
     makes sure that directory is actually registered in Eden's config
@@ -1115,7 +1131,15 @@ def install_eden_dlc_and_updates(abs_paths):
     filesystems."""
     if not abs_paths:
         return
-    _eden_register_external_content_dir()
+    # Flathub Eden is sandboxed and its own manifest grants no
+    # filesystem access at all, so without this it cannot read the
+    # directory it was just told to scan. The entry's own
+    # grant_permissions (--filesystem=host:ro) covers this along with
+    # the ROM itself, and grant_permissions runs on every Create, so
+    # this is just making sure it has happened before the config edit
+    # points Eden at a path it might not be able to open.
+    grant_permissions(name)
+    _eden_register_external_content_dir(name)
     target_dir = eden_external_content_dir()
     os.makedirs(target_dir, exist_ok=True)
     for src in abs_paths:
@@ -2550,6 +2574,29 @@ EMULATORS = {
         "args": _wheelwizard_args,
         "display_name": WHEEL_WIZARD_NAME,
     },
+    EDEN_FLATHUB_NAME: {
+        "install_type": "flathub",
+        "app_id": EDEN_FLATHUB_APP_ID,
+        "consoles": "Nintendo Switch",
+        "needs_bios": False,
+        "needs_keys": True,
+        # Same as the AppImage variants: not confirmed to hard-require a
+        # firmware install to boot at all, so not asserted either way.
+        "needs_firmware": False,
+        "args": _eden_args,
+        "keys_installed": _switch_keys_installed,
+        "install_keys": _switch_install_keys,
+        "keys_tooltip": "Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
+        # Confirmed by reading its own Flathub manifest (flathub/
+        # dev.eden_emu.eden): its finish-args grant sockets, dri/input
+        # devices and network, and exactly one filesystem entry -- a
+        # read-only Discord socket path. No home, no host. So like
+        # gopher64 (see grant_permissions' own docstring) it cannot read
+        # a ROM from anywhere outside its sandbox until this is granted,
+        # and the same applies to the DLC/updates directory SelfSteam
+        # registers for it (see install_eden_dlc_and_updates).
+        "grant_permissions": ["--filesystem=host:ro"],
+    },
     "Ryubing": {
         "install_type": "flathub",
         "app_id": "io.github.ryubing.Ryujinx",
@@ -3200,6 +3247,7 @@ EMULATOR_ICON_SLUGS = {
     "Dolphin": "dolphin",
     WHEEL_WIZARD_NAME: "wheelwizard",
     "Ryubing": "ryujinx",
+    EDEN_FLATHUB_NAME: "eden",
     "Cemu": "cemu",
     "Flycast": "flycast",
     "gopher64": "gopher64",
@@ -3461,6 +3509,54 @@ def installed_flathub_app_ids():
     return {line.strip() for line in result.stdout.splitlines() if line.strip()}
 
 
+def user_installed_flathub_app_ids():
+    """The subset of installed_flathub_app_ids that this user can
+    actually remove, i.e. the ones in the user installation rather than
+    the system one. Same one-subprocess-for-the-whole-grid reasoning as
+    installed_flathub_app_ids above -- per-card scope lookups would be
+    a subprocess each.
+
+    The two sets are genuinely different: a system-wide app is really
+    installed (so it earns its installed marker) but cannot be removed
+    without root, so offering Remove on it only ever produces flatpak's
+    own "No installed refs found" (confirmed live on a Steam Deck)."""
+    flatpak = host_exec.which("flatpak")
+    if not flatpak:
+        return set()
+    result = subprocess.run(
+        host_exec.wrap([flatpak, "list", "--user", "--app", "--columns=application"]),
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        return set()
+    return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+
+
+def flathub_app_id_scope(app_id):
+    """Which Flatpak installation an app_id actually lives in --
+    "user", "system", or None when it is not installed at all.
+
+    flathub_app_id_installed above answers a different question than it
+    looks like: `flatpak info` finds an app in EITHER installation, so
+    it says True for a system-wide app that this process has no way to
+    remove. That mismatch is what made the Apps tab offer Remove on a
+    system app and then fail with flatpak's own bare "No installed refs
+    found for <id>" (confirmed live on a Steam Deck with
+    ca.parallel_launcher.ParallelLauncher and net.shadps4.shadPS4).
+    """
+    flatpak = host_exec.which("flatpak")
+    if not flatpak:
+        return None
+    for scope in ("user", "system"):
+        result = subprocess.run(
+            host_exec.wrap([flatpak, "list", f"--{scope}", "--app", "--columns=application"]),
+            capture_output=True, text=True,
+        )
+        if result.returncode == 0 and app_id in result.stdout.split():
+            return scope
+    return None
+
+
 def uninstall_flathub_app_id(app_id):
     """`flatpak uninstall` for a bare app_id -- the Apps tab's own
     Remove button. No retry loop the way install_flathub_app_id has
@@ -3472,6 +3568,22 @@ def uninstall_flathub_app_id(app_id):
     flatpak = host_exec.which("flatpak")
     if not flatpak:
         raise RuntimeError("flatpak isn't available on this host")
+    scope = flathub_app_id_scope(app_id)
+    if scope is None:
+        raise RuntimeError(f"{app_id} isn't installed")
+    if scope == "system":
+        # Deliberately not attempted rather than tried and left to fail:
+        # a system-wide uninstall needs root, which means a polkit
+        # prompt on the machine's own screen -- unanswerable from a web
+        # UI, and worse than useless in Game Mode where there is no
+        # desktop to show it on. The Apps tab already hides Remove for
+        # these (see _apps_card_html), so this is the backstop for a
+        # request that arrives anyway.
+        raise RuntimeError(
+            f"{app_id} is installed system-wide, so removing it needs administrator rights. "
+            f"Run this in a terminal on the machine itself: "
+            f"sudo flatpak uninstall --system -y {app_id}"
+        )
     result = subprocess.run(
         host_exec.wrap([flatpak, "uninstall", "--user", "-y", app_id]),
         capture_output=True, text=True,
