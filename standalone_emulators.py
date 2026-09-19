@@ -485,6 +485,13 @@ def _cemu_configure_game_dir(entry, game_dir):
         os.makedirs(os.path.dirname(settings_path), exist_ok=True)
         root = ET.Element("content")
         tree = ET.ElementTree(root)
+        # The wizard's two display choices, answered the way a couch
+        # setup wants them. Only on a fresh file: an existing one holds
+        # the player's own answers.
+        ET.SubElement(root, "fullscreen").text = "true"
+        ET.SubElement(root, "open_pad").text = "true"
+        # Vulkan (Graphic/api 1). Left out, Cemu falls back to 0, OpenGL.
+        ET.SubElement(ET.SubElement(root, "Graphic"), "api").text = "1"
     changed = _cemu_fix_audio_api(root)
     game_paths = root.find("GamePaths")
     if game_paths is None:

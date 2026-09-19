@@ -41,4 +41,8 @@ unset LD_PRELOAD
 python3 "$(dirname "$0")/sync_gamescope_resolution.py" 2>/dev/null
 sleep 0.3
 
+# First-run config for emulators whose wizard would otherwise sit in front
+# of the game (only Cemu so far). No-ops for every other command.
+python3 "$(dirname "$0")/cemu_first_run.py" "$@" 2>/dev/null
+
 exec "$@"

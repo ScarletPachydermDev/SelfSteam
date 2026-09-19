@@ -107,7 +107,7 @@ FLATPAK_STEAM_DATA_DIR = os.path.expanduser("~/.var/app/com.valvesoftware.Steam"
 FLATPAK_LAUNCHER_DIR = os.path.join(FLATPAK_STEAM_DATA_DIR, "selfsteam-launcher")
 _OLD_FLATPAK_LAUNCHER_DIRNAME = "gridge-launcher"
 FLATPAK_LAUNCH_WRAPPER = os.path.join(FLATPAK_LAUNCHER_DIR, _LAUNCH_WRAPPER_NAME)
-_LAUNCHER_COPY_ITEMS = ["sync_gamescope_resolution.py", "vendor"]
+_LAUNCHER_COPY_ITEMS = ["sync_gamescope_resolution.py", "cemu_first_run.py", "vendor"]
 
 # Relocating the wrapper into Steam's own sandbox-visible dir only gets
 # it exec'd -- the browser command inside it (e.g. "/usr/bin/flatpak
@@ -126,6 +126,7 @@ _FLATPAK_STEAM_LAUNCH_SCRIPT = """#!/bin/sh
 unset LD_PRELOAD
 python3 "$(dirname "$0")/sync_gamescope_resolution.py" 2>/dev/null
 sleep 0.3
+python3 "$(dirname "$0")/cemu_first_run.py" "$@" 2>/dev/null
 # --env forwards DISPLAY/WAYLAND_DISPLAY explicitly rather than relying
 # on flatpak-spawn's default environment propagation, which isn't
 # guaranteed to carry them across every Flatpak version -- getting this
