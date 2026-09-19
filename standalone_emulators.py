@@ -485,14 +485,46 @@ def _cemu_configure_game_dir(entry, game_dir):
         os.makedirs(os.path.dirname(settings_path), exist_ok=True)
         root = ET.Element("content")
         tree = ET.ElementTree(root)
+    changed = _cemu_fix_audio_api(root)
     game_paths = root.find("GamePaths")
     if game_paths is None:
         game_paths = ET.SubElement(root, "GamePaths")
-    if any((e.text or "") == game_dir for e in game_paths.findall("Entry")):
-        return
-    entry_el = ET.SubElement(game_paths, "Entry")
-    entry_el.text = game_dir
-    tree.write(settings_path, encoding="utf-8", xml_declaration=True)
+    if not any((e.text or "") == game_dir for e in game_paths.findall("Entry")):
+        entry_el = ET.SubElement(game_paths, "Entry")
+        entry_el.text = game_dir
+        changed = True
+    if changed:
+        tree.write(settings_path, encoding="utf-8", xml_declaration=True)
+
+
+# Cemu's AudioAPI enum (src/audio/IAudioAPI.h): 0 DirectSound, 1 XAudio27,
+# 2 XAudio2, 3 Cubeb. Only Cubeb exists on Linux, yet a settings.xml with
+# no <Audio><api> (including the one bootstrapped above) loads as 0. Cemu
+# then can't find any TV audio device, and some titles hang at their boot
+# splash instead of running silent. Confirmed live on the Machine with
+# Wind Waker HD: frozen at 0% CPU with api 0, booted with sound on api 3.
+_CEMU_AUDIO_API_CUBEB = "3"
+
+
+def _cemu_fix_audio_api(root):
+    """Point Cemu at Cubeb when its audio API is missing or set to a
+    Windows-only one. Returns True if it changed anything."""
+    audio = root.find("Audio")
+    if audio is None:
+        audio = ET.SubElement(root, "Audio")
+    api = audio.find("api")
+    if api is None:
+        api = ET.SubElement(audio, "api")
+    if (api.text or "").strip() == _CEMU_AUDIO_API_CUBEB:
+        return False
+    api.text = _CEMU_AUDIO_API_CUBEB
+    device = audio.find("TVDevice")
+    if device is None:
+        device = ET.SubElement(audio, "TVDevice")
+    # Cubeb's own built-in entry, which follows the system's current
+    # output. A device name from another API would never match.
+    device.text = "default"
+    return True
 
 
 def _switch_keys_dirs():
@@ -857,7 +889,7 @@ EDEN_FLATHUB_APP_ID = "dev.eden_emu.eden"
 # non-Switch emulator just as well as Ryubing.
 PREFLIGHT_EMULATORS = {
     "Ryubing", "Ryubing (AppImage)", "Ryubing Canary (AppImage)",
-    "Dolphin", WHEEL_WIZARD_NAME,
+    "Dolphin", WHEEL_WIZARD_NAME, "Cemu",
 } | EDEN_EMULATORS | {EDEN_FLATHUB_NAME}
 
 
