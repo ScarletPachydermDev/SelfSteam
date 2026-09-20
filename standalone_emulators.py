@@ -896,7 +896,7 @@ EDEN_FLATHUB_APP_ID = "dev.eden_emu.eden"
 # non-Switch emulator just as well as Ryubing.
 PREFLIGHT_EMULATORS = {
     "Ryubing", "Ryubing (AppImage)", "Ryubing Canary (AppImage)",
-    "Dolphin", WHEEL_WIZARD_NAME, "Cemu",
+    "Dolphin", WHEEL_WIZARD_NAME, "Cemu", "gopher64",
 } | EDEN_EMULATORS | {EDEN_FLATHUB_NAME}
 
 
