@@ -2970,11 +2970,12 @@ _EM_STATE_KEYS = [
     "em_bios2path", "em_bios2file", "em_bios2source", "em_bios2_skip",
     "em_bios3path", "em_bios3file", "em_bios3source", "em_bios3_skip",
     "em_bios4path", "em_bios4file", "em_bios4source", "em_bios4_skip",
-    # sbi: an optional subchannel file for LibCrypt PlayStation discs,
-    # shown only for DuckStation with a disc image picked (see
-    # standalone_emulators.sbi_picker_applies). Same
-    # em_<prefix>path/file/source/_skip shape as every other picker.
-    "em_sbipath", "em_sbifile", "em_sbisource", "em_sbi_skip",
+    # Companion files that belong beside a disc image (.sbi, extra .bin
+    # tracks, the discs an .m3u lists), shown only for DuckStation with
+    # a disc image picked -- see standalone_emulators.
+    # extra_files_picker_applies. Accumulates like em_dlc_paths rather
+    # than holding one slot, and shares its separator and helpers.
+    "em_extra_paths", "em_extrapath", "em_extrasource", "em_extra_picker_open",
     "em_keyspath", "em_keysfile", "em_keyssource", "em_keys_skip",
     "em_firmwarepath", "em_firmwarefile", "em_firmwaresource", "em_firmware_skip",
     "em_resolved", "em_sgdb_q", "em_sgdb_cleared", "em_name_cleared",
@@ -4146,6 +4147,137 @@ def _em_dlc_list_rows(abs_path, rel_path, state):
     return "".join(rows)
 
 
+def _em_extra_paths_list(state):
+    return [p for p in (state.get("em_extra_paths") or "").split(_EM_DLC_SEP) if p]
+
+
+def _em_extra_list_rows(abs_path, rel_path, state):
+    """Local-browse rows for the additional-files picker -- same
+    add-then-close behaviour as _em_dlc_list_rows, just against
+    em_extra_paths."""
+    try:
+        entries = sorted(os.scandir(abs_path), key=lambda e: (not e.is_dir(), e.name.lower()))
+    except PermissionError:
+        return '<div class="row" style="color:var(--text-dim)">Permission denied</div>'
+    entries = [e for e in entries if not e.name.startswith(".")]
+    if not entries:
+        return '<div class="row" style="color:var(--text-dim)">Nothing here.</div>'
+    already_added = set(_em_extra_paths_list(state))
+    rows = []
+    for entry in entries:
+        entry_rel = f"{rel_path}/{entry.name}".lstrip("/")
+        if entry.is_dir():
+            href = _em_url("/new", state, em_extrapath=entry_rel)
+            rows.append(f'<a href="{href}" onclick="return selfsteamEmNav(this)"><span class="folder-icon">&#128193;</span>{html.escape(entry.name)}</a>')
+        elif entry_rel in already_added:
+            rows.append(
+                f'<span class="row" style="opacity:0.4;cursor:default">'
+                f'<span class="file-icon">&#128190;</span>{html.escape(entry.name)} &#10003;</span>'
+            )
+        else:
+            overrides = {
+                "em_extrapath": rel_path,
+                "em_extra_paths": _EM_DLC_SEP.join(_em_extra_paths_list(state) + [entry_rel]),
+                "em_extra_picker_open": "",
+            }
+            href = _em_url("/new", state, **overrides)
+            rows.append(f'<a href="{href}" onclick="return selfsteamEmNav(this)"><span class="file-icon">&#128190;</span>{html.escape(entry.name)}</a>')
+    return "".join(rows)
+
+
+def _em_extra_picker_section(state):
+    """Companion files that belong beside the disc image, as a "+" list
+    in the same shape as the DLC+updates picker (see
+    _em_dlc_picker_section for why that shape rather than an always-open
+    browser).
+
+    Always present for an emulator that has one, greyed out until a game
+    is picked -- same as the DLC+updates picker. Optional in every case:
+    most games need nothing here.
+    """
+    emulator = state.get("em_emulator", "")
+    if not standalone_emulators.extra_files_picker_applies(emulator):
+        return ""
+    # Greyed out and inert until a game is picked, exactly as the
+    # DLC+updates picker is: there is nowhere to copy a companion file
+    # to, and no name to give an .sbi, until then.
+    has_rom = bool(state.get("em_romfile"))
+
+    paths = _em_extra_paths_list(state)
+
+    def _row_html(path):
+        remove_href = _em_url("/new", state, em_extra_paths=_EM_DLC_SEP.join(p for p in paths if p != path))
+        return f"""
+      <div class="dlc-added-row">
+        <span style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{html.escape(os.path.basename(path))}</span>
+        <a href="{remove_href}" class="remove-file-btn" title="Remove file" onclick="return selfsteamEmNav(this)">{_X_ICON_SVG}</a>
+      </div>"""
+
+    rows_html = "".join(_row_html(p) for p in paths)
+    picker_open = bool(state.get("em_extra_picker_open"))
+    add_row_href = _em_url("/new", state, em_extra_picker_open=("" if picker_open else "1"))
+    add_row_title = "Hide file picker" if picker_open else "Add a file"
+    add_row_chevron = f'<span class="dlc-add-row-chevron">{_CHEVRON_UP_ICON_SVG}</span>' if picker_open else ""
+    add_row_html = (
+        f'<a href="{add_row_href}" class="dlc-added-row dlc-add-row" onclick="return selfsteamEmNav(this)" '
+        f'title="{add_row_title}">+{add_row_chevron}</a>'
+    )
+    rows_block = f'<div class="picker-list"><div class="dlc-added-list">{rows_html}{add_row_html}</div></div>'
+
+    picker_ui = ""
+    if picker_open:
+        dom_prefix = "em-extra-source"
+        source = state.get("em_extrasource") or "local"
+        upload_action = f"/new/upload-em-extra?{_em_qs(state)}#tab-emulators"
+        upload_panel = f"""
+    <form method="post" enctype="multipart/form-data" action="{upload_action}">
+      <input type="file" name="file"
+             onchange="selfsteamShowUploading('em-extra'); selfsteamEmUploadFetch(this)">
+    </form>"""
+        extra_rel_path = _ra_resolve_relpath(state.get("em_extrapath", ""))
+        extra_abs_path = _ra_safe_join(extra_rel_path)
+        if extra_abs_path is None or not os.path.isdir(extra_abs_path):
+            extra_rel_path = _RA_DEFAULT_RELPATH
+            extra_abs_path = _ra_safe_join(extra_rel_path) or _RA_ROOT
+        local_panel = (
+            f'<div class="picker-location-row"><div class="breadcrumbs">{_em_breadcrumbs_html(extra_rel_path, state, "em_extrapath")}</div>'
+            f'{_picker_location_html(state, "em_extrapath", _em_url, extra_rel_path, "selfsteamEmNav")}</div>'
+            f'<div class="picker-list"><div class="boxed-list">{_em_extra_list_rows(extra_abs_path, extra_rel_path, state)}</div></div>'
+        )
+        upload_display = "" if source == "upload" else "none"
+        local_display = "none" if source == "upload" else ""
+        upload_active = "source-label active" if source == "upload" else "source-label"
+        local_active = "source-label" if source == "upload" else "source-label active"
+        picker_ui = f"""
+    <div class="source-toggle">
+      <a class="{upload_active}" href="javascript:void(0)" id="{dom_prefix}-upload-label" onclick="selfsteamToggleSource('{dom_prefix}', 'upload', 'em_extrasource')">Upload</a>
+      <a class="{local_active}" href="javascript:void(0)" id="{dom_prefix}-local-label" onclick="selfsteamToggleSource('{dom_prefix}', 'local', 'em_extrasource')">{html.escape(_hostname())}</a>
+    </div>
+    <div id="{dom_prefix}-upload-panel" style="display:{upload_display};margin-top:0.6rem">{upload_panel}</div>
+    <div id="{dom_prefix}-local-panel" style="display:{local_display}">{local_panel}</div>"""
+
+    hint = (
+        "Files that belong next to the disc image: an .sbi for LibCrypt games "
+        "(Crash Team Racing and other PAL discs), extra .bin tracks for a .cue, "
+        "or the discs an .m3u lists. An .sbi is renamed to match the disc image, "
+        "which is how DuckStation finds it."
+    )
+    body = f"""
+    {rows_block}
+    {picker_ui}"""
+    if not has_rom:
+        body = f'<div style="opacity:0.5;pointer-events:none">{body}</div>'
+
+    return f"""
+  <div class="field-group">
+    <label class="field-label" style="display:flex;align-items:center;gap:0.4rem;min-width:0">
+      <span style="flex:0 1 auto;min-width:0">Additional files (.sbi, .bin, .m3u) (optional) {_info_tooltip_icon_html(hint)}</span>
+      <span id="em-extra-upload-status" class="upload-status" style="display:none">Reading<span class="spinner"></span></span>
+    </label>
+    {body}
+  </div>"""
+
+
 def _em_dlc_picker_section(state):
     """DLC+updates picker -- Ryubing and Eden only (see
     _DLC_UPDATE_EMULATORS), always visible for one of those but greyed
@@ -4462,20 +4594,7 @@ def _emulators_tab_panel_html(state, chosen=None):
     dlc_block = _em_dlc_picker_section(state)
 
     romfile = state.get("em_romfile", "")
-    # Optional, and only once a disc image is actually picked: a .sbi is
-    # meaningless without one, and most PlayStation games never need it
-    # at all. See standalone_emulators.sbi_picker_applies.
-    sbi_block = ""
-    if standalone_emulators.sbi_picker_applies(emulator, romfile):
-        sbi_tooltip = (
-            "LibCrypt games (Crash Team Racing and other PAL discs) need an .sbi file "
-            "alongside the disc image. Uploading a game cannot bring one with it, so pick it here. "
-            "Leave empty if your game does not have one."
-        )
-        sbi_block = _em_picker_section(
-            "sbi", "Select SBI (optional)", state,
-            info_tooltip=sbi_tooltip, optional=True,
-        )
+    extra_block = _em_extra_picker_section(state)
     # Vita3K .pkg needs a real zRIF license key alongside the package
     # itself to install at all -- see standalone_emulators.
     # install_vita3k_pkg's own docstring. form="{_ADD_FORM_ID}", not
@@ -4640,7 +4759,7 @@ def _emulators_tab_panel_html(state, chosen=None):
   {keys_block}
   {firmware_block}
   {rom_block}
-  {sbi_block}
+  {extra_block}
   {dlc_block}
   {zrif_block}
   <div class="selfsteam-spacer"></div>
@@ -6824,6 +6943,10 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_em_upload()
             return
 
+        if parsed.path == "/new/upload-em-extra":
+            self._handle_em_extra_upload()
+            return
+
         if parsed.path == "/new/upload-em-dlc":
             # Same streaming-upload reasoning as /new/upload-em, but for
             # the DLC+updates picker's own `multiple` file input -- see
@@ -7209,7 +7332,7 @@ class Handler(BaseHTTPRequestHandler):
         em_biosfile = (params.get("em_biosfile") or [""])[0]
         em_keysfile = (params.get("em_keysfile") or [""])[0]
         em_firmwarefile = (params.get("em_firmwarefile") or [""])[0]
-        em_sbifile = (params.get("em_sbifile") or [""])[0]
+        em_extra_paths = [p for p in ((params.get("em_extra_paths") or [""])[0]).split(_EM_DLC_SEP) if p]
         em_zrif = (params.get("em_zrif") or [""])[0].strip()
         em_preflight = bool(params.get("em_preflight"))
         match_name = (
@@ -7271,10 +7394,16 @@ class Handler(BaseHTTPRequestHandler):
         if em_firmwarefile and (em_firmwarefile_abs is None or not os.path.isfile(em_firmwarefile_abs)):
             self._send_html(render_done(match_name, ok=False, error="Firmware zip not found -- please pick it again"))
             return
-        em_sbifile_abs = _ra_safe_join(em_sbifile) if em_sbifile else None
-        if em_sbifile and (em_sbifile_abs is None or not os.path.isfile(em_sbifile_abs)):
-            self._send_html(render_done(match_name, ok=False, error="SBI file not found -- please pick it again"))
-            return
+        em_extra_abs = []
+        for extra in em_extra_paths:
+            extra_abs = _ra_safe_join(extra)
+            if extra_abs is None or not os.path.isfile(extra_abs):
+                self._send_html(render_done(
+                    match_name, ok=False,
+                    error=f"Additional file not found: {os.path.basename(extra)} -- please pick it again",
+                ))
+                return
+            em_extra_abs.append(extra_abs)
 
         try:
             if em_emulator == standalone_emulators.WHEEL_WIZARD_NAME:
@@ -7334,11 +7463,11 @@ class Handler(BaseHTTPRequestHandler):
                 standalone_emulators.install_keys(em_emulator, em_keysfile_abs)
             if em_firmwarefile_abs:
                 standalone_emulators.install_firmware_zip(em_emulator, em_firmwarefile_abs)
-            # Copied next to the disc image and renamed after it, which
-            # is where and how DuckStation looks for it -- see
-            # standalone_emulators.install_sbi.
-            if em_sbifile_abs:
-                standalone_emulators.install_sbi(romfile_abs, em_sbifile_abs)
+            # Companion files go next to the disc image, which is where
+            # the emulator looks for them -- see standalone_emulators.
+            # install_extra_files.
+            if em_extra_abs:
+                standalone_emulators.install_extra_files(romfile_abs, em_extra_abs)
             for prefix, bios_abs in em_bios_slot_files.items():
                 standalone_emulators.install_bios_slot(em_emulator, prefix, bios_abs)
 
@@ -7634,7 +7763,7 @@ class Handler(BaseHTTPRequestHandler):
         params = urllib.parse.parse_qs(parsed.query)
         em_state = _em_state_from_params(params)
         slot = (params.get("slot") or [""])[0]
-        if slot not in ("rom", "bios", "bios2", "bios3", "bios4", "keys", "firmware", "sbi"):
+        if slot not in ("rom", "bios", "bios2", "bios3", "bios4", "keys", "firmware"):
             self._send_html(render("<p>Invalid upload slot</p>"), status=400)
             return
 
@@ -7724,6 +7853,42 @@ class Handler(BaseHTTPRequestHandler):
                 existing.append(rel_path)
 
         overrides = {"em_dlc_paths": _em_dlc_join(existing), "em_dlc_picker_open": ""}
+        self._redirect(_em_url("/new", em_state, **overrides))
+
+    def _handle_em_extra_upload(self):
+        """Companion-file upload -- same multi-part accumulate-and-close
+        shape as _handle_em_dlc_upload, into its own em-extra folder so
+        an upload here never collides with a DLC one."""
+        parsed = urllib.parse.urlparse(self.path)
+        params = urllib.parse.parse_qs(parsed.query)
+        em_state = _em_state_from_params(params)
+
+        content_type = self.headers.get("Content-Type", "")
+        length = int(self.headers.get("Content-Length", 0))
+        dest_dir = os.path.join(_RA_UPLOAD_DIR, "em-extra")
+        os.makedirs(dest_dir, exist_ok=True)
+
+        def make_dest_path(filename):
+            fd, tmp_path = tempfile.mkstemp(dir=dest_dir, prefix=".upload-")
+            os.close(fd)
+            return tmp_path
+
+        try:
+            saved = multipart_upload.save_uploaded_files(self.rfile, content_type, length, make_dest_path)
+        except (ValueError, OSError):
+            self._send_html(render_done("Additional files", ok=False, error="Upload failed -- please try again"))
+            return
+
+        existing = _em_extra_paths_list(em_state)
+        for filename, tmp_path in saved:
+            safe_name = os.path.basename(filename) if filename else os.path.basename(tmp_path)
+            dest_path = os.path.join(dest_dir, safe_name)
+            os.replace(tmp_path, dest_path)
+            rel_path = os.path.relpath(dest_path, _RA_ROOT)
+            if rel_path not in existing:
+                existing.append(rel_path)
+
+        overrides = {"em_extra_paths": _EM_DLC_SEP.join(existing), "em_extra_picker_open": ""}
         self._redirect(_em_url("/new", em_state, **overrides))
 
     def _commit_pending(self):

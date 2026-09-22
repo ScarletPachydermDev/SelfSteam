@@ -1686,40 +1686,55 @@ def install_duckstation_bios_slot(entry, slot_prefix, file_path):
     shutil.copy2(file_path, os.path.join(bios_dir, os.path.basename(file_path)))
 
 
-SBI_EMULATORS = frozenset({"DuckStation"})
+EXTRA_FILES_EMULATORS = frozenset({"DuckStation"})
 
-# Disc images whose .sbi sidecar is worth offering. A .sbi only ever
-# accompanies a PlayStation disc image, so this is also what decides
+# Disc images that can have companion files worth carrying. Companions
+# only make sense next to a disc image, so this is also what decides
 # whether the picker appears at all once DuckStation is chosen.
-SBI_ROM_EXTENSIONS = frozenset({".bin", ".cue", ".img", ".chd", ".iso", ".pbp", ".ecm", ".m3u"})
+EXTRA_FILES_ROM_EXTENSIONS = frozenset({".bin", ".cue", ".img", ".chd", ".iso", ".pbp", ".ecm", ".m3u"})
+
+# A .sbi is found by the disc image's own name, so it is renamed to match
+# rather than copied as-is. Everything else keeps the name it came with:
+# a .cue names its tracks itself, and an .m3u names its discs.
+_RENAME_TO_ROM_EXTENSIONS = frozenset({".sbi"})
 
 
-def sbi_picker_applies(name, romfile):
-    """Whether to offer an .sbi pick for this emulator and ROM.
+def extra_files_picker_applies(name):
+    """Whether this emulator has an additional-files picker at all.
 
-    LibCrypt games (Crash Team Racing and a handful of other PAL discs)
-    need an .sbi subchannel file next to the disc image or they hang or
-    corrupt themselves in play. DuckStation finds it by name, beside the
-    image, which an upload cannot provide: an uploaded ROM is copied on
-    its own into SelfSteam's own uploads folder, leaving any sidecar
-    behind. Hence a picker of its own."""
-    return name in SBI_EMULATORS and (
-        os.path.splitext(romfile)[1].lower() in SBI_ROM_EXTENSIONS if romfile else False
-    )
+    Some discs need a file beside the image to run. LibCrypt games
+    (Crash Team Racing and other PAL discs) need an .sbi holding the
+    subchannel data; a .cue needs its .bin tracks; an .m3u needs the
+    discs it lists. Uploading a game cannot carry any of them, because
+    an uploaded ROM is copied on its own into SelfSteam's own uploads
+    folder, leaving anything beside it behind.
+
+    Keyed on the emulator alone, like the DLC+updates picker: the
+    picker is part of what setting this emulator up looks like, so it
+    stays on screen from the moment the emulator is chosen rather than
+    appearing partway through. It has nowhere to copy files to until a
+    game is picked, so the section renders inert until then."""
+    return name in EXTRA_FILES_EMULATORS
 
 
-def install_sbi(romfile, sbifile):
-    """Put an .sbi file where the emulator will look for it: beside the
-    disc image, named after it. Returns the path written.
+def install_extra_files(romfile, paths):
+    """Copy companion files next to the disc image. Returns what it
+    wrote.
 
-    Renamed rather than copied verbatim, because the emulator matches by
-    the image's own base name, and a file uploaded here can be called
-    anything. Copied even when it is already in the right folder under a
-    different name, so a local pick works the same as an upload."""
-    target = os.path.splitext(romfile)[0] + ".sbi"
-    if os.path.realpath(sbifile) != os.path.realpath(target):
-        shutil.copy2(sbifile, target)
-    return target
+    Copied, never moved, so the originals stay wherever they were
+    picked from."""
+    written = []
+    rom_dir = os.path.dirname(romfile)
+    rom_base = os.path.splitext(os.path.basename(romfile))[0]
+    for path in paths:
+        extension = os.path.splitext(path)[1].lower()
+        name = (rom_base + extension if extension in _RENAME_TO_ROM_EXTENSIONS
+                else os.path.basename(path))
+        target = os.path.join(rom_dir, name)
+        if os.path.realpath(path) != os.path.realpath(target):
+            shutil.copy2(path, target)
+        written.append(target)
+    return written
 
 
 def _duckstation_args(romfile):
