@@ -330,6 +330,154 @@ def _shortcut_settings_marker():
     return os.path.join(os.path.dirname(_retroarch_config_path()), ".selfsteam-defaults")
 
 
+# RetroArch ships 438 controller profiles and finds a pad by matching one
+# against it. The Flatpak points joypad_autoconfig_dir at a folder in the
+# user's own config instead, so people can add their own, and that folder
+# starts out empty: with it set, nothing matches and no controller is
+# configured at all. Seen live on a Steam Machine, where a fresh RetroArch
+# shortcut launched with no working pad.
+#
+# /app/... is the path inside RetroArch's own sandbox, which is where it
+# reads this, and it stays the same across updates -- unlike the real
+# on-disk location, which carries a per-version hash.
+_AUTOCONFIG_KEY = "joypad_autoconfig_dir"
+_BUNDLED_AUTOCONFIG_DIR = "/app/share/libretro/autoconfig"
+
+
+def _autoconfig_dir_is_empty(value):
+    """True if the configured profile folder holds nothing, so RetroArch
+    has no profile to match a controller against."""
+    path = os.path.expanduser(value.strip().strip('"'))
+    if not path:
+        return True
+    try:
+        return not any(os.scandir(path))
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+
+
+def repair_autoconfig_dir():
+    """Point RetroArch back at its own bundled controller profiles when
+    the folder it is using has none. Returns True if it changed anything.
+
+    Unlike the settings above this is not a preference, so it carries no
+    write-once marker: an empty profile folder means controllers do not
+    work at all, and that is worth fixing on an install that already
+    exists, not only on a fresh one. A folder with anything in it is left
+    alone, since that is someone keeping their own profiles there.
+    """
+    path = _retroarch_config_path()
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            lines = fh.readlines()
+    except OSError:
+        return False
+
+    for i, line in enumerate(lines):
+        if line.split("=", 1)[0].strip() != _AUTOCONFIG_KEY:
+            continue
+        value = line.split("=", 1)[1] if "=" in line else ""
+        if not _autoconfig_dir_is_empty(value):
+            return False
+        lines[i] = f'{_AUTOCONFIG_KEY} = "{_BUNDLED_AUTOCONFIG_DIR}"\n'
+        break
+    else:
+        # Key absent entirely: RetroArch's own default already points at
+        # the bundled profiles, so there is nothing to repair.
+        return False
+
+    try:
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.writelines(lines)
+    except OSError:
+        return False
+    return True
+
+
+# RetroArch can keep game saves in a per-core folder ("saves/ParaLLEl
+# N64/..."), which the Flatpak turns on. Switching a shortcut to another
+# core then looks like a wiped game: the new core reads a different
+# folder and finds nothing, while the real save sits untouched under the
+# old core's name. Cores for the same system share the cartridge save
+# format, so one shared folder is both simpler and what RetroArch itself
+# defaults to.
+#
+# Savestates keep their per-core folders on purpose. A savestate is a
+# dump of one core's internal state and means nothing to another, so
+# mixing them in one folder would only invite loading one into a core
+# that cannot read it.
+_SORT_SAVES_KEY = "sort_savefiles_enable"
+_SAVEFILE_DIR_KEY = "savefile_directory"
+
+
+def _config_value(lines, key):
+    for line in lines:
+        if line.split("=", 1)[0].strip() == key:
+            return line.split("=", 1)[1].strip().strip('"') if "=" in line else ""
+    return None
+
+
+def share_saves_between_cores():
+    """Stop RetroArch filing game saves per core, and bring any already
+    filed that way back out into the shared folder. Returns True if it
+    changed anything.
+
+    Copied, never moved: the per-core copy stays where it is, so nothing
+    is lost if this turns out to be unwanted. Saves are kilobytes.
+    Where the same game has a save under several cores, the newest wins,
+    which is the one whoever played it last would expect.
+    """
+    path = _retroarch_config_path()
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            lines = fh.readlines()
+    except OSError:
+        return False
+    if (_config_value(lines, _SORT_SAVES_KEY) or "false").lower() != "true":
+        return False
+
+    for i, line in enumerate(lines):
+        if line.split("=", 1)[0].strip() == _SORT_SAVES_KEY:
+            lines[i] = f'{_SORT_SAVES_KEY} = "false"\n'
+            break
+    try:
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.writelines(lines)
+    except OSError:
+        return False
+
+    saves_dir = os.path.expanduser(_config_value(lines, _SAVEFILE_DIR_KEY) or "")
+    if saves_dir and os.path.isdir(saves_dir):
+        _lift_saves_out_of_core_folders(saves_dir)
+    return True
+
+
+def _lift_saves_out_of_core_folders(saves_dir):
+    """Copy each per-core save up into saves_dir, newest wins."""
+    newest = {}
+    for entry in os.scandir(saves_dir):
+        if not entry.is_dir():
+            continue
+        for save in os.scandir(entry.path):
+            if not save.is_file():
+                continue
+            existing = newest.get(save.name)
+            if existing is None or save.stat().st_mtime > existing[1]:
+                newest[save.name] = (save.path, save.stat().st_mtime)
+    for name, (src, mtime) in newest.items():
+        dest = os.path.join(saves_dir, name)
+        # An existing shared save that is newer than every per-core one
+        # is already the live save; leave it be.
+        if os.path.exists(dest) and os.path.getmtime(dest) >= mtime:
+            continue
+        try:
+            shutil.copy2(src, dest)
+        except OSError:
+            continue
+
+
 def configure_for_shortcuts():
     """Apply _SHORTCUT_SETTINGS to RetroArch's own config, once ever.
 

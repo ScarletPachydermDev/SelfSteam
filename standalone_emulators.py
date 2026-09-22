@@ -1686,6 +1686,42 @@ def install_duckstation_bios_slot(entry, slot_prefix, file_path):
     shutil.copy2(file_path, os.path.join(bios_dir, os.path.basename(file_path)))
 
 
+SBI_EMULATORS = frozenset({"DuckStation"})
+
+# Disc images whose .sbi sidecar is worth offering. A .sbi only ever
+# accompanies a PlayStation disc image, so this is also what decides
+# whether the picker appears at all once DuckStation is chosen.
+SBI_ROM_EXTENSIONS = frozenset({".bin", ".cue", ".img", ".chd", ".iso", ".pbp", ".ecm", ".m3u"})
+
+
+def sbi_picker_applies(name, romfile):
+    """Whether to offer an .sbi pick for this emulator and ROM.
+
+    LibCrypt games (Crash Team Racing and a handful of other PAL discs)
+    need an .sbi subchannel file next to the disc image or they hang or
+    corrupt themselves in play. DuckStation finds it by name, beside the
+    image, which an upload cannot provide: an uploaded ROM is copied on
+    its own into SelfSteam's own uploads folder, leaving any sidecar
+    behind. Hence a picker of its own."""
+    return name in SBI_EMULATORS and (
+        os.path.splitext(romfile)[1].lower() in SBI_ROM_EXTENSIONS if romfile else False
+    )
+
+
+def install_sbi(romfile, sbifile):
+    """Put an .sbi file where the emulator will look for it: beside the
+    disc image, named after it. Returns the path written.
+
+    Renamed rather than copied verbatim, because the emulator matches by
+    the image's own base name, and a file uploaded here can be called
+    anything. Copied even when it is already in the right folder under a
+    different name, so a local pick works the same as an upload."""
+    target = os.path.splitext(romfile)[0] + ".sbi"
+    if os.path.realpath(sbifile) != os.path.realpath(target):
+        shutil.copy2(sbifile, target)
+    return target
+
+
 def _duckstation_args(romfile):
     # "-fullscreen -- <path>" -- confirmed real via DuckStation's own
     # source (qthost.cpp's PrintCommandLineHelp: "-fullscreen: Enters
@@ -1732,6 +1768,17 @@ def _duckstation_bootstrap_config(entry):
         cp.add_section("Main")
     if not cp.has_option("Main", "SetupWizardIncomplete"):
         cp.set("Main", "SetupWizardIncomplete", "false")
+    # [Main]/NoDesktopFile: DuckStation's AppImage build asks, on every
+    # launch, whether to add itself to the application menu ("Would you
+    # like to create a launcher shortcut for DuckStation?"), and the
+    # dialog sits in front of the game until it is answered. Confirmed
+    # via its own source (qthost.cpp's CheckDesktopFile), which prompts
+    # whenever the .desktop file is missing and this key is not set,
+    # and sets it itself when the dialog's "Don't ask again" is ticked.
+    # Someone launching a game from a Steam shortcut never wanted an
+    # application-menu entry, so this answers it for them.
+    if not cp.has_option("Main", "NoDesktopFile"):
+        cp.set("Main", "NoDesktopFile", "true")
     with open(settings_path, "w") as f:
         cp.write(f, space_around_delimiters=True)
 

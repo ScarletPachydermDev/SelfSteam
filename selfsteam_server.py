@@ -2970,6 +2970,11 @@ _EM_STATE_KEYS = [
     "em_bios2path", "em_bios2file", "em_bios2source", "em_bios2_skip",
     "em_bios3path", "em_bios3file", "em_bios3source", "em_bios3_skip",
     "em_bios4path", "em_bios4file", "em_bios4source", "em_bios4_skip",
+    # sbi: an optional subchannel file for LibCrypt PlayStation discs,
+    # shown only for DuckStation with a disc image picked (see
+    # standalone_emulators.sbi_picker_applies). Same
+    # em_<prefix>path/file/source/_skip shape as every other picker.
+    "em_sbipath", "em_sbifile", "em_sbisource", "em_sbi_skip",
     "em_keyspath", "em_keysfile", "em_keyssource", "em_keys_skip",
     "em_firmwarepath", "em_firmwarefile", "em_firmwaresource", "em_firmware_skip",
     "em_resolved", "em_sgdb_q", "em_sgdb_cleared", "em_name_cleared",
@@ -4457,6 +4462,20 @@ def _emulators_tab_panel_html(state, chosen=None):
     dlc_block = _em_dlc_picker_section(state)
 
     romfile = state.get("em_romfile", "")
+    # Optional, and only once a disc image is actually picked: a .sbi is
+    # meaningless without one, and most PlayStation games never need it
+    # at all. See standalone_emulators.sbi_picker_applies.
+    sbi_block = ""
+    if standalone_emulators.sbi_picker_applies(emulator, romfile):
+        sbi_tooltip = (
+            "LibCrypt games (Crash Team Racing and other PAL discs) need an .sbi file "
+            "alongside the disc image. Uploading a game cannot bring one with it, so pick it here. "
+            "Leave empty if your game does not have one."
+        )
+        sbi_block = _em_picker_section(
+            "sbi", "Select SBI (optional)", state,
+            info_tooltip=sbi_tooltip, optional=True,
+        )
     # Vita3K .pkg needs a real zRIF license key alongside the package
     # itself to install at all -- see standalone_emulators.
     # install_vita3k_pkg's own docstring. form="{_ADD_FORM_ID}", not
@@ -4621,6 +4640,7 @@ def _emulators_tab_panel_html(state, chosen=None):
   {keys_block}
   {firmware_block}
   {rom_block}
+  {sbi_block}
   {dlc_block}
   {zrif_block}
   <div class="selfsteam-spacer"></div>
@@ -7142,6 +7162,13 @@ class Handler(BaseHTTPRequestHandler):
             # RetroArch installed before this existed. It writes at
             # most once ever and then no-ops, see its own docstring.
             retroarch_cores.configure_for_shortcuts()
+            # Separate from the settings above because it is a repair,
+            # not a preference, so it has no write-once marker and runs
+            # every time -- see its own docstring.
+            retroarch_cores.repair_autoconfig_dir()
+            # Same every-time reasoning: switching a shortcut's core
+            # must not look like a wiped save, on old installs too.
+            retroarch_cores.share_saves_between_cores()
             if biosfile_abs:
                 retroarch_cores.install_bios(biosfile_abs)
 
@@ -7182,6 +7209,7 @@ class Handler(BaseHTTPRequestHandler):
         em_biosfile = (params.get("em_biosfile") or [""])[0]
         em_keysfile = (params.get("em_keysfile") or [""])[0]
         em_firmwarefile = (params.get("em_firmwarefile") or [""])[0]
+        em_sbifile = (params.get("em_sbifile") or [""])[0]
         em_zrif = (params.get("em_zrif") or [""])[0].strip()
         em_preflight = bool(params.get("em_preflight"))
         match_name = (
@@ -7243,6 +7271,10 @@ class Handler(BaseHTTPRequestHandler):
         if em_firmwarefile and (em_firmwarefile_abs is None or not os.path.isfile(em_firmwarefile_abs)):
             self._send_html(render_done(match_name, ok=False, error="Firmware zip not found -- please pick it again"))
             return
+        em_sbifile_abs = _ra_safe_join(em_sbifile) if em_sbifile else None
+        if em_sbifile and (em_sbifile_abs is None or not os.path.isfile(em_sbifile_abs)):
+            self._send_html(render_done(match_name, ok=False, error="SBI file not found -- please pick it again"))
+            return
 
         try:
             if em_emulator == standalone_emulators.WHEEL_WIZARD_NAME:
@@ -7302,6 +7334,11 @@ class Handler(BaseHTTPRequestHandler):
                 standalone_emulators.install_keys(em_emulator, em_keysfile_abs)
             if em_firmwarefile_abs:
                 standalone_emulators.install_firmware_zip(em_emulator, em_firmwarefile_abs)
+            # Copied next to the disc image and renamed after it, which
+            # is where and how DuckStation looks for it -- see
+            # standalone_emulators.install_sbi.
+            if em_sbifile_abs:
+                standalone_emulators.install_sbi(romfile_abs, em_sbifile_abs)
             for prefix, bios_abs in em_bios_slot_files.items():
                 standalone_emulators.install_bios_slot(em_emulator, prefix, bios_abs)
 
@@ -7597,7 +7634,7 @@ class Handler(BaseHTTPRequestHandler):
         params = urllib.parse.parse_qs(parsed.query)
         em_state = _em_state_from_params(params)
         slot = (params.get("slot") or [""])[0]
-        if slot not in ("rom", "bios", "bios2", "bios3", "bios4", "keys", "firmware"):
+        if slot not in ("rom", "bios", "bios2", "bios3", "bios4", "keys", "firmware", "sbi"):
             self._send_html(render("<p>Invalid upload slot</p>"), status=400)
             return
 
