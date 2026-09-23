@@ -897,6 +897,10 @@ EDEN_FLATHUB_APP_ID = "dev.eden_emu.eden"
 PREFLIGHT_EMULATORS = {
     "Ryubing", "Ryubing (AppImage)", "Ryubing Canary (AppImage)",
     "Dolphin", WHEEL_WIZARD_NAME, "Cemu", "gopher64",
+    # PCSX2 confirmed working on a Steam Machine (2026-09-23); xemu and
+    # DuckStation ride along on the same Preflight backends (see its own
+    # repo's duckstation/xemu/pcsx2 handling).
+    "xemu", "DuckStation", "PCSX2",
 } | EDEN_EMULATORS | {EDEN_FLATHUB_NAME}
 
 
