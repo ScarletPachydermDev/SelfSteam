@@ -340,13 +340,31 @@ def _shortcut_settings_marker():
 # /app/... is the path inside RetroArch's own sandbox, which is where it
 # reads this, and it stays the same across updates -- unlike the real
 # on-disk location, which carries a per-version hash.
-_AUTOCONFIG_KEY = "joypad_autoconfig_dir"
-_BUNDLED_AUTOCONFIG_DIR = "/app/share/libretro/autoconfig"
+# Every folder RetroArch ships content in and then points at a copy in
+# the user's own config, which starts out empty. The consequences differ
+# but the shape is identical: whatever the empty folder was meant to
+# hold, RetroArch behaves as though it does not exist.
+#
+#   joypad_autoconfig_dir -- 438 controller profiles. Empty means no pad
+#     is ever recognised, so a game launches with no working controller.
+#   assets_directory -- the menu's own fonts and icons. Empty means the
+#     menu falls back to a plain font with no button glyphs in its
+#     legend, which is what someone reading it on a TV actually needs.
+#   video_shader_dir -- the bundled shader presets, simply absent.
+#
+# /app/... is the path inside RetroArch's own sandbox, which is where it
+# reads these, and it stays the same across updates, unlike the real
+# on-disk location which carries a per-version hash.
+_BUNDLED_DIRS = {
+    "joypad_autoconfig_dir": "/app/share/libretro/autoconfig",
+    "assets_directory": "/app/share/libretro/assets",
+    "video_shader_dir": "/app/share/libretro/shaders",
+}
 
 
-def _autoconfig_dir_is_empty(value):
-    """True if the configured profile folder holds nothing, so RetroArch
-    has no profile to match a controller against."""
+def _dir_is_empty(value):
+    """True if a configured folder holds nothing, so whatever RetroArch
+    expected to find there is effectively missing."""
     path = os.path.expanduser(value.strip().strip('"'))
     if not path:
         return True
@@ -358,42 +376,52 @@ def _autoconfig_dir_is_empty(value):
         return False
 
 
-def repair_autoconfig_dir():
-    """Point RetroArch back at its own bundled controller profiles when
-    the folder it is using has none. Returns True if it changed anything.
+def repair_bundled_dirs():
+    """Point RetroArch back at its own bundled content wherever the
+    folder it is using is empty. Returns the keys it changed.
 
-    Unlike the settings above this is not a preference, so it carries no
-    write-once marker: an empty profile folder means controllers do not
-    work at all, and that is worth fixing on an install that already
-    exists, not only on a fresh one. A folder with anything in it is left
-    alone, since that is someone keeping their own profiles there.
+    Unlike the settings above these are not preferences, so there is no
+    write-once marker: an empty folder means the content is missing
+    outright, and that is worth fixing on an install that already
+    exists, not only on a fresh one. A folder with anything in it is
+    left alone, since that is someone keeping their own files there.
+    A key that is absent entirely is also left alone: RetroArch's own
+    default already points at the bundled copy.
     """
     path = _retroarch_config_path()
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as fh:
             lines = fh.readlines()
     except OSError:
-        return False
+        return []
 
+    changed = []
     for i, line in enumerate(lines):
-        if line.split("=", 1)[0].strip() != _AUTOCONFIG_KEY:
+        key = line.split("=", 1)[0].strip()
+        bundled = _BUNDLED_DIRS.get(key)
+        if not bundled:
             continue
         value = line.split("=", 1)[1] if "=" in line else ""
-        if not _autoconfig_dir_is_empty(value):
-            return False
-        lines[i] = f'{_AUTOCONFIG_KEY} = "{_BUNDLED_AUTOCONFIG_DIR}"\n'
-        break
-    else:
-        # Key absent entirely: RetroArch's own default already points at
-        # the bundled profiles, so there is nothing to repair.
-        return False
+        # Already pointed at the bundled copy: nothing to do, and
+        # nothing to check either. That path lives inside RetroArch's
+        # own sandbox, which SelfSteam cannot see from inside its own,
+        # so testing whether it is empty would always say yes and
+        # rewrite the same value for ever.
+        if value.strip().strip('"') == bundled:
+            continue
+        if not _dir_is_empty(value):
+            continue
+        lines[i] = f'{key} = "{bundled}"\n'
+        changed.append(key)
 
+    if not changed:
+        return []
     try:
         with open(path, "w", encoding="utf-8") as fh:
             fh.writelines(lines)
     except OSError:
-        return False
-    return True
+        return []
+    return changed
 
 
 # RetroArch can keep game saves in a per-core folder ("saves/ParaLLEl

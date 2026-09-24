@@ -2890,7 +2890,20 @@ def _retroarch_tab_panel_html(state, chosen=None):
     # of a plain navigation so the swap always happens even when only a
     # same-page state flag changed (a plain <a> click to an identical
     # URL+fragment is a real no-op in the browser otherwise).
+    # Always on screen, not gated on a ROM being picked: this is how you
+    # get out of a RetroArch game without a keyboard (and how you reach
+    # core options, such as a core's graphics plugin), so it is worth
+    # reading before a shortcut exists rather than being discovered
+    # afterwards. SelfSteam sets this combo up on every RetroArch
+    # install -- see retroarch_cores._SHORTCUT_SETTINGS.
+    ra_menu_hint = """
+  <div class="hint-row">
+    <span class="info-icon">i</span>
+    <span>In game you can click both sticks (L3 + R3) to open RetroArch's menu,
+      where you can change core options, switch a core's graphics plugin, or quit properly.</span>
+  </div>"""
     name_field = f"""
+  {ra_menu_hint}
   <div class="field-group">
     <label class="field-label" for="ra-name-field">Name</label>
     <div class="field-with-clear">
@@ -7288,7 +7301,7 @@ class Handler(BaseHTTPRequestHandler):
             # Separate from the settings above because it is a repair,
             # not a preference, so it has no write-once marker and runs
             # every time -- see its own docstring.
-            retroarch_cores.repair_autoconfig_dir()
+            retroarch_cores.repair_bundled_dirs()
             # Same every-time reasoning: switching a shortcut's core
             # must not look like a wiped save, on old installs too.
             retroarch_cores.share_saves_between_cores()
