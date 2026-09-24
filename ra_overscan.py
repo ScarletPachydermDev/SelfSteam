@@ -396,6 +396,35 @@ def _write_options(core_name, rom_path, offsets, keys):
     return dest
 
 
+def _applied_offsets(core_name, rom_path, keys):
+    """What the per-game options file is already cropping.
+
+    The options file is the real state; this module's own notes are a
+    cache of it. Reading it back means the two cannot drift apart -- if
+    the notes are lost while a crop is in force, measuring a game that
+    is already correct would otherwise read as "no borders here" and be
+    remembered as needing none.
+    """
+    path = _per_game_opt_path(core_name, rom_path)
+    values = {}
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                key, _, value = line.partition("=")
+                values[key.strip()] = value.strip().strip('"')
+    except OSError:
+        return [0, 0, 0, 0]
+    if values.get(keys["enable"]) != "Enabled":
+        return [0, 0, 0, 0]
+    out = []
+    for side in ("left", "right", "top", "bottom"):
+        try:
+            out.append(int(values.get(keys[side], "0")))
+        except ValueError:
+            out.append(0)
+    return out
+
+
 def calibrate(core_name, rom_path, keys):
     """Sample the running game and write its crop. Returns the offsets
     written, or None if there was nothing worth cropping.
@@ -420,7 +449,8 @@ def calibrate(core_name, rom_path, keys):
     # right answer from below over a session or two. Approaching from
     # below is the point: the cost of stopping early is a thin border,
     # while the cost of overshooting is a missing HUD.
-    applied = list(state.get("offsets") or [0, 0, 0, 0])
+    applied = list(state.get("offsets") or
+                   _applied_offsets(core_name, rom_path, keys))
     extra = None
     taken = 0
     _log(f"calibrating {os.path.basename(rom_path)} on {core_name}")
