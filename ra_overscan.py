@@ -573,7 +573,7 @@ def _commit(core_name, rom_path, applied, extra, keys):
         # the crop only takes effect when the game is next started, so
         # without this the last thing seen is a border that looks
         # uncorrected.
-        _say("SelfSteam: black borders measured, applied on next launch")
+        _say("SelfSteam: black borders measured, will disappear at next game launch")
     return offsets
 
 
