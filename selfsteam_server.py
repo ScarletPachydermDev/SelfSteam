@@ -57,6 +57,7 @@ import maintenance
 import pending_queue
 import multipart_upload
 import nsp_metadata
+import ra_overscan
 import retroarch_cores
 import standalone_emulators
 import service_resolver
@@ -1461,7 +1462,27 @@ var SELFSTEAM_RA_SWAP_IDS = [
   "selfsteam-add-form-slot", "selfsteam-add-button",
 ];
 
-function selfsteamRaFetch(url) { selfsteamTabFetch(url, SELFSTEAM_RA_SWAP_IDS); }
+// Same problem, same fix as selfsteamEmPreflightUrl below: the overscan
+// toggle only lives in the DOM, while every href on this tab was built
+// server-side from the state of the request that rendered it. Folding
+// its live value into each nav keeps a folder click or console change
+// from quietly switching it back on.
+function selfsteamRaOverscanUrl(href) {
+  var box = document.getElementById("ra-overscan-toggle");
+  if (!box) return href;
+  var hash = "";
+  var h = href.indexOf("#");
+  if (h >= 0) { hash = href.slice(h); href = href.slice(0, h); }
+  var q = href.indexOf("?");
+  var base = q >= 0 ? href.slice(0, q) : href;
+  var params = new URLSearchParams(q >= 0 ? href.slice(q + 1) : "");
+  if (box.checked) params.delete("ra_overscan_off");
+  else params.set("ra_overscan_off", "1");
+  var qs = params.toString();
+  return base + (qs ? "?" + qs : "") + hash;
+}
+
+function selfsteamRaFetch(url) { selfsteamTabFetch(selfsteamRaOverscanUrl(url), SELFSTEAM_RA_SWAP_IDS); }
 
 function selfsteamRaNav(a) {
   selfsteamRaFetch(a.getAttribute("href"));
@@ -2293,6 +2314,11 @@ _RA_STATE_KEYS = [
     "ra_console", "ra_rompath", "ra_romfile", "ra_biospath", "ra_biosfile",
     "ra_resolved", "ra_sgdb_q", "ra_romsource", "ra_biossource", "ra_bios_skip",
     "ra_sgdb_cleared", "ra_name_cleared",
+    # "1" only when the N64 overscan toggle has been switched off. Kept
+    # as an "off" flag so the default -- on -- needs nothing in the URL.
+    # The checkbox itself is DOM-only (see selfsteamRaOverscanUrl in
+    # PAGE_TAIL), so this is how its value survives a tab navigation.
+    "ra_overscan_off",
     # Set only when this /new session started from the gallery's own
     # Edit link (see its own comment on edit_href) -- their presence is
     # what switches the Add button to "Save Shortcut" and, if the Name
@@ -2663,7 +2689,7 @@ def _ra_picker_section(prefix, label, state, already_installed=None):
     # this.form.submit() if fetch throws, same as every other nav helper.
     upload_panel = f"""
     <form method="post" enctype="multipart/form-data" action="{upload_action}">
-      <input type="file" name="file" onchange="selfsteamShowUploading('{dom_prefix}'); selfsteamUploadFetch(this, SELFSTEAM_RA_SWAP_IDS)">
+      <input type="file" name="file" onchange="selfsteamShowUploading('{dom_prefix}'); selfsteamUploadFetch(this, SELFSTEAM_RA_SWAP_IDS, selfsteamRaOverscanUrl)">
     </form>"""
 
     abs_path = _ra_safe_join(rel_path)
@@ -2914,6 +2940,26 @@ def _retroarch_tab_panel_html(state, chosen=None):
     </div>
   </div>"""
 
+    # N64 only: those are the cores ra_overscan knows how to set, and
+    # the system where the borders are bad enough to matter. On the Add
+    # form, like the Emulators tab's Preflight toggle, so it submits
+    # with Create rather than navigating on change.
+    overscan_block = ""
+    if console.partition(" - ")[0] == "Nintendo 64":
+        overscan_checked = "" if state.get("ra_overscan_off") else "checked"
+        overscan_tooltip = (
+            "Screen will flash briefly during first few plays while automatic "
+            "overscan cropping measures and removes black borders."
+        )
+        overscan_block = f"""
+  <div class="field-group">
+    <label class="toggle-switch">
+      <input type="checkbox" name="ra_overscan" id="ra-overscan-toggle" form="{_ADD_FORM_ID}" {overscan_checked}>
+      <span class="toggle-switch-track"></span>
+      Automatic overscan cropping {_info_tooltip_icon_html(overscan_tooltip)}
+    </label>
+  </div>"""
+
     return f"""
   <form method="get" action="/new#tab-retroarch" style="margin:0;display:flex;flex-direction:column;gap:0.9rem">
     {hidden_fields}
@@ -2955,6 +3001,7 @@ def _retroarch_tab_panel_html(state, chosen=None):
       </select>
     </div>
   </form>
+  {overscan_block}
   {bios_block}
   {rom_block}
   <div class="selfsteam-spacer"></div>
@@ -6198,6 +6245,7 @@ def _poster_card_html(shortcut, pending_removal_appids):
         edit_href = _ra_url("/new", {
             "ra_console": shortcut["ra_console"],
             "ra_romfile": romfile_rel,
+            "ra_overscan_off": "" if ra_overscan.is_enabled(shortcut["ra_romfile"]) else "1",
             # See _RA_STATE_KEYS' own comment on ra_edit_appid/
             # ra_edit_name -- carries this shortcut's current identity
             # forward so the Add form knows it's editing (swap the
@@ -7314,6 +7362,12 @@ class Handler(BaseHTTPRequestHandler):
             args = retroarch_cores.launch_args(ra_console, romfile_abs)
             if args is None:
                 raise RuntimeError("flatpak isn't available on this host")
+            # Per game, from the RetroArch tab's toggle. A no-op for any
+            # core ra_overscan cannot calibrate.
+            ra_overscan.set_enabled(
+                retroarch_cores.core_path(ra_console), romfile_abs,
+                bool(params.get("ra_overscan")),
+            )
 
             slug = create_webapp.slugify(match_name)
             selections = {}

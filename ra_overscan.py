@@ -409,6 +409,8 @@ def apply_pending(core_name, rom_path, keys):
     RetroArch loads these values as its own and saves them back itself.
     """
     state = _load_state(rom_path)
+    if state.get("disabled"):
+        return None
     offsets = state.get("offsets")
     if not offsets or max(offsets) < _MIN_BORDER_NATIVE:
         return None
@@ -461,8 +463,8 @@ def calibrate(core_name, rom_path, keys):
     so being interrupted costs accuracy rather than the whole result.
     """
     state = _load_state(rom_path)
-    if state.get("done"):
-        return None  # nothing left to trim for this game
+    if state.get("done") or state.get("disabled"):
+        return None  # settled, or switched off for this game
 
     shots_dir = os.path.join(_ra_config_dir(), "screenshots")
     os.makedirs(shots_dir, exist_ok=True)
@@ -595,6 +597,52 @@ def _core_and_rom(argv):
     if len(argv) > 1 and os.path.isfile(argv[-1]):
         rom = argv[-1]
     return (core, rom) if rom else (None, None)
+
+
+def core_for_path(core_path):
+    """The table entry for a core library, or None if this cannot
+    calibrate it."""
+    return _CORES.get(os.path.basename(core_path or ""))
+
+
+def set_enabled(core_path, rom_path, enabled):
+    """Turn automatic cropping on or off for one game. SelfSteam calls
+    this when a shortcut is created or saved, from its toggle.
+
+    Off also takes an existing crop out of force, since someone turning
+    this off after it has run expects the picture back as the game
+    draws it. The measurement is kept, so turning it back on restores
+    the crop on the next launch without measuring all over again.
+    """
+    core = core_for_path(core_path)
+    if not core:
+        return
+    state = _load_state(rom_path)
+    if enabled:
+        state.pop("disabled", None)
+        _save_state(rom_path, state)
+        return
+    state["disabled"] = True
+    _save_state(rom_path, state)
+    path = _per_game_opt_path(core["name"], rom_path)
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            lines = fh.readlines()
+    except OSError:
+        return
+    key = core["keys"]["enable"]
+    for i, line in enumerate(lines):
+        if line.split("=", 1)[0].strip() == key:
+            lines[i] = f'{key} = "Disabled"\n'
+    try:
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.writelines(lines)
+    except OSError:
+        pass
+
+
+def is_enabled(rom_path):
+    return not _load_state(rom_path).get("disabled")
 
 
 def main(argv):
