@@ -107,7 +107,12 @@ FLATPAK_STEAM_DATA_DIR = os.path.expanduser("~/.var/app/com.valvesoftware.Steam"
 FLATPAK_LAUNCHER_DIR = os.path.join(FLATPAK_STEAM_DATA_DIR, "selfsteam-launcher")
 _OLD_FLATPAK_LAUNCHER_DIRNAME = "gridge-launcher"
 FLATPAK_LAUNCH_WRAPPER = os.path.join(FLATPAK_LAUNCHER_DIR, _LAUNCH_WRAPPER_NAME)
-_LAUNCHER_COPY_ITEMS = ["sync_gamescope_resolution.py", "cemu_first_run.py", "vendor"]
+_LAUNCHER_COPY_ITEMS = [
+    "sync_gamescope_resolution.py",
+    "cemu_first_run.py",
+    "ra_overscan.py",
+    "vendor",
+]
 
 # Relocating the wrapper into Steam's own sandbox-visible dir only gets
 # it exec'd -- the browser command inside it (e.g. "/usr/bin/flatpak

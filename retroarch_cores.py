@@ -506,6 +506,58 @@ def _lift_saves_out_of_core_folders(saves_dir):
             continue
 
 
+# What ra_overscan.py needs in order to work at all. Unlike
+# _SHORTCUT_SETTINGS these are not preferences anyone would set
+# deliberately, so they carry no write-once marker and are ensured on
+# every Create -- the same reasoning as the repairs above.
+#
+#   network_cmd_enable -- RetroArch's UDP command port, which is how the
+#     calibration asks a running game for a screenshot to measure.
+#   notification_show_screenshot -- off, so those measurements do not
+#     flash "Screenshot saved" over the game every twenty seconds.
+#   game_specific_options -- lets the measured crop be saved against one
+#     ROM instead of the whole core, which matters because the right
+#     amount differs per game.
+_OVERSCAN_SETTINGS = {
+    "network_cmd_enable": "true",
+    "notification_show_screenshot": "false",
+    "game_specific_options": "true",
+}
+
+
+def enable_overscan_calibration():
+    """Ensure the settings ra_overscan.py depends on. Returns True if it
+    changed anything."""
+    path = _retroarch_config_path()
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            lines = fh.readlines()
+    except OSError:
+        return False
+
+    remaining = dict(_OVERSCAN_SETTINGS)
+    changed = False
+    for i, line in enumerate(lines):
+        key = line.split("=", 1)[0].strip()
+        if key in remaining:
+            want = remaining.pop(key)
+            if line.split("=", 1)[1].strip().strip('"') != want:
+                lines[i] = f'{key} = "{want}"\n'
+                changed = True
+    for key, value in remaining.items():
+        lines.append(f'{key} = "{value}"\n')
+        changed = True
+
+    if not changed:
+        return False
+    try:
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.writelines(lines)
+    except OSError:
+        return False
+    return True
+
+
 def configure_for_shortcuts():
     """Apply _SHORTCUT_SETTINGS to RetroArch's own config, once ever.
 

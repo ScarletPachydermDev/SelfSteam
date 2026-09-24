@@ -7305,6 +7305,9 @@ class Handler(BaseHTTPRequestHandler):
             # Same every-time reasoning: switching a shortcut's core
             # must not look like a wiped save, on old installs too.
             retroarch_cores.share_saves_between_cores()
+            # Same again: what the N64 overscan calibration needs in
+            # order to run at all, not a preference.
+            retroarch_cores.enable_overscan_calibration()
             if biosfile_abs:
                 retroarch_cores.install_bios(biosfile_abs)
 
