@@ -2925,8 +2925,7 @@ def _retroarch_tab_panel_html(state, chosen=None):
     ra_menu_hint = """
   <div class="hint-row">
     <span class="info-icon">i</span>
-    <span>In game you can click both sticks (L3 + R3) to open RetroArch's menu,
-      where you can change core options, switch a core's graphics plugin, or quit properly.</span>
+    <span>In game you can click both sticks (L3 + R3) to open RetroArch's menu.</span>
   </div>"""
     name_field = f"""
   {ra_menu_hint}
