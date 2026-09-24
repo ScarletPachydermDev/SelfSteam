@@ -132,6 +132,11 @@ unset LD_PRELOAD
 python3 "$(dirname "$0")/sync_gamescope_resolution.py" 2>/dev/null
 sleep 0.3
 python3 "$(dirname "$0")/cemu_first_run.py" "$@" 2>/dev/null
+# N64 black borders, same two phases as launch.sh. Run on the host rather
+# than in here: it reads RetroArch's own config and screenshot folders,
+# which Steam's sandbox has no reason to be able to see.
+flatpak-spawn --host python3 "$(dirname "$0")/ra_overscan.py" --apply "$@" >/dev/null 2>&1
+flatpak-spawn --host python3 "$(dirname "$0")/ra_overscan.py" "$@" >/dev/null 2>&1 &
 # --env forwards DISPLAY/WAYLAND_DISPLAY explicitly rather than relying
 # on flatpak-spawn's default environment propagation, which isn't
 # guaranteed to carry them across every Flatpak version -- getting this
