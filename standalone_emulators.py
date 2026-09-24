@@ -58,7 +58,7 @@ import steamos_session
 #       the multi-BIOS-file dispatch (xemu, PCSX2, RPCS3, Vita3K).
 #   keys_installed(name) / install_keys(name, path) -- Switch prod.keys/title.keys handling.
 #   firmware_installed(name) / install_firmware_zip(name, path) -- Switch firmware handling.
-#   configure_renderer(name) -- sets an emulator's own renderer preference, if it has one (xemu -> Vulkan).
+#   configure_renderer(name) -- sets an emulator's own renderer preference, if it has one and its config names none yet (xemu, Flycast -> Vulkan).
 #   bootstrap_config(name) -- copies an emulator's own bundled config it needs but won't set up itself, if any (no current user).
 #   binary_path(name) -- real AppImage path for a "binary" install_type entry.
 #
@@ -1556,20 +1556,54 @@ def _xemu_configure_vulkan(entry):
     > Display > Backend in xemu's own UI, confirmed via its docs) --
     same xemu.toml this file's BIOS-slot writes already touch, just a
     different section/key ([display] renderer = "VULKAN" rather than
-    [sys.files]). OpenGL is xemu's own default; Vulkan is applied
-    unconditionally here since it's a real emulator-wide preference
-    (generally the better-performing/more broadly compatible backend on
-    modern GPUs), not something that varies per shortcut/game the way
-    BIOS files do."""
+    [sys.files]). OpenGL is xemu's own default, and Vulkan is generally
+    the better-performing backend on modern GPUs.
+
+    Written only when the config names no renderer at all -- a better
+    starting point for someone who has never opened xemu's settings,
+    and then out of the way. This used to be applied on every Create,
+    which quietly put Vulkan back every time for anyone who had chosen
+    OpenGL themselves; same rule as Cemu's own first-run config."""
     toml_path = _xemu_toml_path(entry)
     os.makedirs(os.path.dirname(toml_path), exist_ok=True)
     content = ""
     if os.path.isfile(toml_path):
         with open(toml_path) as f:
             content = f.read()
+    if _toml_get_in_section(content, "display", "renderer"):
+        return
     content = _toml_set_in_section(content, "display", "renderer", "VULKAN")
     with open(toml_path, "w") as f:
         f.write(content)
+
+
+def _flycast_configure_vulkan(entry):
+    """Sets Flycast's renderer to Vulkan, on a config that names none.
+
+    emu.cfg, [config] key "pvr.rend", the same file and section
+    _flycast_configure_game_dir already writes. Values come from
+    Flycast's own RenderType enum (core/types.h): 0 OpenGL, 4 Vulkan,
+    with the _OIT variants at 3 and 5. Its default on a Linux build with
+    OpenGL compiled in is OpenGL (core/cfg/option.h's RendererOption),
+    which is why this is worth setting at all -- unlike PCSX2 and
+    DuckStation, which already pick Vulkan for themselves on Linux, or
+    Vita3K and Dolphin, which default to it.
+
+    Only touches an existing emu.cfg, same reasoning as the game-dir
+    writer above, and only when no renderer is named."""
+    config_path = _flatpak_config_dir(entry["app_id"], "flycast", "emu.cfg")
+    if not os.path.isfile(config_path):
+        return
+    cp = configparser.ConfigParser(interpolation=None)
+    cp.optionxform = str
+    cp.read(config_path)
+    if not cp.has_section("config"):
+        cp.add_section("config")
+    if cp.get("config", "pvr.rend", fallback=""):
+        return
+    cp.set("config", "pvr.rend", "4")
+    with open(config_path, "w") as f:
+        cp.write(f, space_around_delimiters=True)
 
 
 def _pcsx2_bios_dir(entry):
@@ -2747,6 +2781,7 @@ EMULATORS = {
         "needs_firmware": False,
         "args": _flycast_args,
         "configure_game_dir": _flycast_configure_game_dir,
+        "configure_renderer": _flycast_configure_vulkan,
     },
     "gopher64": {
         "install_type": "flathub",
