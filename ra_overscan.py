@@ -396,6 +396,29 @@ def _write_options(core_name, rom_path, offsets, keys):
     return dest
 
 
+def apply_pending(core_name, rom_path, keys):
+    """Put the measured crop into the options file, before RetroArch
+    starts.
+
+    Not while it is running. RetroArch rewrites a game's options file
+    when the game exits, from the values it read at startup, so anything
+    written underneath it during play is reverted on quit. That is what
+    kept a measured crop one step behind for ever: each session measured
+    against a crop that had been rolled back, so the leftover never
+    reached zero and it never settled. Writing before launch means
+    RetroArch loads these values as its own and saves them back itself.
+    """
+    state = _load_state(rom_path)
+    offsets = state.get("offsets")
+    if not offsets or max(offsets) < _MIN_BORDER_NATIVE:
+        return None
+    if _applied_offsets(core_name, rom_path, keys) == list(offsets):
+        return None  # already in force
+    _write_options(core_name, rom_path, offsets, keys)
+    _log(f"applied crop {offsets} before launch")
+    return offsets
+
+
 def _applied_offsets(core_name, rom_path, keys):
     """What the per-game options file is already cropping.
 
@@ -544,7 +567,6 @@ def _commit(core_name, rom_path, applied, extra, keys):
     # never needs measuring again.
     done = max(extra) < 1
     _save_state(rom_path, {"offsets": offsets, "done": done})
-    _write_options(core_name, rom_path, offsets, keys)
     _log(f"crop now {offsets}{' (settled)' if done else ''}")
     if done:
         # Worth saying out loud: the screenshot flashes stop here, and
@@ -576,10 +598,14 @@ def _core_and_rom(argv):
 
 
 def main(argv):
-    core, rom_path = _core_and_rom(argv[1:])
+    apply_only = "--apply" in argv
+    core, rom_path = _core_and_rom([a for a in argv[1:] if a != "--apply"])
     if not core:
         return 0
     try:
+        if apply_only:
+            apply_pending(core["name"], rom_path, core["keys"])
+            return 0
         calibrate(core["name"], rom_path, core["keys"])
     except Exception:
         # Never let a calibration problem stop someone playing.

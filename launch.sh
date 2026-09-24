@@ -45,10 +45,14 @@ sleep 0.3
 # of the game (only Cemu so far). No-ops for every other command.
 python3 "$(dirname "$0")/cemu_first_run.py" "$@" 2>/dev/null
 
-# Measures how much black border an N64 game draws and crops it away, on
-# the first playthrough of each game. Backgrounded because it watches the
-# running game for a few minutes; it exits on its own, and no-ops for
-# every command that is not a RetroArch N64 launch.
+# N64 black borders. Two phases, and the order matters: RetroArch
+# rewrites a game's options file when the game exits, so a crop written
+# while it runs is reverted on quit. The first call puts the crop
+# measured last time in place before RetroArch reads it; the second
+# watches the running game to measure what is still left over, and only
+# writes its own notes. Both no-op for anything that is not a RetroArch
+# N64 launch.
+python3 "$(dirname "$0")/ra_overscan.py" --apply "$@" >/dev/null 2>&1
 python3 "$(dirname "$0")/ra_overscan.py" "$@" >/dev/null 2>&1 &
 
 exec "$@"
