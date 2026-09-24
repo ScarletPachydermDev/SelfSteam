@@ -87,12 +87,32 @@ _MIN_BORDER_NATIVE = 2
 # crops exactly double and cuts the HUD off.
 _NATIVE_WIDTH = 320
 
-_OPTION_KEYS = {
-    "enable": "parallel-n64-gliden64-EnableOverscan",
-    "left": "parallel-n64-gliden64-OverscanLeft",
-    "right": "parallel-n64-gliden64-OverscanRight",
-    "top": "parallel-n64-gliden64-OverscanTop",
-    "bottom": "parallel-n64-gliden64-OverscanBottom",
+# Per core, because every core names these differently. Both N64 cores
+# happen to take the crop as four pixel offsets plus a switch, which is
+# what this knows how to fill in. Cores for other systems often expose
+# overscan as a plain on/off instead, with the amount decided for you;
+# those cannot use a measurement and are not listed here.
+_CORES = {
+    "parallel_n64_libretro.so": {
+        "name": "ParaLLEl N64",
+        "keys": {
+            "enable": "parallel-n64-gliden64-EnableOverscan",
+            "left": "parallel-n64-gliden64-OverscanLeft",
+            "right": "parallel-n64-gliden64-OverscanRight",
+            "top": "parallel-n64-gliden64-OverscanTop",
+            "bottom": "parallel-n64-gliden64-OverscanBottom",
+        },
+    },
+    "mupen64plus_next_libretro.so": {
+        "name": "Mupen64Plus-Next",
+        "keys": {
+            "enable": "mupen64plus-EnableOverscan",
+            "left": "mupen64plus-OverscanLeft",
+            "right": "mupen64plus-OverscanRight",
+            "top": "mupen64plus-OverscanTop",
+            "bottom": "mupen64plus-OverscanBottom",
+        },
+    },
 }
 
 
@@ -301,14 +321,24 @@ def lit_box(path):
 # --- talking to a running RetroArch --------------------------------------
 
 
-def _request_screenshot():
+def _send(command):
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.sendto(b"SCREENSHOT", (_CMD_HOST, _CMD_PORT))
+        sock.sendto(command.encode("utf-8"), (_CMD_HOST, _CMD_PORT))
         sock.close()
         return True
     except OSError:
         return False
+
+
+def _request_screenshot():
+    return _send("SCREENSHOT")
+
+
+def _say(text):
+    """Put a line on screen over the game. Best effort: if RetroArch is
+    not listening there is nothing to tell anyone anyway."""
+    _send(f"SHOW_MSG {text}")
 
 
 def _newest_since(directory, known):
@@ -331,7 +361,7 @@ def _per_game_opt_path(core_name, rom_path):
     return os.path.join(_ra_config_dir(), "config", core_name, base + ".opt")
 
 
-def _write_options(core_name, rom_path, offsets):
+def _write_options(core_name, rom_path, offsets, keys):
     """Write a per-game options file, based on the core's own current
     options so nothing else changes. RetroArch loads this automatically
     for this ROM only -- it needs game_specific_options, which SelfSteam
@@ -344,11 +374,11 @@ def _write_options(core_name, rom_path, offsets):
             lines = fh.readlines()
 
     wanted = {
-        _OPTION_KEYS["enable"]: "Enabled",
-        _OPTION_KEYS["left"]: str(offsets[0]),
-        _OPTION_KEYS["right"]: str(offsets[1]),
-        _OPTION_KEYS["top"]: str(offsets[2]),
-        _OPTION_KEYS["bottom"]: str(offsets[3]),
+        keys["enable"]: "Enabled",
+        keys["left"]: str(offsets[0]),
+        keys["right"]: str(offsets[1]),
+        keys["top"]: str(offsets[2]),
+        keys["bottom"]: str(offsets[3]),
     }
     seen = set()
     for i, line in enumerate(lines):
@@ -366,7 +396,7 @@ def _write_options(core_name, rom_path, offsets):
     return dest
 
 
-def calibrate(core_name, rom_path):
+def calibrate(core_name, rom_path, keys):
     """Sample the running game and write its crop. Returns the offsets
     written, or None if there was nothing worth cropping.
 
@@ -458,17 +488,19 @@ def calibrate(core_name, rom_path):
                                                 in zip(extra, this)]
             _log(f"sample {taken}: leftover {box} of {width}px -> add {extra}")
             if taken >= _MIN_SAMPLES:
-                _commit(core_name, rom_path, applied, extra)
+                result = _commit(core_name, rom_path, applied, extra, keys)
                 if max(extra) < 1:
                     # Nothing left to trim. Stop bothering the game for
-                    # screenshots rather than running out the count.
-                    break
+                    # screenshots, and return rather than break: falling
+                    # through to the commit below would write the same
+                    # answer again and announce it a second time.
+                    return result
         time.sleep(_SAMPLE_INTERVAL)
 
-    return _commit(core_name, rom_path, applied, extra)
+    return _commit(core_name, rom_path, applied, extra, keys)
 
 
-def _commit(core_name, rom_path, applied, extra):
+def _commit(core_name, rom_path, applied, extra, keys):
     """Add this session's leftover to the crop already in force."""
     if extra is None:
         return None
@@ -482,18 +514,15 @@ def _commit(core_name, rom_path, applied, extra):
     # never needs measuring again.
     done = max(extra) < 1
     _save_state(rom_path, {"offsets": offsets, "done": done})
-    _write_options(core_name, rom_path, offsets)
+    _write_options(core_name, rom_path, offsets, keys)
     _log(f"crop now {offsets}{' (settled)' if done else ''}")
+    if done:
+        # Worth saying out loud: the screenshot flashes stop here, and
+        # the crop only takes effect when the game is next started, so
+        # without this the last thing seen is a border that looks
+        # uncorrected.
+        _say("SelfSteam: black borders measured, applied on next launch")
     return offsets
-
-
-# The core's options live in a folder named after its display name, not
-# after the library file. Only cores whose option keys this knows can be
-# calibrated -- Mupen64Plus-Next names its overscan options differently
-# and is not handled yet.
-_CORE_DISPLAY_NAMES = {
-    "parallel_n64_libretro.so": "ParaLLEl N64",
-}
 
 
 def _core_and_rom(argv):
@@ -504,9 +533,9 @@ def _core_and_rom(argv):
     core = rom = None
     for i, arg in enumerate(argv):
         if arg == "-L" and i + 1 < len(argv):
-            core = _CORE_DISPLAY_NAMES.get(os.path.basename(argv[i + 1]))
+            core = _CORES.get(os.path.basename(argv[i + 1]))
         elif arg.startswith("-L") and len(arg) > 2:
-            core = _CORE_DISPLAY_NAMES.get(os.path.basename(arg[2:]))
+            core = _CORES.get(os.path.basename(arg[2:]))
     if not core:
         return None, None
     # The ROM is the trailing argument; RetroArch's own command line
@@ -517,11 +546,11 @@ def _core_and_rom(argv):
 
 
 def main(argv):
-    core_name, rom_path = _core_and_rom(argv[1:])
-    if not core_name:
+    core, rom_path = _core_and_rom(argv[1:])
+    if not core:
         return 0
     try:
-        calibrate(core_name, rom_path)
+        calibrate(core["name"], rom_path, core["keys"])
     except Exception:
         # Never let a calibration problem stop someone playing.
         return 0
