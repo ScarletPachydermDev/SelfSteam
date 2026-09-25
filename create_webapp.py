@@ -111,6 +111,7 @@ _LAUNCHER_COPY_ITEMS = [
     "sync_gamescope_resolution.py",
     "cemu_first_run.py",
     "ra_overscan.py",
+    "ra_resolution.py",
     "vendor",
 ]
 
@@ -136,6 +137,7 @@ python3 "$(dirname "$0")/cemu_first_run.py" "$@" 2>/dev/null
 # than in here: it reads RetroArch's own config and screenshot folders,
 # which Steam's sandbox has no reason to be able to see.
 flatpak-spawn --host python3 "$(dirname "$0")/ra_overscan.py" --apply "$@" >/dev/null 2>&1
+flatpak-spawn --host --env=DISPLAY="$DISPLAY" python3 "$(dirname "$0")/ra_resolution.py" "$@" >/dev/null 2>&1
 flatpak-spawn --host python3 "$(dirname "$0")/ra_overscan.py" "$@" >/dev/null 2>&1 &
 # --env forwards DISPLAY/WAYLAND_DISPLAY explicitly rather than relying
 # on flatpak-spawn's default environment propagation, which isn't
