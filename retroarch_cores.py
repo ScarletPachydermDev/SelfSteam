@@ -514,13 +514,18 @@ def _lift_saves_out_of_core_folders(saves_dir):
 #   network_cmd_enable -- RetroArch's UDP command port, which is how the
 #     calibration asks a running game for a screenshot to measure.
 #   notification_show_screenshot -- off, so those measurements do not
-#     flash "Screenshot saved" over the game every twenty seconds.
+#     put "Screenshot saved" over the game every ten seconds.
+#   notification_show_screenshot_flash -- 2, which is OFF in
+#     RetroArch's own enum (gfx_widgets.h: 0 normal, 1 fast, 2 off).
+#     A separate setting from the message above, and the one that
+#     actually whites out the screen for each measurement.
 #   game_specific_options -- lets the measured crop be saved against one
 #     ROM instead of the whole core, which matters because the right
 #     amount differs per game.
 _OVERSCAN_SETTINGS = {
     "network_cmd_enable": "true",
     "notification_show_screenshot": "false",
+    "notification_show_screenshot_flash": "2",
     "game_specific_options": "true",
 }
 
