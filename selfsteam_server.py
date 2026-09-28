@@ -2947,8 +2947,10 @@ def _retroarch_tab_panel_html(state, chosen=None):
     if console.partition(" - ")[0] == "Nintendo 64":
         overscan_checked = "" if state.get("ra_overscan_off") else "checked"
         overscan_tooltip = (
-            "Screen will flash briefly during first few plays while automatic "
-            "overscan cropping measures and removes black borders."
+            "On first play it will not take effect. Screenshots are being taken in "
+            "the background during gameplay, and black borders will be gone "
+            "progressively on every game launch until you see a notification "
+            "about calculations finished."
         )
         overscan_block = f"""
   <div class="field-group">
