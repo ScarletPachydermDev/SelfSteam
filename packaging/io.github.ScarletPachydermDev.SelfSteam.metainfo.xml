@@ -26,6 +26,18 @@
   </categories>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="0.1.27" date="2026-09-28">
+      <description>
+        <ul>
+          <li>New automatic overscan cropping for N64 games in RetroArch (ParaLLEl N64 and Mupen64Plus-Next). Many N64 games draw black borders around the picture that old TVs used to hide; SelfSteam now measures them in the background while you play and crops them away. It has no effect on the first play, the borders shrink with every launch after that, and a notification tells you when it has finished. It is on by default and can be switched off per game with the new "Automatic overscan cropping" toggle on the RetroArch tab. Support for more RetroArch cores and standalone emulators is planned</li>
+          <li>N64 games in RetroArch now render at a resolution that suits your screen, chosen fresh at every launch, so a Deck gets the right value both handheld and docked. A resolution you pick yourself in RetroArch's Core Options is never overridden. Support for more RetroArch cores and standalone emulators is planned</li>
+          <li>Fix RetroArch's menu showing a plain fallback font with no button icons in its legend: like the controller profiles in the last release, it was looking for its fonts and icons in an empty folder</li>
+          <li>The RetroArch tab now reminds you that clicking both sticks (L3 + R3) in game opens RetroArch's menu</li>
+          <li>Flycast now starts in Vulkan, and xemu no longer switches back to Vulkan if you chose OpenGL yourself</li>
+          <li>Quiver Launcher, for installing and running apps published on GitHub and GitLab, is now available from the Apps tab's AppImage list</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.26" date="2026-09-23">
       <description>
         <ul>
