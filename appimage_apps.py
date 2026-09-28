@@ -10,7 +10,7 @@ Flathub app in its own right (io.itch.itch on Flathub) -- no reason to
 offer it a second time through a separate, less-standard AppImage
 install path when Flathub already covers it.
 
-Only one install mechanism among the two entries here: "github" -- a
+Only one install mechanism among the entries here: "github" -- a
 real GitHub releases API + asset regex, same mechanism
 standalone_emulators.install_binary already uses for its own
 binary-install emulators.
@@ -51,6 +51,21 @@ APPS = {
         "release_api": "https://api.github.com/repos/sharkwouter/minigalaxy/releases?per_page=1",
         "binary_asset_re": re.compile(r"^Minigalaxy-.*-x86_64\.AppImage$"),
     },
+    "io.github.tgeorgiadis.QuiverLauncher": {
+        "name": "Quiver Launcher",
+        # Real description, confirmed via the repo's own GitHub
+        # "description" field.
+        "summary": "Download, install and run apps from GitHub and GitLab releases",
+        "icon": "https://raw.githubusercontent.com/tgeorgiadis/quiver-launcher/main/Assets/quiver-icon.png",
+        "homepage": "https://github.com/tgeorgiadis/quiver-launcher",
+        "install_type": "github",
+        # releases/latest, not releases?per_page=1: this project ships
+        # release candidates as GitHub pre-releases (v3.5.0-rc.1 was
+        # newest when this was added), and only /latest leaves those out.
+        "release_api": "https://api.github.com/repos/tgeorgiadis/quiver-launcher/releases/latest",
+        # Unversioned name, and an arm64 build sits beside it.
+        "binary_asset_re": re.compile(r"^QuiverLauncher-linux-x64\.AppImage$"),
+    },
 }
 
 # Same layout convention as standalone_emulators._binary_dir -- a
@@ -79,6 +94,9 @@ def _install_github(app_id, entry):
     req = urllib.request.Request(entry["release_api"], headers={"User-Agent": "SelfSteam"})
     with urllib.request.urlopen(req, timeout=30) as resp:
         releases = json.load(resp)
+    # /releases returns a list, /releases/latest a single release.
+    if isinstance(releases, dict):
+        releases = [releases]
     if not releases:
         raise RuntimeError(f"{entry['name']}: release API returned no releases")
     release = releases[0]
