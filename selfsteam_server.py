@@ -57,6 +57,8 @@ import maintenance
 import pending_queue
 import multipart_upload
 import nsp_metadata
+import archives
+import shutil
 import ra_overscan
 import retroarch_cores
 import standalone_emulators
@@ -1316,6 +1318,12 @@ function selfsteamShowCreating(form) {
     button.innerHTML = "Extracting PKG" + '<span class="spinner"></span>';
   } else if (form.dataset.nszConvert) {
     button.innerHTML = "Converting NSZ to NSP" + '<span class="spinner"></span>';
+  } else if (form.dataset.decompress) {
+    // The server names each archive as it unpacks it, and whatever
+    // runs after (a PKG extraction, an NSZ conversion) the same way,
+    // so follow its steps rather than freezing on one label.
+    button.innerHTML = "Decompressing" + '<span class="spinner"></span>';
+    selfsteamPollInstallStep(button);
   } else if (browserRadio && !browserRadio.dataset.installed) {
     button.innerHTML = "Downloading " + browserRadio.dataset.name + '<span class="spinner"></span>';
   } else if (form.dataset.appName && !form.dataset.installed) {
@@ -2485,6 +2493,95 @@ def _ra_resolve_relpath(raw):
 # moves or deletes those files), but new uploads now land in a
 # separate ~/.local/share/selfsteam/uploads/ instead of alongside them.
 _RA_UPLOAD_DIR = os.path.join(_HOME_DIR, ".local", "share", "selfsteam", "uploads")
+# Where picked archives are unpacked (see archives.py). Beside uploads
+# rather than inside it, so it never shows up as a folder in the
+# "Uploaded" pickers, and under the same home-wide read access every
+# emulator is already given for the uploads themselves.
+_EXTRACT_DIR = os.path.join(_HOME_DIR, ".local", "share", "selfsteam", "extracted")
+
+# Switch DLC and updates, and PS4 DLC and updates: the formats a DLC+
+# updates picker takes, used to pick them back out of an unpacked archive.
+_DLC_EXTENSIONS = frozenset({".nsp", ".xci", ".nsz", ".xcz", ".pkg"})
+
+
+def _unpacked(path, extensions=None):
+    """The file to use in place of a picked archive, unpacking it first.
+    Anything that is not an archive comes back unchanged."""
+    if not path or not archives.is_archive(path):
+        return path
+    _set_install_step(f"Decompressing {os.path.basename(path)}")
+    folder = archives.extract(_EXTRACT_DIR, path)
+    picked = archives.main_file(folder, extensions)
+    if not picked:
+        raise RuntimeError(f"Nothing usable found inside {os.path.basename(path)}")
+    return picked
+
+
+# What RetroArch opens itself when content arrives compressed. It also
+# has to: arcade and Neo Geo ROM sets are zips by definition, and
+# unpacking one would leave the core nothing it recognises.
+_RA_NATIVE_ARCHIVES = (".zip", ".7z")
+
+
+def _ra_unpacked_rom(path):
+    if path and path.lower().endswith(_RA_NATIVE_ARCHIVES):
+        return path
+    return _unpacked(path)
+
+
+def _ra_needs_unpacking(state):
+    rom = state.get("ra_romfile", "")
+    paths = [] if rom.lower().endswith(_RA_NATIVE_ARCHIVES) else [rom]
+    if not state.get("ra_console", "").startswith("Neo Geo - "):
+        paths.append(state.get("ra_biosfile", ""))
+    return _needs_unpacking(paths)
+
+
+def _em_needs_unpacking(state):
+    firmware = state.get("em_firmwarefile", "")
+    return _needs_unpacking([
+        state.get("em_romfile", ""),
+        state.get("em_biosfile", ""), state.get("em_bios2file", ""),
+        state.get("em_bios3file", ""), state.get("em_bios4file", ""),
+        state.get("em_keysfile", ""),
+        # A firmware zip is used as it is; only other archives unpack.
+        "" if firmware.lower().endswith(".zip") else firmware,
+        *[p for p in state.get("em_extra_paths", "").split(_EM_DLC_SEP) if p],
+        *_em_dlc_paths_list(state),
+    ])
+
+
+def _em_dlc_state_unpacked(params):
+    """The Emulators tab state for Create's DLC+updates handling, with
+    any archive in the DLC list replaced by every DLC or update file
+    inside it -- one archive often carries a game's whole set."""
+    state = _em_state_from_params(params)
+    rel_paths = _em_dlc_paths_list(state)
+    if not any(archives.is_archive(p) for p in rel_paths):
+        return state
+    expanded = []
+    for rel in rel_paths:
+        abs_path = _ra_safe_join(rel)
+        if not (abs_path and archives.is_archive(abs_path) and os.path.isfile(abs_path)):
+            expanded.append(rel)
+            continue
+        _set_install_step(f"Decompressing {os.path.basename(abs_path)}")
+        folder = archives.extract(_EXTRACT_DIR, abs_path)
+        expanded += [os.path.relpath(p, _RA_ROOT) for p in archives.all_files(folder, _DLC_EXTENSIONS)]
+    state["em_dlc_paths"] = _EM_DLC_SEP.join(expanded)
+    return state
+
+
+def _needs_unpacking(rel_paths):
+    """True if Create will have to unpack any of these, so the button
+    can say so. Relative to _RA_ROOT, like every picked path in state."""
+    for rel in rel_paths:
+        if not rel or not archives.is_archive(rel):
+            continue
+        abs_path = _ra_safe_join(rel)
+        if abs_path and os.path.isfile(abs_path) and not archives.is_extracted(_EXTRACT_DIR, abs_path):
+            return True
+    return False
 
 
 def _ra_state_from_params(params):
@@ -5676,7 +5773,8 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
         ra_pending_installs = retroarch_cores.pending_installs(ra_console)
         add_form = f"""
 <form id="{_ADD_FORM_ID}" action="/add" method="post" onsubmit="selfsteamShowCreating(this)"
-      data-ra="1" data-installing="{html.escape(", ".join(ra_pending_installs))}">
+      data-ra="1" data-installing="{html.escape(", ".join(ra_pending_installs))}"
+      data-decompress="{"1" if _ra_needs_unpacking(ra_state) else ""}">
   <input type="hidden" name="ra_console" value="{html.escape(ra_console)}">
   <input type="hidden" name="ra_romfile" value="{html.escape(ra_state.get('ra_romfile', ''))}">
   <input type="hidden" name="ra_biosfile" value="{html.escape(ra_state.get('ra_biosfile', ''))}">
@@ -5731,7 +5829,8 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
       data-emulator="{html.escape(em_emulator)}"
       data-installing="{html.escape(", ".join(standalone_emulators.EMULATORS.get(n, {}).get("display_name", n) for n in em_pending_installs))}"
       data-pkg-extract="{"1" if em_pkg_extract_needed else ""}"
-      data-nsz-convert="{"1" if em_nsz_convert_needed else ""}">
+      data-nsz-convert="{"1" if em_nsz_convert_needed else ""}"
+      data-decompress="{"1" if _em_needs_unpacking(em_state) else ""}">
   <input type="hidden" name="em_emulator" value="{html.escape(em_emulator)}">
   <input type="hidden" name="em_romfile" value="{html.escape(em_state.get('em_romfile', ''))}">
   <input type="hidden" name="em_biosfile" value="{html.escape(em_state.get('em_biosfile', ''))}">
@@ -6027,6 +6126,16 @@ def _run_commit_in_background(items, label):
                 romfile = item.get("romfile")
                 if romfile and os.path.isfile(romfile):
                     os.remove(romfile)
+                # A ROM unpacked from an archive: take its whole folder,
+                # not just the one file. A cached folder missing its
+                # main file would otherwise hand the next shortcut made
+                # from the same archive whatever was left in it, a .bin
+                # track instead of the .cue, say.
+                extract_root = os.path.join(_EXTRACT_DIR, "")
+                if romfile and romfile.startswith(extract_root):
+                    top = romfile[len(extract_root):].split(os.sep, 1)[0]
+                    if top:
+                        shutil.rmtree(os.path.join(_EXTRACT_DIR, top), ignore_errors=True)
                 shadps4_base_title_id = item.get("shadps4_base_title_id")
                 if shadps4_base_title_id:
                     standalone_emulators.reset_shadps4_game_data(
@@ -7323,6 +7432,13 @@ class Handler(BaseHTTPRequestHandler):
             if biosfile_abs is None or not os.path.isfile(biosfile_abs):
                 self._send_html(render_done(match_name, ok=False, error="BIOS file not found -- please pick it again"))
                 return
+        try:
+            romfile_abs = _ra_unpacked_rom(romfile_abs)
+            if biosfile_abs and not ra_console.startswith("Neo Geo - "):
+                biosfile_abs = _unpacked(biosfile_abs)
+        except Exception as e:  # noqa: BLE001 -- surfaced to the user
+            self._send_html(render_done(match_name, ok=False, error=e))
+            return
 
         try:
             # Installing RetroArch itself is a one-time cost (confirmed
@@ -7420,6 +7536,18 @@ class Handler(BaseHTTPRequestHandler):
         if romfile_abs is None or not os.path.isfile(romfile_abs):
             self._send_html(render_done(match_name, ok=False, error="ROM file not found -- please pick it again"))
             return
+        # Compressed picks, unpacked before anything reads them. Every
+        # emulator here wants the file inside, not the archive -- the
+        # one exception, Switch firmware, is read straight out of a zip,
+        # so a zip stays a zip and any other archive is repacked as one.
+        # Inside the try below would be tidier, but the Mario Kart Wii
+        # check needs the real image, and a failed unpack deserves the
+        # same "please pick it again" page as a missing file.
+        try:
+            romfile_abs = _unpacked(romfile_abs)
+        except Exception as e:  # noqa: BLE001 -- surfaced to the user
+            self._send_html(render_done(match_name, ok=False, error=e))
+            return
         if em_emulator == standalone_emulators.WHEEL_WIZARD_NAME:
             if not standalone_emulators.is_mario_kart_wii(romfile_abs):
                 self._send_html(render_done(
@@ -7475,6 +7603,22 @@ class Handler(BaseHTTPRequestHandler):
                 ))
                 return
             em_extra_abs.append(extra_abs)
+
+        # The rest of the compressed picks. Keys go in as the unpacked
+        # folder, since install_keys already takes a folder and a keys
+        # archive usually holds prod.keys and title.keys together.
+        try:
+            em_bios_slot_files = {k: _unpacked(v) for k, v in em_bios_slot_files.items()}
+            em_extra_abs = [_unpacked(p) for p in em_extra_abs]
+            if em_keysfile_abs and archives.is_archive(em_keysfile_abs):
+                _set_install_step(f"Decompressing {os.path.basename(em_keysfile_abs)}")
+                em_keysfile_abs = archives.extract(_EXTRACT_DIR, em_keysfile_abs)
+            if em_firmwarefile_abs and archives.is_archive(em_firmwarefile_abs):
+                _set_install_step(f"Decompressing {os.path.basename(em_firmwarefile_abs)}")
+                em_firmwarefile_abs = archives.as_zip(_EXTRACT_DIR, em_firmwarefile_abs)
+        except Exception as e:  # noqa: BLE001 -- surfaced to the user
+            self._send_html(render_done(match_name, ok=False, error=e))
+            return
 
         try:
             if em_emulator == standalone_emulators.WHEEL_WIZARD_NAME:
@@ -7554,7 +7698,7 @@ class Handler(BaseHTTPRequestHandler):
             # own shared external-content directory, no per-file
             # metadata at all.
             if em_emulator in standalone_emulators.SWITCH_DLC_UPDATE_EMULATORS:
-                em_dlc_state = _em_state_from_params(params)
+                em_dlc_state = _em_dlc_state_unpacked(params)
                 rom_title_id_base, dlc_rows, _header_key_error = _em_dlc_classify(em_dlc_state)
                 if rom_title_id_base is not None:
                     update_abs_paths = [
@@ -7589,7 +7733,7 @@ class Handler(BaseHTTPRequestHandler):
                         f"{rom_title_id_base:016x}", dlc_entries,
                     )
             elif em_emulator in standalone_emulators.EDEN_DLC_UPDATE_EMULATORS:
-                em_dlc_state = _em_state_from_params(params)
+                em_dlc_state = _em_dlc_state_unpacked(params)
                 _rom_title_id_base, dlc_rows, _header_key_error = _em_dlc_classify(em_dlc_state)
                 dlc_update_abs_paths = [
                     _ra_safe_join(row["path"]) for row in dlc_rows
@@ -7598,7 +7742,7 @@ class Handler(BaseHTTPRequestHandler):
                 dlc_update_abs_paths = [p for p in dlc_update_abs_paths if p]
                 standalone_emulators.install_eden_dlc_and_updates(dlc_update_abs_paths, em_emulator)
             elif em_emulator in standalone_emulators.PS4_DLC_UPDATE_EMULATORS:
-                em_dlc_state = _em_state_from_params(params)
+                em_dlc_state = _em_dlc_state_unpacked(params)
                 dlc_rows = _em_dlc_classify_ps4(em_dlc_state)
                 dlc_abs_paths = [_ra_safe_join(row["path"]) for row in dlc_rows if row["kind"] == "dlc"]
                 dlc_abs_paths = [p for p in dlc_abs_paths if p]
