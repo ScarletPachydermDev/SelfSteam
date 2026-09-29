@@ -21,26 +21,29 @@ alike and is present both on SteamOS and inside SelfSteam's own Flatpak
 runtime, so nothing extra needs to be bundled. Python's own zip and tar
 support stands in if it is ever missing.
 
-Each archive is unpacked once, into a folder keyed by the archive's
-path, size and modification time, so making the same shortcut again, or
-a second shortcut from the same archive, does not unpack it again.
+The unpacked files go where the archive was, on the same drive: a
+single file straight beside it, several (a .cue and its .bin tracks) in
+a folder named after the archive. Someone who keeps games on an SD card
+or an external drive does so on purpose, and unpacking a 6 GB disc image
+onto a Deck's internal storage behind their back would undo that. Once
+the shortcut is made, the archive itself goes to the rubbish bin -- the
+drive's own bin, per the freedesktop Trash spec, so it can be restored
+from a file manager -- leaving just the playable files. Only a drive that
+cannot be written to keeps its archive, and unpacks to a folder the
+caller gives instead.
 
-That folder goes beside the archive, in a hidden ".selfsteam-extracted"
-folder on the same drive. Someone who keeps games on an SD card or an
-external drive does so on purpose, and unpacking a 6 GB disc image onto
-a Deck's internal storage behind their back would undo that. Only a
-drive that cannot be written to falls back to a folder the caller gives.
-SelfSteam's own file pickers hide dot-folders, so it never shows up
-there. Space is checked before anything is written, so a full drive is
-reported as exactly that rather than as a failed unpack.
+Space is checked before anything is written, so a full drive is
+reported as exactly that rather than as a failed unpack. An archive
+whose files are already there is not unpacked again.
 """
 
-import hashlib
 import os
 import shutil
 import subprocess
 import tarfile
 import tempfile
+import time
+import urllib.parse
 import zipfile
 
 # Compound suffixes first, so ".tar.gz" is not read as ".gz".
@@ -78,8 +81,6 @@ def is_archive(path):
     return bool(path) and path.lower().endswith(_ARCHIVE_SUFFIXES)
 
 
-HIDDEN_DIR = ".selfsteam-extracted"
-
 # Headroom beyond the unpacked size, so unpacking never leaves a drive
 # completely full.
 _SPACE_MARGIN = 256 * 1024 * 1024
@@ -89,37 +90,58 @@ def _writable(folder):
     return os.path.isdir(folder) and os.access(folder, os.W_OK | os.X_OK)
 
 
-def _roots(archive, fallback_root):
-    """Where this archive's folder may live, in order of preference."""
-    beside = os.path.join(os.path.dirname(os.path.abspath(archive)), HIDDEN_DIR)
-    return [beside, fallback_root]
-
-
-def _root_for(archive, fallback_root):
-    beside, fallback = _roots(archive, fallback_root)
-    if _writable(beside) or _writable(os.path.dirname(beside)):
-        return beside
-    return fallback
-
-
-def _cache_dir(root, archive):
-    st = os.stat(archive)
-    key = f"{os.path.abspath(archive)}\0{st.st_size}\0{int(st.st_mtime)}"
-    digest = hashlib.sha1(key.encode("utf-8")).hexdigest()[:12]
+def _stem(archive):
     base = os.path.basename(archive)
     for suffix in _ARCHIVE_SUFFIXES:
         if base.lower().endswith(suffix):
-            base = base[: -len(suffix)]
-            break
-    return os.path.join(root, f"{base}-{digest}")
+            return base[: -len(suffix)]
+    return base
+
+
+def _members(archive):
+    """The files inside an archive (not folders), as stored."""
+    bsdtar = shutil.which("bsdtar")
+    if bsdtar:
+        result = subprocess.run([bsdtar, "-tf", archive], capture_output=True, text=True)
+        if result.returncode == 0:
+            return [m for m in result.stdout.splitlines() if m and not m.endswith("/")]
+    try:
+        if archive.lower().endswith(".zip"):
+            with zipfile.ZipFile(archive) as z:
+                return [i.filename for i in z.infolist() if not i.is_dir()]
+        if tarfile.is_tarfile(archive):
+            with tarfile.open(archive) as t:
+                return [m.name for m in t.getmembers() if m.isfile()]
+    except (OSError, zipfile.BadZipFile, tarfile.TarError):
+        pass
+    return []
+
+
+def target(archive, fallback_root):
+    """Where this archive's files go: a single file beside the archive,
+    or a folder named after it, on the archive's own drive if that can
+    be written to and under fallback_root if not."""
+    folder = os.path.dirname(os.path.abspath(archive))
+    if not _writable(folder):
+        folder = fallback_root
+    members = _members(archive)
+    if len(members) == 1:
+        return os.path.join(folder, os.path.basename(members[0]))
+    return os.path.join(folder, _stem(archive))
 
 
 def is_extracted(archive, fallback_root):
     try:
-        return any(os.path.isdir(_cache_dir(root, archive))
-                   for root in _roots(archive, fallback_root))
+        return os.path.exists(target(archive, fallback_root))
     except OSError:
         return False
+
+
+def went_beside(archive, fallback_root):
+    """True if the archive's files went next to it, which is when the
+    archive itself is no longer needed and can go to the bin."""
+    return os.path.dirname(target(archive, fallback_root)) == \
+        os.path.dirname(os.path.abspath(archive))
 
 
 def _unpacked_size(archive):
@@ -204,26 +226,29 @@ def _unpack(archive, dest):
 
 
 def extract(archive, fallback_root):
-    """Unpack archive once and return the folder it is in: beside the
-    archive where that drive can be written, otherwise under
-    fallback_root.
+    """Unpack archive, once, and return where its files are: the single
+    file itself, or the folder holding several.
 
-    Unpacked into a temporary folder and moved into place only when it
-    succeeds, so an interrupted run never leaves a half-unpacked folder
-    behind that a later run would mistake for a finished one.
+    Unpacked into a temporary folder on the same drive and moved into
+    place only when it succeeds, so an interrupted run never leaves a
+    half-unpacked result that a later run would mistake for a finished
+    one.
     """
-    for root in _roots(archive, fallback_root):
-        done = _cache_dir(root, archive)
-        if os.path.isdir(done):
-            return done
-    root = _root_for(archive, fallback_root)
-    dest = _cache_dir(root, archive)
-    os.makedirs(root, exist_ok=True)
-    _check_space(archive, root)
-    tmp = tempfile.mkdtemp(prefix=".unpacking-", dir=root)
+    dest = target(archive, fallback_root)
+    if os.path.exists(dest):
+        return dest
+    parent = os.path.dirname(dest)
+    os.makedirs(parent, exist_ok=True)
+    _check_space(archive, parent)
+    tmp = tempfile.mkdtemp(prefix=".unpacking-", dir=parent)
     try:
         _unpack(archive, tmp)
-        os.rename(tmp, dest)
+        files = _all_files(tmp)
+        if len(files) == 1:
+            os.rename(files[0], dest)
+            shutil.rmtree(tmp, ignore_errors=True)
+        else:
+            os.rename(tmp, dest)
     except BaseException:
         shutil.rmtree(tmp, ignore_errors=True)
         raise
@@ -231,6 +256,8 @@ def extract(archive, fallback_root):
 
 
 def _all_files(folder):
+    if os.path.isfile(folder):
+        return [folder]
     out = []
     for dirpath, _dirs, files in os.walk(folder):
         for name in files:
@@ -239,7 +266,8 @@ def _all_files(folder):
 
 
 def main_file(folder, extensions=None):
-    """The one file in an unpacked folder the emulator should be given.
+    """The one file among what an archive unpacked to (a single file, or
+    a folder) that the emulator should be given.
 
     extensions narrows it to what a slot accepts (".nsp" for a DLC
     picker, say); otherwise any recognised game format will do. Within
@@ -271,7 +299,7 @@ def main_file(folder, extensions=None):
 
 
 def all_files(folder, extensions):
-    """Every file in an unpacked folder with one of these extensions.
+    """Every unpacked file with one of these extensions.
     For pickers that take many files at once, like DLC and updates."""
     return [p for p in _all_files(folder)
             if os.path.splitext(p)[1].lower() in extensions]
@@ -279,13 +307,84 @@ def all_files(folder, extensions):
 
 def as_zip(archive, fallback_root):
     """A .zip holding the same files, for consumers that read a zip
-    directly. A .zip is returned as it is; anything else is unpacked and
-    packed again as a zip, once, beside its unpacked folder."""
+    directly. A .zip is returned as it is; anything else is repacked as
+    a .zip of the same name, once, in the same place its files would
+    otherwise have been unpacked to."""
     if archive.lower().endswith(".zip"):
         return archive
-    folder = extract(archive, fallback_root)
-    zip_path = folder + ".zip"
-    if not os.path.isfile(zip_path):
-        tmp = shutil.make_archive(folder + ".repacking", "zip", folder)
-        os.rename(tmp, zip_path)
+    zip_path = os.path.join(os.path.dirname(target(archive, fallback_root)),
+                            _stem(archive) + ".zip")
+    if os.path.isfile(zip_path):
+        return zip_path
+    parent = os.path.dirname(zip_path)
+    os.makedirs(parent, exist_ok=True)
+    _check_space(archive, parent)
+    tmp = tempfile.mkdtemp(prefix=".unpacking-", dir=parent)
+    try:
+        _unpack(archive, tmp)
+        packed = shutil.make_archive(os.path.join(tmp, "repacked"), "zip", tmp)
+        os.rename(packed, zip_path)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
     return zip_path
+
+
+# --- the rubbish bin ------------------------------------------------------
+
+
+def _mount_top(path):
+    path = os.path.abspath(path)
+    while not os.path.ismount(path):
+        path = os.path.dirname(path)
+    return path
+
+
+def trash(path, home):
+    """Move a file to the rubbish bin rather than deleting it.
+
+    Per the freedesktop Trash spec, which is what file managers read: a
+    file on the same drive as home goes to ~/.local/share/Trash, and a
+    file on any other drive to that drive's own .Trash-<uid> folder, so
+    it is moved rather than copied across drives. Each entry gets a
+    .trashinfo beside it recording where it came from, so it can be
+    restored. The space it uses is only freed once the bin is emptied.
+    """
+    path = os.path.abspath(path)
+    if os.stat(path).st_dev == os.stat(home).st_dev:
+        bin_dir = os.path.join(home, ".local", "share", "Trash")
+        recorded = urllib.parse.quote(path)
+    else:
+        top = _mount_top(path)
+        bin_dir = os.path.join(top, f".Trash-{os.getuid()}")
+        recorded = urllib.parse.quote(os.path.relpath(path, top))
+    files_dir = os.path.join(bin_dir, "files")
+    info_dir = os.path.join(bin_dir, "info")
+    os.makedirs(files_dir, mode=0o700, exist_ok=True)
+    os.makedirs(info_dir, mode=0o700, exist_ok=True)
+
+    base = os.path.basename(path)
+    name, n = base, 1
+    while True:
+        info_path = os.path.join(info_dir, name + ".trashinfo")
+        try:
+            fd = os.open(info_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            n += 1
+            name = f"{base}.{n}"
+            continue
+        if os.path.exists(os.path.join(files_dir, name)):
+            os.close(fd)
+            os.remove(info_path)
+            n += 1
+            name = f"{base}.{n}"
+            continue
+        break
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write("[Trash Info]\n"
+                 f"Path={recorded}\n"
+                 f"DeletionDate={time.strftime('%Y-%m-%dT%H:%M:%S')}\n")
+    try:
+        os.rename(path, os.path.join(files_dir, name))
+    except OSError:
+        os.remove(info_path)
+        raise

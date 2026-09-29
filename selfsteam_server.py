@@ -2505,22 +2505,57 @@ _DLC_EXTENSIONS = frozenset({".nsp", ".xci", ".nsz", ".xcz", ".pkg"})
 
 
 def _unpacked_folder_of(path):
-    """The unpacked-archive folder a file sits in, if it sits in one:
-    beside its archive (see archives.HIDDEN_DIR) or, for a drive that
-    could not be written, under _EXTRACT_DIR."""
-    if not path:
-        return None
-    parts = os.path.abspath(path).split(os.sep)
-    if archives.HIDDEN_DIR in parts:
-        i = parts.index(archives.HIDDEN_DIR)
-        if i + 1 < len(parts) - 1:
-            return os.sep.join(parts[: i + 2])
+    """What to remove with a shortcut whose ROM came out of an archive
+    unpacked under _EXTRACT_DIR (a drive that could not be written to):
+    the file itself, or the folder it shares with the rest of its
+    archive. Files unpacked beside their archive are the player's own
+    files now, like any ROM they picked, and are left to the usual rule."""
     root = os.path.join(_EXTRACT_DIR, "")
-    if path.startswith(root):
-        top = path[len(root):].split(os.sep, 1)[0]
-        if top and os.sep in path[len(root):]:
-            return os.path.join(_EXTRACT_DIR, top)
-    return None
+    if not path or not path.startswith(root):
+        return None
+    top = path[len(root):].split(os.sep, 1)[0]
+    return os.path.join(_EXTRACT_DIR, top) if top else None
+
+
+# Archives unpacked during one Create, sent to the rubbish bin only once
+# the shortcut has actually been made: a Create that fails part way must
+# leave the archive where it was. Per thread, because each request runs
+# on its own thread (ThreadingHTTPServer).
+_archive_batch = threading.local()
+
+
+def _begin_archive_batch():
+    _archive_batch.items = []
+    _archive_batch.ok = False
+
+
+def _archive_batch_succeeded():
+    _archive_batch.ok = True
+
+
+def _end_archive_batch():
+    items = getattr(_archive_batch, "items", None) or []
+    ok = getattr(_archive_batch, "ok", False)
+    _archive_batch.items = None
+    if not ok:
+        return
+    for archive in dict.fromkeys(items):
+        try:
+            if os.path.isfile(archive):
+                archives.trash(archive, _HOME_DIR)
+        except OSError as e:
+            print(f"Could not move {archive} to the rubbish bin: {e}", flush=True)
+
+
+def _unpacked_archive(path):
+    """Unpack an archive and note it for the bin, if its files went
+    beside it. Returns where the files are: a file or a folder."""
+    _set_install_step(f"Decompressing {os.path.basename(path)}")
+    where = archives.extract(path, _EXTRACT_DIR)
+    items = getattr(_archive_batch, "items", None)
+    if items is not None and archives.went_beside(path, _EXTRACT_DIR):
+        items.append(path)
+    return where
 
 
 def _unpacked(path, extensions=None):
@@ -2528,9 +2563,7 @@ def _unpacked(path, extensions=None):
     Anything that is not an archive comes back unchanged."""
     if not path or not archives.is_archive(path):
         return path
-    _set_install_step(f"Decompressing {os.path.basename(path)}")
-    folder = archives.extract(path, _EXTRACT_DIR)
-    picked = archives.main_file(folder, extensions)
+    picked = archives.main_file(_unpacked_archive(path), extensions)
     if not picked:
         raise RuntimeError(f"Nothing usable found inside {os.path.basename(path)}")
     return picked
@@ -2584,8 +2617,7 @@ def _em_dlc_state_unpacked(params):
         if not (abs_path and archives.is_archive(abs_path) and os.path.isfile(abs_path)):
             expanded.append(rel)
             continue
-        _set_install_step(f"Decompressing {os.path.basename(abs_path)}")
-        folder = archives.extract(abs_path, _EXTRACT_DIR)
+        folder = _unpacked_archive(abs_path)
         expanded += [os.path.relpath(p, _RA_ROOT) for p in archives.all_files(folder, _DLC_EXTENSIONS)]
     state["em_dlc_paths"] = _EM_DLC_SEP.join(expanded)
     return state
@@ -6145,13 +6177,11 @@ def _run_commit_in_background(items, label):
                 romfile = item.get("romfile")
                 if romfile and os.path.isfile(romfile):
                     os.remove(romfile)
-                # A ROM unpacked from an archive: take its whole folder,
-                # not just the one file. A cached folder missing its
-                # main file would otherwise hand the next shortcut made
-                # from the same archive whatever was left in it, a .bin
-                # track instead of the .cue, say.
+                # A ROM unpacked to SelfSteam's own folder, because its
+                # archive sat on a drive that could not be written: take
+                # the rest of what that archive unpacked to as well.
                 unpacked = _unpacked_folder_of(romfile)
-                if unpacked:
+                if unpacked and os.path.isdir(unpacked):
                     shutil.rmtree(unpacked, ignore_errors=True)
                 shadps4_base_title_id = item.get("shadps4_base_title_id")
                 if shadps4_base_title_id:
@@ -7322,13 +7352,21 @@ class Handler(BaseHTTPRequestHandler):
         ra_console = (params.get("ra_console") or [""])[0]
         ra_romfile = (params.get("ra_romfile") or [""])[0]
         if ra_console and ra_romfile:
-            self._add_retroarch_shortcut(params, ra_console, ra_romfile)
+            _begin_archive_batch()
+            try:
+                self._add_retroarch_shortcut(params, ra_console, ra_romfile)
+            finally:
+                _end_archive_batch()
             return
 
         em_emulator = (params.get("em_emulator") or [""])[0]
         em_romfile = (params.get("em_romfile") or [""])[0]
         if em_emulator and em_romfile:
-            self._add_standalone_emulator_shortcut(params, em_emulator, em_romfile)
+            _begin_archive_batch()
+            try:
+                self._add_standalone_emulator_shortcut(params, em_emulator, em_romfile)
+            finally:
+                _end_archive_batch()
             return
 
         apps_app_id = (params.get("apps_app_id") or [""])[0]
@@ -7514,6 +7552,7 @@ class Handler(BaseHTTPRequestHandler):
             asset_paths = create_webapp.download_selected_assets(slug, selections)
             _queue_edit_rename_cleanup(params, "ra", match_name)
             pending_queue.add(match_name, None, False, asset_paths, launch_args=args)
+            _archive_batch_succeeded()
             # Same "stay on this tab, cleaned" redirect as the URL tab's
             # own /add -- see its comment above. Console and the ROM
             # picker's own folder/source carried forward (everything
@@ -7628,11 +7667,15 @@ class Handler(BaseHTTPRequestHandler):
             em_bios_slot_files = {k: _unpacked(v) for k, v in em_bios_slot_files.items()}
             em_extra_abs = [_unpacked(p) for p in em_extra_abs]
             if em_keysfile_abs and archives.is_archive(em_keysfile_abs):
-                _set_install_step(f"Decompressing {os.path.basename(em_keysfile_abs)}")
-                em_keysfile_abs = archives.extract(em_keysfile_abs, _EXTRACT_DIR)
+                em_keysfile_abs = _unpacked_archive(em_keysfile_abs)
             if em_firmwarefile_abs and archives.is_archive(em_firmwarefile_abs):
                 _set_install_step(f"Decompressing {os.path.basename(em_firmwarefile_abs)}")
-                em_firmwarefile_abs = archives.as_zip(em_firmwarefile_abs, _EXTRACT_DIR)
+                original = em_firmwarefile_abs
+                em_firmwarefile_abs = archives.as_zip(original, _EXTRACT_DIR)
+                # Repacked beside the original: the original can go.
+                batch = getattr(_archive_batch, "items", None)
+                if batch is not None and os.path.dirname(em_firmwarefile_abs) == os.path.dirname(original):
+                    batch.append(original)
         except Exception as e:  # noqa: BLE001 -- surfaced to the user
             self._send_html(render_done(match_name, ok=False, error=e))
             return
@@ -7845,6 +7888,7 @@ class Handler(BaseHTTPRequestHandler):
                 match_name, None, False, asset_paths, launch_args=args,
                 steam_input_enabled=steam_input_enabled,
             )
+            _archive_batch_succeeded()
             # Emulator (and its Flathub/AppImage source), plus the ROM
             # picker's own folder/source, carried forward -- same
             # reasoning as _add_retroarch_shortcut's own carry-forward,
