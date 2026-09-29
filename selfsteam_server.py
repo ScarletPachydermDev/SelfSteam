@@ -7721,6 +7721,9 @@ class Handler(BaseHTTPRequestHandler):
             # above, so it also reaches an emulator SelfSteam didn't
             # freshly install this time.
             standalone_emulators.configure_renderer(em_emulator)
+            # 1080p internal resolution (one step lower on a Deck), unless
+            # a player already chose one -- see configure_resolution.
+            standalone_emulators.configure_resolution(em_emulator)
             # No-op for every emulator that doesn't define one -- see
             # bootstrap_config's own docstring. Same unconditional-
             # every-time reasoning as grant_permissions/
