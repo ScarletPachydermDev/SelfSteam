@@ -4132,6 +4132,11 @@ def configure_resolution(name):
     a file holding nothing but this one key could skip or confuse it. A
     freshly installed emulator therefore gets it the next time one of
     its shortcuts is created or saved, after its first launch."""
+    # Wheel Wizard runs Mario Kart Wii in the real Dolphin, with
+    # Dolphin's own config (see _wheelwizard_configure), so its
+    # resolution is Dolphin's -- one setting, one owner note.
+    if name == WHEEL_WIZARD_NAME:
+        name = "Dolphin"
     setting = _RESOLUTION_SETTINGS.get(name)
     entry = EMULATORS.get(name)
     if not setting or not entry:
