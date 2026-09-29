@@ -24,6 +24,15 @@ support stands in if it is ever missing.
 Each archive is unpacked once, into a folder keyed by the archive's
 path, size and modification time, so making the same shortcut again, or
 a second shortcut from the same archive, does not unpack it again.
+
+That folder goes beside the archive, in a hidden ".selfsteam-extracted"
+folder on the same drive. Someone who keeps games on an SD card or an
+external drive does so on purpose, and unpacking a 6 GB disc image onto
+a Deck's internal storage behind their back would undo that. Only a
+drive that cannot be written to falls back to a folder the caller gives.
+SelfSteam's own file pickers hide dot-folders, so it never shows up
+there. Space is checked before anything is written, so a full drive is
+reported as exactly that rather than as a failed unpack.
 """
 
 import hashlib
@@ -69,6 +78,30 @@ def is_archive(path):
     return bool(path) and path.lower().endswith(_ARCHIVE_SUFFIXES)
 
 
+HIDDEN_DIR = ".selfsteam-extracted"
+
+# Headroom beyond the unpacked size, so unpacking never leaves a drive
+# completely full.
+_SPACE_MARGIN = 256 * 1024 * 1024
+
+
+def _writable(folder):
+    return os.path.isdir(folder) and os.access(folder, os.W_OK | os.X_OK)
+
+
+def _roots(archive, fallback_root):
+    """Where this archive's folder may live, in order of preference."""
+    beside = os.path.join(os.path.dirname(os.path.abspath(archive)), HIDDEN_DIR)
+    return [beside, fallback_root]
+
+
+def _root_for(archive, fallback_root):
+    beside, fallback = _roots(archive, fallback_root)
+    if _writable(beside) or _writable(os.path.dirname(beside)):
+        return beside
+    return fallback
+
+
 def _cache_dir(root, archive):
     st = os.stat(archive)
     key = f"{os.path.abspath(archive)}\0{st.st_size}\0{int(st.st_mtime)}"
@@ -81,11 +114,65 @@ def _cache_dir(root, archive):
     return os.path.join(root, f"{base}-{digest}")
 
 
-def is_extracted(root, archive):
+def is_extracted(archive, fallback_root):
     try:
-        return os.path.isdir(_cache_dir(root, archive))
+        return any(os.path.isdir(_cache_dir(root, archive))
+                   for root in _roots(archive, fallback_root))
     except OSError:
         return False
+
+
+def _unpacked_size(archive):
+    """Total size of the archive's contents, or None if unknown."""
+    bsdtar = shutil.which("bsdtar")
+    if bsdtar:
+        result = subprocess.run([bsdtar, "-tvf", archive], capture_output=True, text=True)
+        if result.returncode == 0:
+            total = 0
+            for line in result.stdout.splitlines():
+                fields = line.split()
+                # ls -l style: mode links owner group SIZE month day time name
+                if len(fields) >= 5 and fields[4].isdigit():
+                    total += int(fields[4])
+            return total
+    try:
+        if archive.lower().endswith(".zip"):
+            with zipfile.ZipFile(archive) as z:
+                return sum(i.file_size for i in z.infolist())
+        if tarfile.is_tarfile(archive):
+            with tarfile.open(archive) as t:
+                return sum(m.size for m in t.getmembers())
+    except (OSError, zipfile.BadZipFile, tarfile.TarError):
+        pass
+    return None
+
+
+def _mount_point(path):
+    path = os.path.abspath(path)
+    while not os.path.ismount(path):
+        path = os.path.dirname(path)
+    return path
+
+
+def _check_space(archive, root):
+    needed = _unpacked_size(archive)
+    if needed is None:
+        return  # unknown; let the unpack itself report a problem
+    probe = root if os.path.isdir(root) else os.path.dirname(root)
+    st = os.statvfs(probe)
+    free = st.f_bavail * st.f_frsize
+    if free < needed + _SPACE_MARGIN:
+        raise RuntimeError(
+            f"Not enough space on {_mount_point(probe)} to decompress "
+            f"{os.path.basename(archive)}: it needs {_size(needed)} "
+            f"and {_size(free)} is free"
+        )
+
+
+def _size(n):
+    if n >= 1024 ** 3:
+        return f"{n / 1024 ** 3:.1f} GB"
+    return f"{max(1, round(n / 1024 ** 2))} MB"
 
 
 def _unpack(archive, dest):
@@ -116,17 +203,23 @@ def _unpack(archive, dest):
     )
 
 
-def extract(root, archive):
-    """Unpack archive under root, once, and return the folder it is in.
+def extract(archive, fallback_root):
+    """Unpack archive once and return the folder it is in: beside the
+    archive where that drive can be written, otherwise under
+    fallback_root.
 
     Unpacked into a temporary folder and moved into place only when it
     succeeds, so an interrupted run never leaves a half-unpacked folder
     behind that a later run would mistake for a finished one.
     """
+    for root in _roots(archive, fallback_root):
+        done = _cache_dir(root, archive)
+        if os.path.isdir(done):
+            return done
+    root = _root_for(archive, fallback_root)
     dest = _cache_dir(root, archive)
-    if os.path.isdir(dest):
-        return dest
     os.makedirs(root, exist_ok=True)
+    _check_space(archive, root)
     tmp = tempfile.mkdtemp(prefix=".unpacking-", dir=root)
     try:
         _unpack(archive, tmp)
@@ -184,13 +277,13 @@ def all_files(folder, extensions):
             if os.path.splitext(p)[1].lower() in extensions]
 
 
-def as_zip(root, archive):
+def as_zip(archive, fallback_root):
     """A .zip holding the same files, for consumers that read a zip
     directly. A .zip is returned as it is; anything else is unpacked and
     packed again as a zip, once, beside its unpacked folder."""
     if archive.lower().endswith(".zip"):
         return archive
-    folder = extract(root, archive)
+    folder = extract(archive, fallback_root)
     zip_path = folder + ".zip"
     if not os.path.isfile(zip_path):
         tmp = shutil.make_archive(folder + ".repacking", "zip", folder)

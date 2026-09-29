@@ -2504,13 +2504,32 @@ _EXTRACT_DIR = os.path.join(_HOME_DIR, ".local", "share", "selfsteam", "extracte
 _DLC_EXTENSIONS = frozenset({".nsp", ".xci", ".nsz", ".xcz", ".pkg"})
 
 
+def _unpacked_folder_of(path):
+    """The unpacked-archive folder a file sits in, if it sits in one:
+    beside its archive (see archives.HIDDEN_DIR) or, for a drive that
+    could not be written, under _EXTRACT_DIR."""
+    if not path:
+        return None
+    parts = os.path.abspath(path).split(os.sep)
+    if archives.HIDDEN_DIR in parts:
+        i = parts.index(archives.HIDDEN_DIR)
+        if i + 1 < len(parts) - 1:
+            return os.sep.join(parts[: i + 2])
+    root = os.path.join(_EXTRACT_DIR, "")
+    if path.startswith(root):
+        top = path[len(root):].split(os.sep, 1)[0]
+        if top and os.sep in path[len(root):]:
+            return os.path.join(_EXTRACT_DIR, top)
+    return None
+
+
 def _unpacked(path, extensions=None):
     """The file to use in place of a picked archive, unpacking it first.
     Anything that is not an archive comes back unchanged."""
     if not path or not archives.is_archive(path):
         return path
     _set_install_step(f"Decompressing {os.path.basename(path)}")
-    folder = archives.extract(_EXTRACT_DIR, path)
+    folder = archives.extract(path, _EXTRACT_DIR)
     picked = archives.main_file(folder, extensions)
     if not picked:
         raise RuntimeError(f"Nothing usable found inside {os.path.basename(path)}")
@@ -2566,7 +2585,7 @@ def _em_dlc_state_unpacked(params):
             expanded.append(rel)
             continue
         _set_install_step(f"Decompressing {os.path.basename(abs_path)}")
-        folder = archives.extract(_EXTRACT_DIR, abs_path)
+        folder = archives.extract(abs_path, _EXTRACT_DIR)
         expanded += [os.path.relpath(p, _RA_ROOT) for p in archives.all_files(folder, _DLC_EXTENSIONS)]
     state["em_dlc_paths"] = _EM_DLC_SEP.join(expanded)
     return state
@@ -2579,7 +2598,7 @@ def _needs_unpacking(rel_paths):
         if not rel or not archives.is_archive(rel):
             continue
         abs_path = _ra_safe_join(rel)
-        if abs_path and os.path.isfile(abs_path) and not archives.is_extracted(_EXTRACT_DIR, abs_path):
+        if abs_path and os.path.isfile(abs_path) and not archives.is_extracted(abs_path, _EXTRACT_DIR):
             return True
     return False
 
@@ -6131,11 +6150,9 @@ def _run_commit_in_background(items, label):
                 # main file would otherwise hand the next shortcut made
                 # from the same archive whatever was left in it, a .bin
                 # track instead of the .cue, say.
-                extract_root = os.path.join(_EXTRACT_DIR, "")
-                if romfile and romfile.startswith(extract_root):
-                    top = romfile[len(extract_root):].split(os.sep, 1)[0]
-                    if top:
-                        shutil.rmtree(os.path.join(_EXTRACT_DIR, top), ignore_errors=True)
+                unpacked = _unpacked_folder_of(romfile)
+                if unpacked:
+                    shutil.rmtree(unpacked, ignore_errors=True)
                 shadps4_base_title_id = item.get("shadps4_base_title_id")
                 if shadps4_base_title_id:
                     standalone_emulators.reset_shadps4_game_data(
@@ -7612,10 +7629,10 @@ class Handler(BaseHTTPRequestHandler):
             em_extra_abs = [_unpacked(p) for p in em_extra_abs]
             if em_keysfile_abs and archives.is_archive(em_keysfile_abs):
                 _set_install_step(f"Decompressing {os.path.basename(em_keysfile_abs)}")
-                em_keysfile_abs = archives.extract(_EXTRACT_DIR, em_keysfile_abs)
+                em_keysfile_abs = archives.extract(em_keysfile_abs, _EXTRACT_DIR)
             if em_firmwarefile_abs and archives.is_archive(em_firmwarefile_abs):
                 _set_install_step(f"Decompressing {os.path.basename(em_firmwarefile_abs)}")
-                em_firmwarefile_abs = archives.as_zip(_EXTRACT_DIR, em_firmwarefile_abs)
+                em_firmwarefile_abs = archives.as_zip(em_firmwarefile_abs, _EXTRACT_DIR)
         except Exception as e:  # noqa: BLE001 -- surfaced to the user
             self._send_html(render_done(match_name, ok=False, error=e))
             return
