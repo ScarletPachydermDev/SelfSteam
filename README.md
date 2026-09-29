@@ -7,7 +7,7 @@ A headless companion, a small web UI for adding Steam shortcuts (with SteamGridD
 > [!NOTE]
 > Flathub repo is needed for the GNOME runtime dependency, RetroArch and emulators.
 
-## Feaures
+## Features
 + Add streaming or any websites as a Steam shortcut
 + Retrieve game or app artwork from [SteamGridDB](https://www.steamgriddb.com/) vast community database (you'll need to provide your own API key)
 + Install other game launchers and apps
@@ -19,7 +19,7 @@ A headless companion, a small web UI for adding Steam shortcuts (with SteamGridD
 + Install emulators from flathub and appimages from developers source
 + Auto update flatpak
 + Convert .nsz Switch roms to .nsp automatically so Ryujinx/Eden can load them
-+ Optional [Preflight](https://github.com/ScarletPachydermDev/Preflight) integration for Ryubing (Flathub and AppImage builds alike), Eden and Dolphin: a pre-launch controller check for local multiplayer games, installed and kept up to date automatically. Preflight catches up to whatever's newest the next time SelfSteam updates
++ Optional [Preflight](https://github.com/ScarletPachydermDev/Preflight) integration for Ryubing (Flathub and AppImage builds alike), Eden, Dolphin, Cemu, gopher64, PCSX2, DuckStation and xemu: a pre-launch controller check for local multiplayer games, installed and kept up to date automatically. Preflight catches up to whatever's newest the next time SelfSteam updates
 + Automatic overscan cropping for N64 games in RetroArch: SS measures the black borders a game draws in the background while you play and removes them over the first few launches, no settings to tweak. Can be switched off per game. More RetroArch cores and emulators are planned
 + N64 internal resolution picked to suit your screen at every launch, so the same game looks sharp on a Deck handheld and docked to a 4K TV. A resolution you set yourself is never overridden. More RetroArch cores and emulators are planned
   

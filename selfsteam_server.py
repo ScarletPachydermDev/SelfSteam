@@ -4765,7 +4765,7 @@ def _emulators_tab_panel_html(state, chosen=None):
         notice_rows.append(
             "Wheel Wizard opens its own window to start the game, and a standard gamepad "
             "cannot navigate it. You may need a mouse and keyboard, or a controller with a "
-            "trackpad. This applies every time the shortcut runs, not just the first."
+            "trackpad."
         )
         rows_html = "".join(f'\n    <div class="hint-row">{r}</div>' for r in notice_rows)
         wheelwizard_notice = f"""
