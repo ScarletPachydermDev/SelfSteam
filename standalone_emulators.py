@@ -1272,14 +1272,76 @@ def _melonds_args(romfile):
 def _m64py_args(romfile):
     # Bare positional romfile -- confirmed real via M64Py's own source
     # (src/m64py/opts.py: `usage = 'usage: %prog <romfile>'`, only other
-    # option is -v/--verbose). No fullscreen flag or persisted fullscreen
-    # setting exists at all (confirmed: grepped mainwindow.py/settings.py
-    # for both -- isFullScreen()/setWindowState() are pure runtime Qt
-    # window-state toggles, never read from or written to
-    # QSettings/m64py.conf), so unlike every other emulator here this
-    # always launches windowed -- a real, unavoidable gap for a
-    # Steam/Big-Picture launch, not an oversight in this args builder.
+    # option is -v/--verbose). No fullscreen flag, which is why fullscreen
+    # is set in its config instead -- see _m64py_configure_fullscreen.
     return [shlex.quote(romfile)]
+
+
+def _set_ini_key(path, section, key, value, sep="="):
+    """Set one key in one [section] of an INI-style file, line by line,
+    leaving every other line exactly as it was. Creates the section, and
+    the file, if missing. Not configparser: M64Py's own file holds Qt
+    @Variant blobs that configparser would mangle on the way back out."""
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            lines = fh.readlines()
+    except FileNotFoundError:
+        lines = []
+    new_line = f"{key}{sep}{value}\n"
+    header = f"[{section}]"
+    in_section = False
+    insert_at = None
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            if in_section:
+                insert_at = i
+                break
+            in_section = stripped == header
+            continue
+        if in_section and line.split("=", 1)[0].strip() == key:
+            if line == new_line:
+                return
+            lines[i] = new_line
+            break
+    else:
+        if in_section:
+            if lines and not lines[-1].endswith("\n"):
+                lines[-1] += "\n"
+            lines.append(new_line)
+        else:
+            if lines and lines[-1].strip():
+                lines.append("\n")
+            lines += [header + "\n", new_line]
+    if insert_at is not None:
+        lines.insert(insert_at, new_line)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.writelines(lines)
+
+
+def _m64py_configure_fullscreen(entry):
+    """Makes M64Py games open fullscreen, rather than inside M64Py's own
+    window with its menu bar and status bar around them.
+
+    M64Py cannot do it by itself: by default it draws the game inside its
+    own Qt window ("video extension", enable_vidext), and its handler for
+    the core's window request (core/vidext.py, set_mode) drops the
+    fullscreen flag entirely -- the only way in is its View > Fullscreen
+    toggle, by hand, every launch. With the video extension off, the
+    Mupen64Plus core opens its own window instead, and that one does
+    honour [Video-General] Fullscreen. Confirmed on a Steam Machine with
+    Kirby 64: full screen, no menu or status bar.
+
+    Enforced on every Create rather than only on a fresh config, because
+    M64Py writes enable_vidext=1 itself on its first run -- a write-once
+    rule would never win. The core only fills in keys that are missing,
+    so writing these two into files it has not created yet is safe."""
+    app_id = entry["app_id"]
+    _set_ini_key(_flatpak_config_dir(app_id, "m64py", "m64py.conf"),
+                 "General", "enable_vidext", "0")
+    _set_ini_key(_flatpak_config_dir(app_id, "mupen64plus", "mupen64plus.cfg"),
+                 "Video-General", "Fullscreen", "True", sep=" = ")
 
 
 def _rmg_args(romfile):
@@ -2827,6 +2889,7 @@ EMULATORS = {
         "needs_keys": False,
         "needs_firmware": False,
         "args": _m64py_args,
+        "bootstrap_config": _m64py_configure_fullscreen,
         # Confirmed via its own Flathub manifest: same gap as gopher64/
         # RMG, zero filesystem access granted at all (only ipc/device/
         # pulseaudio/x11/wayland sockets), so a ROM picked from anywhere
