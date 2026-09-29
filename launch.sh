@@ -53,8 +53,8 @@ python3 "$(dirname "$0")/cemu_first_run.py" "$@" 2>/dev/null
 # writes its own notes. Both no-op for anything that is not a RetroArch
 # N64 launch.
 python3 "$(dirname "$0")/ra_overscan.py" --apply "$@" >/dev/null 2>&1
-# Internal resolution to suit the screen this game is opening on, before
-# RetroArch reads it. N64 only for now; no-ops for anything else.
+# Internal resolution for RetroArch's 3D cores (1080p, one step lower on
+# a Deck), before RetroArch reads it. No-ops for anything else.
 python3 "$(dirname "$0")/ra_resolution.py" "$@" >/dev/null 2>&1
 python3 "$(dirname "$0")/ra_overscan.py" "$@" >/dev/null 2>&1 &
 
