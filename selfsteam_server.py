@@ -908,8 +908,6 @@ input[type=file]::file-selector-button {
    see .shortcut-poster's own comment), so letting the grid track
    stretch wider than 230px would leave the art not covering its own
    cell. */
-.gallery-section { margin-bottom: 2.5rem; }
-.gallery-section-title { font-size: 1.05rem; font-weight: 600; color: var(--text-dim); margin: 0 0 1rem; text-transform: uppercase; letter-spacing: 0.06em; }
 .gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 230px)); gap: 24px; justify-content: center; }
 /* Fixed pixel sizes throughout this poster, not responsive/aspect-ratio
    based -- scaled up (195x229 -> 230x270, same ~0.852 aspect ratio) from
@@ -6533,47 +6531,19 @@ def render_gallery():
     pending_removal_appids = {
         str(item["appid"]) for item in pending_queue.all_items() if item.get("type") == "remove"
     }
-    add_tile = """
-  <a class="add-poster-frame" href="/new" title="Add a shortcut">
-    <span class="add-poster">
-      <span class="add-poster-plus">+</span>
-    </span>
-  </a>"""
-    # Grouped by what each shortcut is, and a group only appears once
-    # something is in it. Others is everything SelfSteam cannot place:
-    # shortcuts added by hand, by another tool, or through the Custom
-    # editor.
-    groups = {"Games": [], "Apps": [], "Sites": [], "Others": []}
-    for s in shortcuts:
-        if s.get("ra_console") or s.get("em_emulator"):
-            groups["Games"].append(s)
-        elif s.get("apps_app_id"):
-            groups["Apps"].append(s)
-        elif s.get("url"):
-            groups["Sites"].append(s)
-        else:
-            groups["Others"].append(s)
-    sections = []
-    for title, items in groups.items():
-        if not items:
-            continue
-        cards = "".join(_poster_card_html(s, pending_removal_appids) for s in items)
-        # The "+" tile leads the first group, where it always was.
-        lead = add_tile if not sections else ""
-        sections.append(f"""
-<section class="gallery-section">
-  <h3 class="gallery-section-title">{title}</h3>
-  <div class="gallery-grid">{lead}
-  {cards}
-  </div>
-</section>""")
-    if not sections:
-        sections.append(f'<div class="gallery-grid">{add_tile}\n</div>')
+    cards_html = "".join(_poster_card_html(s, pending_removal_appids) for s in shortcuts)
     return render(f"""
 <div class="gallery-header">
   <h2>Non Steam shortcuts</h2>
 </div>
-{"".join(sections)}
+<div class="gallery-grid">
+  <a class="add-poster-frame" href="/new" title="Add a shortcut">
+    <span class="add-poster">
+      <span class="add-poster-plus">+</span>
+    </span>
+  </a>
+  {cards_html}
+</div>
 """, page_title=_hostname(), show_back=False)
 
 
