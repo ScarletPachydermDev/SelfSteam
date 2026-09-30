@@ -26,6 +26,16 @@
   </categories>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="0.1.28" date="2026-09-30">
+      <description>
+        <ul>
+          <li>Sharper 3D games by default: RetroArch's N64, PlayStation, Saturn, Dreamcast, PS2, PSP, DS and 3DS cores, and Dolphin (including Wheel Wizard), PCSX2, DuckStation, xemu, gopher64, M64Py, Flycast, melonDS and Azahar, now render at 1080p, one step lower on a Steam Deck. A resolution you already set yourself is never changed</li>
+          <li>Compressed games and files are unpacked for you: pick a .zip, .7z or .rar and SelfSteam unpacks it on the same drive it is on, then moves the archive to that drive's rubbish bin once the shortcut is made (empty the bin in Desktop Mode to free the space). Free space is checked first. RetroArch games stay zipped, since RetroArch opens .zip and .7z itself</li>
+          <li>M64Py games now open fullscreen instead of inside M64Py's window</li>
+          <li>File pickers only list files the chosen emulator can open, so a document or a photo can no longer become a shortcut that fails at launch. In RetroArch this also keeps another console's games out of the list</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.27" date="2026-09-28">
       <description>
         <ul>
