@@ -2703,6 +2703,12 @@ def _ra_list_rows(abs_path, rel_path, state, path_key, file_key):
     # and several (.ssh, .gnupg, .bash_history) shouldn't be casually
     # listed in a picker at all.
     entries = [e for e in entries if not e.name.startswith(".")]
+    # Only files the picked core can open (see retroarch_cores.
+    # supported_extensions), so a document or another console's ROM is
+    # never offered as this console's game.
+    if file_key == "ra_romfile" and state.get("ra_console"):
+        entries = [e for e in entries
+                   if e.is_dir() or retroarch_cores.accepts_file(state["ra_console"], e.name)]
     if not entries:
         return '<div class="row" style="color:var(--text-dim)">Nothing here.</div>'
     rows = []
@@ -4087,6 +4093,9 @@ def _em_list_rows(abs_path, rel_path, state, path_key, file_key):
         exclude = entry.get("rom_exclude_extensions") if entry else None
         if exclude:
             entries = [e for e in entries if e.is_dir() or os.path.splitext(e.name)[1].lower() not in exclude]
+        # Documents, photos and the like: never a game, for any emulator
+        # (see standalone_emulators.NEVER_ROM_EXTENSIONS).
+        entries = [e for e in entries if e.is_dir() or not standalone_emulators.is_never_a_rom(e.name)]
     if not entries:
         return '<div class="row" style="color:var(--text-dim)">Nothing here.</div>'
     rows = []
@@ -7481,6 +7490,14 @@ class Handler(BaseHTTPRequestHandler):
         if romfile_abs is None or not os.path.isfile(romfile_abs):
             self._send_html(render_done(match_name, ok=False, error="ROM file not found -- please pick it again"))
             return
+        if not retroarch_cores.accepts_file(ra_console, romfile_abs):
+            _, _, core_display = ra_console.partition(" - ")
+            allowed = sorted(retroarch_cores.supported_extensions(ra_console) - retroarch_cores._ARCHIVE_EXTENSIONS)
+            self._send_html(render_done(match_name, ok=False, error=(
+                f"{core_display or ra_console} can't open {os.path.splitext(romfile_abs)[1] or 'this file'} files. "
+                f"It opens {', '.join(allowed)}, or any of those in a .zip or .7z."
+            )))
+            return
         biosfile_abs = None
         if ra_biosfile:
             biosfile_abs = _ra_safe_join(ra_biosfile)
@@ -7493,6 +7510,14 @@ class Handler(BaseHTTPRequestHandler):
                 biosfile_abs = _unpacked(biosfile_abs)
         except Exception as e:  # noqa: BLE001 -- surfaced to the user
             self._send_html(render_done(match_name, ok=False, error=e))
+            return
+        # Checked again on what came out of an archive: an archive the
+        # core could accept can still hold something it cannot open.
+        if not retroarch_cores.accepts_file(ra_console, romfile_abs):
+            self._send_html(render_done(match_name, ok=False, error=(
+                f"{os.path.basename(romfile_abs)}, from the picked archive, isn't a file "
+                f"{ra_console.partition(' - ')[2] or ra_console} can open."
+            )))
             return
 
         try:
@@ -7592,6 +7617,13 @@ class Handler(BaseHTTPRequestHandler):
         if romfile_abs is None or not os.path.isfile(romfile_abs):
             self._send_html(render_done(match_name, ok=False, error="ROM file not found -- please pick it again"))
             return
+        if standalone_emulators.is_never_a_rom(romfile_abs):
+            self._send_html(render_done(match_name, ok=False, error=(
+                f"{os.path.basename(romfile_abs)} isn't a game file -- "
+                f"{_em_display_name(em_emulator)} can't open {os.path.splitext(romfile_abs)[1]} files. "
+                "Please pick the game itself."
+            )))
+            return
         # Compressed picks, unpacked before anything reads them. Every
         # emulator here wants the file inside, not the archive -- the
         # one exception, Switch firmware, is read straight out of a zip,
@@ -7603,6 +7635,11 @@ class Handler(BaseHTTPRequestHandler):
             romfile_abs = _unpacked(romfile_abs)
         except Exception as e:  # noqa: BLE001 -- surfaced to the user
             self._send_html(render_done(match_name, ok=False, error=e))
+            return
+        if standalone_emulators.is_never_a_rom(romfile_abs):
+            self._send_html(render_done(match_name, ok=False, error=(
+                f"The picked archive holds {os.path.basename(romfile_abs)}, which isn't a game file."
+            )))
             return
         if em_emulator == standalone_emulators.WHEEL_WIZARD_NAME:
             if not standalone_emulators.is_mario_kart_wii(romfile_abs):

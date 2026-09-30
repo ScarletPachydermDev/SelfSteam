@@ -319,6 +319,91 @@ _SHORTCUT_SETTINGS = {
 }
 
 
+# The file types each core opens, from libretro's own core-info files
+# (libretro-core-info, "supported_extensions", fetched 2026-09-30). Used
+# to keep files a core cannot open -- a document, a photo, another
+# console's ROM -- out of the ROM picker and away from Create. A "/"
+# entry in a couple of these (folder support) is left out: it is not a
+# file type.
+_SUPPORTED_EXTENSIONS = {
+    "azahar": "3ds 3dsx z3dsx elf axf cci zcci cxi zcxi app",
+    "blastem": "md gen smd 68k sgd 32x sms gg sg sg1 sc sc3 sf7 col cue toc iso chd vgm vgz flac wav bin rom gz",
+    "bluemsx": "rom ri mx1 mx2 dsk col sg sc sf cas m3u",
+    "bsnes": "smc sfc swc fig gb gbc bs",
+    "citra": "3ds 3dsx elf axf cci cxi app",
+    "desmume": "nds ids bin",
+    "fbneo": "zip 7z cue ccd",
+    "fceumm": "fds nes unif unf",
+    "flycast": "chd cdi elf bin cue gdi lst zip dat 7z m3u",
+    "fmsx": "rom mx1 mx2 dsk fdi cas m3u",
+    "freeintv": "int bin rom",
+    "gambatte": "gb gbc dmg",
+    "gearcoleco": "col cv bin rom zip ddp dsk m3u",
+    "genesis_plus_gx": "mdx md smd gen bin cue iso sms bms gg sg 68k sgd chd m3u",
+    "handy": "lnx lyx o",
+    "kronos": "ccd chd cue iso mds zip m3u",
+    "mednafen_lynx": "lnx lyx bll o",
+    "mednafen_ngp": "ngp ngc ngpc npc",
+    "mednafen_pce": "pce sgx cue ccd chd toc m3u",
+    "mednafen_pce_fast": "pce cue ccd chd toc m3u",
+    "mednafen_psx_hw": "cue toc m3u ccd exe pbp chd bin",
+    "mednafen_saturn": "ccd chd cue toc m3u zip",
+    "mednafen_wswan": "ws wsc pc2 pcv2",
+    "melonds": "nds ids dsi",
+    "mesen": "nes fds unf unif",
+    "mesen-s": "sfc smc fig swc bs gb gbc",
+    "mgba": "gb gbc gba",
+    "mupen64plus_next": "n64 v64 z64 ndd bin u1",
+    "nestopia": "nes fds unf unif nsf",
+    "parallel_n64": "n64 v64 z64 bin u1 ndd",
+    "pcsx2": "elf iso ciso cue bin gz chd cso zso mdf nrg dump img m3u",
+    "pcsx_rearmed": "bin cue img mdf pbp toc cbn m3u ccd chd iso exe",
+    "picodrive": "bin gen smd md 32x cue iso chd sms gg sg sc m3u 68k sgd pco",
+    "ppsspp": "elf iso cso prx pbp chd",
+    "prosystem": "a78 bin cdf",
+    "puae": "adf adz dms fdi ipf hdf hdz lha slave info cue ccd nrg mds iso chd uae m3u zip 7z rp9",
+    "quicknes": "nes",
+    "sameboy": "gb gbc",
+    "snes9x": "smc sfc swc fig bs st",
+    "stella": "a26 bin",
+    "swanstation": "exe psexe cue bin img iso chd pbp ecm mds psf m3u",
+    "vbam": "dmg gb gbc cgb sgb gba",
+    "vecx": "bin vec",
+    "vice_x64": "d64 d71 d80 d81 d82 g64 g41 x64 t64 tap prg p00 crt bin zip gz d6z d7z d8z g6z g4z x6z cmd m3u vfl vsf nib nbz d2m d4m",
+    "vice_x64sc": "d64 d71 d80 d81 d82 g64 g41 x64 t64 tap prg p00 crt bin zip gz d6z d7z d8z g6z g4z x6z cmd m3u vfl vsf nib nbz d2m d4m",
+}
+
+# Accepted for every core on top of its own list: RetroArch opens .zip
+# and .7z itself, and SelfSteam unpacks the rest (see archives.py).
+_ARCHIVE_EXTENSIONS = frozenset({
+    ".zip", ".7z", ".rar", ".tar", ".tgz", ".tbz2", ".txz", ".gz", ".bz2", ".xz", ".zst",
+})
+
+
+def _core_name(console):
+    for group, core, _bios, display, _default in _CONSOLE_ENTRIES:
+        if f"{group} - {display}" == console:
+            return core
+    return None
+
+
+def supported_extensions(console):
+    """The file types this console's core opens, archives included, or
+    None if the core is not known -- in which case nothing is filtered."""
+    listed = _SUPPORTED_EXTENSIONS.get(_core_name(console) or "")
+    if listed is None:
+        return None
+    return frozenset("." + e.lower() for e in listed.split()) | _ARCHIVE_EXTENSIONS
+
+
+def accepts_file(console, path):
+    allowed = supported_extensions(console)
+    if allowed is None:
+        return True
+    lower = path.lower()
+    return any(lower.endswith(ext) for ext in allowed)
+
+
 def _retroarch_config_path():
     return os.path.expanduser(f"~/.var/app/{RETROARCH_APP_ID}/config/retroarch/retroarch.cfg")
 

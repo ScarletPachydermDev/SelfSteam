@@ -1786,6 +1786,29 @@ def install_duckstation_bios_slot(entry, slot_prefix, file_path):
     shutil.copy2(file_path, os.path.join(bios_dir, os.path.basename(file_path)))
 
 
+# File types that are never a game, for any emulator. Rather than keep
+# an exact list of what each of twenty-odd emulators opens -- where one
+# missing entry would block a real game -- this names what obviously is
+# not one, so a document or a photo picked by mistake never becomes a
+# shortcut that can only fail at launch.
+NEVER_ROM_EXTENSIONS = frozenset({
+    # documents
+    ".pdf", ".doc", ".docx", ".odt", ".rtf", ".txt", ".md", ".ppt", ".pptx",
+    ".odp", ".xls", ".xlsx", ".ods", ".csv", ".epub",
+    # images
+    ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg", ".heic", ".tif", ".tiff",
+    # audio and video
+    ".mp3", ".flac", ".ogg", ".wav", ".m4a", ".aac", ".opus",
+    ".mp4", ".mkv", ".avi", ".mov", ".webm", ".wmv",
+    # web pages, scripts and installers for other systems
+    ".html", ".htm", ".url", ".lnk", ".torrent", ".exe", ".msi", ".apk", ".dmg", ".deb", ".rpm",
+})
+
+
+def is_never_a_rom(path):
+    return os.path.splitext(path)[1].lower() in NEVER_ROM_EXTENSIONS
+
+
 EXTRA_FILES_EMULATORS = frozenset({"DuckStation"})
 
 # Disc images that can have companion files worth carrying. Companions
