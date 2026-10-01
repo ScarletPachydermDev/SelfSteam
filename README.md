@@ -19,9 +19,8 @@ A headless companion, a small web UI for adding Steam shortcuts (with SteamGridD
 + Install emulators from flathub and appimages from developers source
 + Auto update flatpak
 + Convert .nsz Switch roms to .nsp automatically so Ryujinx/Eden can load them
-+ Optional [Preflight](https://github.com/ScarletPachydermDev/Preflight) integration for Ryubing (Flathub and AppImage builds alike), Eden, Dolphin, Cemu, gopher64, PCSX2, DuckStation and xemu: a pre-launch controller check for local multiplayer games, installed and kept up to date automatically. Preflight catches up to whatever's newest the next time SelfSteam updates
-+ Automatic overscan cropping for N64 games in RetroArch: SS measures the black borders a game draws in the background while you play and removes them over the first few launches, no settings to tweak. Can be switched off per game. More RetroArch cores and emulators are planned
-+ Sharper 3D games in RetroArch: N64, PlayStation, Saturn, Dreamcast, PS2, PSP, DS and 3DS cores render at 1080p by default (one step lower on a Steam Deck). A resolution you set yourself is never overridden. Emulators tab apps are planned
++ Automatic overscan cropping for N64 games in RetroArch
++ 3D consoles at RetroArch and at Emulators tab render at 1080p by default (one step lower on a Steam Deck). A resolution you set yourself is never overridden. 
   
 ## To be done
 - [ ] App icon
