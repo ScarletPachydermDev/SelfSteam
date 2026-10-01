@@ -1932,19 +1932,6 @@ def _bigpemu_args(romfile):
     return [shlex.quote(romfile)]
 
 
-def _openmsx_args(romfile):
-    # -cart <path> to insert the ROM as a cartridge, plus
-    # -command "set fullscreen on" -- both confirmed real via openMSX's
-    # own manual/source (Ubuntu man page's -cart entry; the -command
-    # startup-Tcl mechanism and "set fullscreen on" documented on
-    # msx.org's own forum, openMSX's maintainer-run support channel).
-    # No -machine override -- the unspecified default is C-BIOS_MSX2+,
-    # openMSX's own bundled open-source BIOS replacement, confirmed via
-    # its own Contrib/README.cbios ("we can ship them with openMSX"),
-    # so no external system ROM is required for cartridge-based games.
-    return ["-cart", shlex.quote(romfile), "-command", shlex.quote("set fullscreen on")]
-
-
 def _shadps4_args(romfile):
     # NOT the raw shadps4 binary's own CLI (src/main.cpp's "guest_arg"
     # positional + "-f,--fullscreen") -- that's what a from-source build
@@ -3336,24 +3323,6 @@ EMULATORS = {
         "needs_firmware": False,
         "args": _xenia_canary_args,
     },
-    "openMSX": {
-        "install_type": "flathub",
-        "app_id": "org.openmsx.openMSX",
-        "consoles": "MSX",
-        # Defaults to C-BIOS_MSX2+, openMSX's own bundled open-source
-        # BIOS replacement -- confirmed via its own Contrib/README.cbios.
-        # Real proprietary MSX system ROMs are an optional accuracy/
-        # compatibility upgrade (disk-based software needs them, C-BIOS
-        # has no disk-drive support), not required to boot cartridges.
-        "needs_bios": False,
-        "needs_keys": False,
-        "needs_firmware": False,
-        "args": _openmsx_args,
-        # Confirmed live on X1: its manifest only grants home (full
-        # read-write, not even :ro) -- no host:ro at all. Same gap as
-        # melonDS/RPCS3/Play!/shadPS4 before their own fixes.
-        "grant_permissions": ["--filesystem=host:ro"],
-    },
 }
 
 
@@ -3497,7 +3466,6 @@ EMULATOR_ICON_SLUGS = {
     "Ryubing Canary (AppImage)": "ryujinx",
     "Vita3K": "vita3k",
     "Xenia Canary (AppImage)": "xenia",
-    "openMSX": "openmsx",
 }
 
 
