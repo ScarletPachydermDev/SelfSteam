@@ -1277,6 +1277,16 @@ function selfsteamPollInstallStep(button) {
   setTimeout(tick, 700);
 }
 
+// Coming back to a page with the browser's Back button restores it
+// exactly as it was left -- after a failed Create, that means a
+// disabled Create button still spinning, a locked page, and a status
+// poll still running, with no way to try again. Everything this page
+// shows comes from its URL, so a fresh load of the same URL loses
+// nothing and gives a working page.
+window.addEventListener("pageshow", function (event) {
+  if (event.persisted) window.location.reload();
+});
+
 function selfsteamShowCreating(form) {
   var button = document.getElementById("selfsteam-add-button");
   if (!button) return;
@@ -7358,6 +7368,10 @@ class Handler(BaseHTTPRequestHandler):
             self._send_html(render("<p>Not found</p>"), status=404)
             return
 
+        # A new Create starts with no status of its own; anything still
+        # there belongs to an earlier one that never cleared it.
+        _set_install_step("")
+
         ra_console = (params.get("ra_console") or [""])[0]
         ra_romfile = (params.get("ra_romfile") or [""])[0]
         if ra_console and ra_romfile:
@@ -7366,6 +7380,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._add_retroarch_shortcut(params, ra_console, ra_romfile)
             finally:
                 _end_archive_batch()
+                _set_install_step("")
             return
 
         em_emulator = (params.get("em_emulator") or [""])[0]
@@ -7376,11 +7391,18 @@ class Handler(BaseHTTPRequestHandler):
                 self._add_standalone_emulator_shortcut(params, em_emulator, em_romfile)
             finally:
                 _end_archive_batch()
+                # Whatever happened, this Create is over: a status left
+                # behind ("Decompressing ...") would otherwise be what
+                # the next Create button shows, forever.
+                _set_install_step("")
             return
 
         apps_app_id = (params.get("apps_app_id") or [""])[0]
         if apps_app_id:
-            self._add_apps_shortcut(params, apps_app_id)
+            try:
+                self._add_apps_shortcut(params, apps_app_id)
+            finally:
+                _set_install_step("")
             return
 
         cu_target = (params.get("cu_target") or [""])[0]
