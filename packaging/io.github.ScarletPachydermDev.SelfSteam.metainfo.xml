@@ -26,6 +26,18 @@
   </categories>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="0.1.29" date="2026-10-03">
+      <description>
+        <ul>
+          <li>Preflight, which makes your controller work without going into emulator settings, is now available for every emulator on the Emulators tab</li>
+          <li>Vita3K games from a game folder now start: the first launch installs the game into Vita3K and stops at its library, and every launch after that goes straight into the game</li>
+          <li>Play! now opens properly fullscreen, without its menu bar and status bar, and renders at 1080p</li>
+          <li>The 1080p default now also reaches emulators SelfSteam installs for you, such as Flycast, by being applied again when the game launches</li>
+          <li>The Create button no longer stays stuck after a failed Create, such as when there isn't enough space to decompress, and it shows Decompressing before Downloading when both happen</li>
+          <li>openMSX is removed from the Emulators tab; MSX games are still available through RetroArch</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.28" date="2026-09-30">
       <description>
         <ul>
