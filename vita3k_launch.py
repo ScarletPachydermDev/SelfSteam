@@ -19,9 +19,14 @@ So this decides at launch time:
   * installed: start it by title ID (--installed-path), with no path and
     no copying at all.
 
-The link matters on its own too: Vita3K parses its command line with
-Windows-style options allowed, and a path with spaces in it came out
-the other end as just one word of the folder name ("2011").
+The path is passed *relative*, from inside the links folder: Vita3K
+parses its command line with Windows-style options allowed (config.cpp,
+allow_windows_style_options), which reads any argument starting with
+"/" as an option -- so every absolute Linux path was swallowed before
+it was ever seen as content. On a Steam Machine, an absolute path to
+the link produced no "input-content-path" line in Vita3K's log at all,
+and one with spaces in it came out as a single word of the folder name
+("2011").
 
 Run by the launcher in place of the shortcut's own command, for Vita3K
 shortcuts only; everything else is passed through untouched.
@@ -66,14 +71,18 @@ def _installed(tid):
     return os.path.isdir(path) and bool(os.listdir(path))
 
 
-def _space_free_link(folder, tid):
+def _relative_link(folder, tid):
+    """A link to folder named after its title ID, returned as a path
+    relative to the links folder -- which becomes the working folder, so
+    Vita3K resolves it -- since an absolute one never reaches it."""
     os.makedirs(_links_dir(), exist_ok=True)
     link = os.path.join(_links_dir(), tid)
     if os.path.islink(link) and os.readlink(link) != folder:
         os.remove(link)
     if not os.path.lexists(link):
         os.symlink(folder, link)
-    return link
+    os.chdir(_links_dir())
+    return os.path.join(".", tid)
 
 
 def rewrite(args):
@@ -92,7 +101,7 @@ def rewrite(args):
             return args
         if _installed(tid):
             return args[:i] + ["--installed-path", tid] + args[i + 1:]
-        return args[:i] + [_space_free_link(folder, tid)] + args[i + 1:]
+        return args[:i] + [_relative_link(folder, tid)] + args[i + 1:]
     return args
 
 
