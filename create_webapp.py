@@ -112,6 +112,7 @@ _LAUNCHER_COPY_ITEMS = [
     "cemu_first_run.py",
     "ra_overscan.py",
     "ra_resolution.py",
+    "vita3k_launch.py",
     "vendor",
 ]
 
@@ -156,6 +157,10 @@ flatpak-spawn --host python3 "$(dirname "$0")/ra_overscan.py" "$@" >/dev/null 2>
 # this wrapper exists to avoid. Firefox's own GTK backend tolerates the
 # empty value fine, which is why this only ever showed up on Chromium-
 # family browsers (Edge, Opera), not Firefox.
+# Vita3K: see launch.sh -- the same helper, run on the host.
+case "$*" in
+    *Vita3K*) set -- python3 "$(dirname "$0")/vita3k_launch.py" "$@" ;;
+esac
 if [ -n "$WAYLAND_DISPLAY" ]; then
     exec flatpak-spawn --host --env=DISPLAY="$DISPLAY" --env=WAYLAND_DISPLAY="$WAYLAND_DISPLAY" "$@"
 else

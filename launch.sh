@@ -58,4 +58,12 @@ python3 "$(dirname "$0")/ra_overscan.py" --apply "$@" >/dev/null 2>&1
 python3 "$(dirname "$0")/ra_resolution.py" "$@" >/dev/null 2>&1
 python3 "$(dirname "$0")/ra_overscan.py" "$@" >/dev/null 2>&1 &
 
+# Vita3K cannot start a game from the file a shortcut points at, and
+# would reinstall the whole game on every launch if given its folder
+# instead -- vita3k_launch.py works out which command to run. Only for
+# Vita3K; everything else runs exactly as given.
+case "$*" in
+    *Vita3K*) exec python3 "$(dirname "$0")/vita3k_launch.py" "$@" ;;
+esac
+
 exec "$@"
