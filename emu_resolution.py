@@ -33,6 +33,7 @@ stays.
 import json
 import os
 import sys
+import xml.etree.ElementTree as ET
 
 _HOME = os.path.expanduser("~")
 
@@ -154,6 +155,42 @@ def _m64py():
     return path, read, write
 
 
+def _play():
+    """Play!'s config.xml: <Config> holding <Preference Name= Type= Value=>
+    entries (its framework's CConfig). Values are powers of two."""
+    path = _flatpak("org.purei.Play", "config", "Play Data Files", "config.xml")
+    name = "renderer.opengl.resfactor"
+
+    def _node(root):
+        for pref in root.iter("Preference"):
+            if pref.get("Name") == name:
+                return pref
+        return None
+
+    def read():
+        try:
+            node = _node(ET.parse(path).getroot())
+        except (OSError, ET.ParseError):
+            return None
+        return node.get("Value") if node is not None else None
+
+    def write(value):
+        # A fresh file only when there is none: one that exists but will
+        # not parse is Play!'s, and is left alone rather than replaced.
+        if os.path.isfile(path):
+            tree = ET.parse(path)
+        else:
+            tree = ET.ElementTree(ET.Element("Config"))
+        node = _node(tree.getroot())
+        if node is None:
+            node = ET.SubElement(tree.getroot(), "Preference",
+                                 {"Name": name, "Type": "integer"})
+        node.set("Value", value)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tree.write(path, encoding="utf-8", xml_declaration=True)
+    return path, read, write
+
+
 # Each row: the setting, its default, the 1080p value, the Deck's.
 #
 # Every key, file and default was read from the emulator's own source,
@@ -162,8 +199,8 @@ def _m64py():
 # for them; melonDS also needs its OpenGL renderer, the only one that
 # scales. Not here: apps whose console already renders at 720p or 1080p
 # (Switch, Wii U, PS3, PS4, Vita, Xbox 360), where 1080p means no
-# change; Play!, whose setting could not be confirmed; Rosalie's Mupen
-# GUI, not yet checked; and PPSSPP, which matches its window by itself.
+# change; Rosalie's Mupen GUI, not yet checked; and PPSSPP, which
+# matches its window by itself.
 SETTINGS = {
     "Dolphin": (_ini(_flatpak("org.DolphinEmu.dolphin-emu", "config", "dolphin-emu", "GFX.ini"),
                      "Settings", "InternalResolution"), "1", "2", "1"),
@@ -182,7 +219,14 @@ SETTINGS = {
     "Azahar": (_ini(_flatpak("org.azahar_emu.Azahar", "config", "azahar-emu", "qt-config.ini"),
                     "Renderer", "resolution_factor", sep="=",
                     extra=(("resolution_factor\\default", "false"),)), "1", "2", "1"),
+    "Play!": (_play(), "1", "2", "1"),
 }
+
+# Apps whose config may be created when it is missing. Play! only writes
+# config.xml once a setting is changed, so it may never exist at all, and
+# it has no first-run setup a partial file could get in the way of: a
+# preference that is not in the file just takes its default.
+CREATE_IF_MISSING = {"Play!"}
 
 # Settings that have to change with the resolution for it to do anything.
 REQUIRES = {
@@ -204,6 +248,7 @@ _COMMAND_MARKERS = {
     "org.flycast.Flycast": "Flycast",
     "net.kuribo64.melonDS": "melonDS",
     "org.azahar_emu.Azahar": "Azahar",
+    "org.purei.Play": "Play!",
 }
 
 
@@ -249,7 +294,7 @@ def apply(name):
              for i, (acc, default, value) in enumerate(REQUIRES.get(name, []))]
     changed = False
     for (path, read, write), default, value, label in rows:
-        if not os.path.isfile(path):
+        if not os.path.isfile(path) and name not in CREATE_IF_MISSING:
             continue
         note_key = f"{name}::{label}"
         current = read()
