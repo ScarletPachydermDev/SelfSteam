@@ -1314,7 +1314,15 @@ function selfsteamShowCreating(form) {
   var browserRadio = (!form.dataset.emulator && !form.dataset.appName && !form.dataset.ra)
     ? document.querySelector('input[name="browser"]:checked')
     : null;
-  if (form.dataset.installing) {
+  if (form.dataset.decompress) {
+    // First, ahead of data-installing: Create unpacks archives before it
+    // downloads anything, so leading with "Downloading" showed the
+    // steps out of order -- Downloading, Decompressing, Downloading.
+    // The server then names each archive, and every step after it (the
+    // emulator download, a PKG extraction), in the order they happen.
+    button.innerHTML = "Decompressing" + '<span class="spinner"></span>';
+    selfsteamPollInstallStep(button);
+  } else if (form.dataset.installing) {
     // data-installing is the whole list Create is about to fetch, in
     // the order the server installs it. Only the FIRST one is shown
     // here, as an immediate label so the button never sits blank, and
@@ -1328,12 +1336,7 @@ function selfsteamShowCreating(form) {
     button.innerHTML = "Extracting PKG" + '<span class="spinner"></span>';
   } else if (form.dataset.nszConvert) {
     button.innerHTML = "Converting NSZ to NSP" + '<span class="spinner"></span>';
-  } else if (form.dataset.decompress) {
-    // The server names each archive as it unpacks it, and whatever
-    // runs after (a PKG extraction, an NSZ conversion) the same way,
-    // so follow its steps rather than freezing on one label.
-    button.innerHTML = "Decompressing" + '<span class="spinner"></span>';
-    selfsteamPollInstallStep(button);
+
   } else if (browserRadio && !browserRadio.dataset.installed) {
     button.innerHTML = "Downloading " + browserRadio.dataset.name + '<span class="spinner"></span>';
   } else if (form.dataset.appName && !form.dataset.installed) {
