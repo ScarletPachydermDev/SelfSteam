@@ -38,6 +38,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 
 import gamescope_splash
+import emu_resolution
 import host_exec
 import steamos_session
 
@@ -1277,47 +1278,8 @@ def _m64py_args(romfile):
     return [shlex.quote(romfile)]
 
 
-def _set_ini_key(path, section, key, value, sep="="):
-    """Set one key in one [section] of an INI-style file, line by line,
-    leaving every other line exactly as it was. Creates the section, and
-    the file, if missing. Not configparser: M64Py's own file holds Qt
-    @Variant blobs that configparser would mangle on the way back out."""
-    try:
-        with open(path, "r", encoding="utf-8", errors="replace") as fh:
-            lines = fh.readlines()
-    except FileNotFoundError:
-        lines = []
-    new_line = f"{key}{sep}{value}\n"
-    header = f"[{section}]"
-    in_section = False
-    insert_at = None
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        if stripped.startswith("[") and stripped.endswith("]"):
-            if in_section:
-                insert_at = i
-                break
-            in_section = stripped == header
-            continue
-        if in_section and line.split("=", 1)[0].strip() == key:
-            if line == new_line:
-                return
-            lines[i] = new_line
-            break
-    else:
-        if in_section:
-            if lines and not lines[-1].endswith("\n"):
-                lines[-1] += "\n"
-            lines.append(new_line)
-        else:
-            if lines and lines[-1].strip():
-                lines.append("\n")
-            lines += [header + "\n", new_line]
-    if insert_at is not None:
-        lines.insert(insert_at, new_line)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.writelines(lines)
+# One implementation, shared with the launcher -- see emu_resolution.
+_set_ini_key = emu_resolution.set_ini_key
 
 
 def _m64py_configure_fullscreen(entry):
@@ -3974,189 +3936,17 @@ def install_bios_slot(name, slot_prefix, file_path):
     return handler(entry, slot_prefix, file_path) if handler else None
 
 
-def _get_ini_key(path, section, key):
-    """Read one key from one [section] of an INI or flat TOML file, with
-    any quotes stripped. None if the file, section or key is missing."""
-    try:
-        with open(path, "r", encoding="utf-8", errors="replace") as fh:
-            lines = fh.readlines()
-    except OSError:
-        return None
-    in_section = False
-    for line in lines:
-        stripped = line.strip()
-        if stripped.startswith("[") and stripped.endswith("]"):
-            in_section = stripped == f"[{section}]"
-            continue
-        if in_section and line.split("=", 1)[0].strip() == key:
-            return line.split("=", 1)[1].strip().strip("'\"")
-    return None
-
-
-def _same_number(a, b):
-    """True if two setting values mean the same thing: "1" and
-    "1.000000" are one PCSX2 multiplier, not two."""
-    if a is None or b is None:
-        return a == b
-    try:
-        return float(a) == float(b)
-    except ValueError:
-        return a == b
-
-
-def _deck():
-    try:
-        with open("/sys/devices/virtual/dmi/id/board_name", encoding="utf-8") as fh:
-            return fh.read().strip() in ("Jupiter", "Galileo")  # Deck LCD, OLED
-    except OSError:
-        return False
-
-
-def _ini_setting(path_fn, section, key, sep=" = ", extra=()):
-    """A resolution setting stored as one key in an INI or flat TOML
-    file. extra: (key, value) pairs written alongside it, such as a Qt
-    setting's own "\\default" marker."""
-    def read(entry):
-        return _get_ini_key(path_fn(entry), section, key)
-
-    def write(entry, value):
-        path = path_fn(entry)
-        _set_ini_key(path, section, key, value, sep=sep)
-        for extra_key, extra_value in extra:
-            _set_ini_key(path, section, extra_key, extra_value, sep=sep)
-    return path_fn, read, write
-
-
-def _gopher64_config_path(entry):
-    return _flatpak_config_dir(entry["app_id"], "gopher64", "config.json")
-
-
-def _gopher64_upscale():
-    def read(entry):
-        try:
-            with open(_gopher64_config_path(entry), encoding="utf-8") as fh:
-                return str(json.load(fh).get("video", {}).get("upscale"))
-        except (OSError, ValueError, AttributeError):
-            return None
-
-    def write(entry, value):
-        path = _gopher64_config_path(entry)
-        with open(path, encoding="utf-8") as fh:
-            config = json.load(fh)
-        config.setdefault("video", {})["upscale"] = int(value)
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump(config, fh, indent=4)
-    return _gopher64_config_path, read, write
-
-
-def _m64py_screen_size():
-    """M64Py's resolution is the core's own window size, two keys that
-    only mean anything together, so it is read and written as one
-    "WIDTHxHEIGHT" value."""
-    def path(entry):
-        return _flatpak_config_dir(entry["app_id"], "mupen64plus", "mupen64plus.cfg")
-
-    def read(entry):
-        w = _get_ini_key(path(entry), "Video-General", "ScreenWidth")
-        h = _get_ini_key(path(entry), "Video-General", "ScreenHeight")
-        return f"{w}x{h}" if w and h else None
-
-    def write(entry, value):
-        w, h = value.split("x")
-        _set_ini_key(path(entry), "Video-General", "ScreenWidth", w, sep=" = ")
-        _set_ini_key(path(entry), "Video-General", "ScreenHeight", h, sep=" = ")
-    return path, read, write
-
-
-# Internal resolution for the Emulators tab, same rule as RetroArch's 3D
-# cores (ra_resolution.py): the multiple of the console's own picture
-# that fits 1080 lines, one step lower on a Steam Deck. Each row: the
-# setting, its default, the 1080p value and the Deck's.
-#
-# Every key, file and default was read from the emulator's own source,
-# and for the six installed on the test Steam Machine checked against a
-# real config file too. DS and 3DS stack two screens, so 2x is what
-# fits for them; melonDS also needs its OpenGL renderer (1), the only one
-# that scales. Not here: emulators whose console already renders at
-# 720p or 1080p (Switch, Wii U, PS3, PS4, Vita, Xbox 360), where 1080p
-# means no change; Play!, whose setting could not be confirmed; and
-# Rosalie's Mupen GUI, not yet checked. PPSSPP picks a resolution to
-# match its window by itself.
-_RESOLUTION_SETTINGS = {
-    "Dolphin": (_ini_setting(lambda e: _flatpak_config_dir(e["app_id"], "dolphin-emu", "GFX.ini"),
-                             "Settings", "InternalResolution"), "1", "2", "1"),
-    "PCSX2": (_ini_setting(_pcsx2_ini_path, "EmuCore/GS", "upscale_multiplier"), "1", "2", "1"),
-    "DuckStation": (_ini_setting(lambda e: _duckstation_settings_path(), "GPU", "ResolutionScale"),
-                    "1", "4", "3"),
-    "xemu": (_ini_setting(_xemu_toml_path, "display.quality", "surface_scale"), "1", "2", "1"),
-    "gopher64": (_gopher64_upscale(), "1", "4", "2"),
-    "M64Py": (_m64py_screen_size(), "640x480", "1440x1080", "1280x960"),
-    "Flycast": (_ini_setting(lambda e: _flatpak_config_dir(e["app_id"], "flycast", "emu.cfg"),
-                             "config", "rend.Resolution"), "480", "1080", "960"),
-    "melonDS": (_ini_setting(lambda e: _flatpak_config_dir(e["app_id"], "melonDS", "melonDS.toml"),
-                             "3D.GL", "ScaleFactor"), "1", "2", "1"),
-    "Azahar": (_ini_setting(lambda e: _flatpak_config_dir(e["app_id"], "azahar-emu", "qt-config.ini"),
-                            "Renderer", "resolution_factor", sep="=",
-                            extra=(("resolution_factor\\default", "false"),)), "1", "2", "1"),
-}
-
-# Settings that have to change alongside the resolution for it to do
-# anything, under the same ownership rule.
-_RESOLUTION_REQUIRES = {
-    "melonDS": [(_ini_setting(lambda e: _flatpak_config_dir(e["app_id"], "melonDS", "melonDS.toml"),
-                              "3D", "Renderer"), "0", "1")],
-}
-
-
-def _resolution_notes_path():
-    return os.path.join(_xdg_data_dir("selfsteam"), "emulator-resolution.json")
-
-
 def configure_resolution(name):
     """Set an emulator's internal resolution to the 1080p default (one
-    step lower on a Deck), leaving any value a player chose alone.
-
-    Only ever changes a value it wrote itself or the emulator's default;
-    anything else was picked in the emulator's own settings and stays.
-    Only touches a config file that already exists: several of these
-    emulators run a first-time setup when their config is missing, and
-    a file holding nothing but this one key could skip or confuse it. A
-    freshly installed emulator therefore gets it the next time one of
-    its shortcuts is created or saved, after its first launch."""
-    # Wheel Wizard runs Mario Kart Wii in the real Dolphin, with
-    # Dolphin's own config (see _wheelwizard_configure), so its
-    # resolution is Dolphin's -- one setting, one owner note.
+    step lower on a Deck), leaving any value a player chose alone. The
+    table and the rules live in emu_resolution.py, shared with the
+    launcher, which applies the same thing again just before each launch
+    -- that pass is what reaches an emulator installed by this same
+    Create, whose config does not exist until it first runs."""
     if name == WHEEL_WIZARD_NAME:
+        # Plays in the real Dolphin, with Dolphin's own config.
         name = "Dolphin"
-    setting = _RESOLUTION_SETTINGS.get(name)
-    entry = EMULATORS.get(name)
-    if not setting or not entry:
-        return
-    try:
-        with open(_resolution_notes_path(), encoding="utf-8") as fh:
-            notes = json.load(fh)
-    except (OSError, ValueError):
-        notes = {}
-    rows = [(setting[0], setting[1], setting[3] if _deck() else setting[2], "resolution")]
-    rows += [(acc, default, value, f"requires{i}")
-             for i, (acc, default, value) in enumerate(_RESOLUTION_REQUIRES.get(name, []))]
-    for (path_fn, read, write), default, value, label in rows:
-        if not os.path.isfile(path_fn(entry)):
-            continue
-        note_key = f"{name}::{label}"
-        current = read(entry)
-        ours = notes.get(note_key)
-        if current is not None and not _same_number(current, default) and not _same_number(current, ours):
-            continue  # a player's choice
-        if not _same_number(current, value):
-            write(entry, value)
-        notes[note_key] = value
-    try:
-        os.makedirs(os.path.dirname(_resolution_notes_path()), exist_ok=True)
-        with open(_resolution_notes_path(), "w", encoding="utf-8") as fh:
-            json.dump(notes, fh, indent=1)
-    except OSError:
-        pass
+    emu_resolution.apply(name)
 
 
 def configure_renderer(name):

@@ -56,6 +56,10 @@ python3 "$(dirname "$0")/ra_overscan.py" --apply "$@" >/dev/null 2>&1
 # Internal resolution for RetroArch's 3D cores (1080p, one step lower on
 # a Deck), before RetroArch reads it. No-ops for anything else.
 python3 "$(dirname "$0")/ra_resolution.py" "$@" >/dev/null 2>&1
+# The same for the Emulators tab apps, once each has a config to edit.
+# Before Preflight on purpose: it rewrites some of these same files for
+# controllers, and carries the resolution through if it is already there.
+python3 "$(dirname "$0")/emu_resolution.py" "$@" >/dev/null 2>&1
 python3 "$(dirname "$0")/ra_overscan.py" "$@" >/dev/null 2>&1 &
 
 # Vita3K cannot start a game from the file a shortcut points at, and
