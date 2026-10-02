@@ -4922,6 +4922,16 @@ def _emulators_tab_panel_html(state, chosen=None):
     # launch (~2.0 GB on disk when measured here), outside SelfSteam
     # entirely, so without warning it just looks like a hang.
     wheelwizard_notice = ""
+    if emulator == "Vita3K":
+        # Vita3K installs a game folder or .vpk itself on its first
+        # launch (vita3k_launch.py) and, although it logs that it will
+        # start the game afterwards, stops at its own library instead.
+        # Every launch after that starts the game directly. A .pkg is
+        # installed at Create, so this never applies to one.
+        wheelwizard_notice = """
+  <div class="field-group">
+    <div class="hint-row">The first launch of a game folder or .vpk installs it into Vita3K and stops at Vita3K's library. Quit and launch it again to play.</div>
+  </div>"""
     if emulator == standalone_emulators.WHEEL_WIZARD_NAME:
         notice_rows = []
         if not standalone_emulators.installed(emulator):
