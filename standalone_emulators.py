@@ -1212,13 +1212,40 @@ def _azahar_args(romfile):
     return ["-f", shlex.quote(romfile)]
 
 
+def _play_stylesheet_path():
+    # The real home, which Play! can read (its Flatpak has host:ro), and
+    # SelfSteam's own folder rather than Play!'s, so Play!'s config is
+    # never touched.
+    return os.path.join(_xdg_data_dir("selfsteam"), "play-fullscreen.qss")
+
+
+def _play_bootstrap_config(entry):
+    """Writes the stylesheet _play_args points Play! at."""
+    path = _play_stylesheet_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("QMenuBar, QStatusBar { max-height: 0px; min-height: 0px; }\n")
+
+
 def _play_args(romfile):
     # --disc <path> and --fullscreen, both confirmed real via Play!'s
     # own source (Source/ui_qt/main.cpp's QCommandLineParser setup:
     # explicit "disc" option feeding w.LoadCDROM()/w.BootCDROM(), and
     # "fullscreen" feeding w.showFullScreen()). Named option, not a bare
     # positional arg, unlike most other emulators here.
-    return ["--fullscreen", "--disc", shlex.quote(romfile)]
+    #
+    # -stylesheet: --fullscreen alone left Play!'s menu bar and status
+    # bar on screen under Gamescope (seen on a Steam Machine). Play! only
+    # hides them once the window manager confirms the window really went
+    # fullscreen (MainWindow::changeEvent), and Gamescope never does --
+    # a shortcut's window fills the screen already -- so its own
+    # Alt+Enter toggle cannot help either. A Qt stylesheet collapsing
+    # both to nothing does it without Play!'s cooperation: Qt applies
+    # -stylesheet itself and strips it before Play!'s strict parser sees
+    # it (checked: no "unknown option"). The menus are only reachable
+    # with a mouse anyway; Play!'s own settings stay where they are.
+    return ["-stylesheet", shlex.quote(_play_stylesheet_path()),
+            "--fullscreen", "--disc", shlex.quote(romfile)]
 
 
 def _pcsx2_args(romfile):
@@ -3045,6 +3072,7 @@ EMULATORS = {
         "needs_keys": False,
         "needs_firmware": False,
         "args": _play_args,
+        "bootstrap_config": _play_bootstrap_config,
         # Confirmed live on X1: its Flathub manifest only grants
         # home:ro (+ /media, /mnt, /run/media, all :ro) -- same gap as
         # melonDS/RPCS3 before their own fixes. Upgraded to host:ro so
