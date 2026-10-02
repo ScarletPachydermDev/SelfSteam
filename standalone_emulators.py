@@ -895,14 +895,6 @@ EDEN_FLATHUB_APP_ID = "dev.eden_emu.eden"
 # `preflight.sh -- <full command>` and execs whatever it is handed --
 # so an AppImage command works just as well as a Flatpak one, and a
 # non-Switch emulator just as well as Ryubing.
-PREFLIGHT_EMULATORS = {
-    "Ryubing", "Ryubing (AppImage)", "Ryubing Canary (AppImage)",
-    "Dolphin", WHEEL_WIZARD_NAME, "Cemu", "gopher64",
-    # PCSX2 confirmed working on a Steam Machine (2026-09-23); xemu and
-    # DuckStation ride along on the same Preflight backends (see its own
-    # repo's duckstation/xemu/pcsx2 handling).
-    "xemu", "DuckStation", "PCSX2",
-} | EDEN_EMULATORS | {EDEN_FLATHUB_NAME}
 
 
 # Every Ryubing catalog entry -- the "Ryubing" family specifically,
@@ -3400,6 +3392,10 @@ def picker_emulator_names(install_type):
 # project under a different CPU-target/channel name, so they
 # deliberately share one slug rather than needing a separate icon per
 # variant.
+# Every emulator on the Emulators tab: Preflight has a backend for each
+# one (its own BACKENDS table, checked against its repo 2026-10-02).
+PREFLIGHT_EMULATORS = frozenset(EMULATORS)
+
 EMULATOR_ICON_SLUGS = {
     "Dolphin": "dolphin",
     WHEEL_WIZARD_NAME: "wheelwizard",

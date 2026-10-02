@@ -740,13 +740,6 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
 .apps-card-name { font-weight: 600; font-size: 0.9rem; }
 .apps-card-summary { font-size: 0.8rem; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .apps-card-install { flex: 0 0 auto; }
-/* Right-hand tag on an .apps-card row -- currently the Emulators tab's
-   own picker marking which entries Preflight can launch (see
-   standalone_emulators.PREFLIGHT_EMULATORS). Sits after
-   .apps-card-text, which is the flex:1 that pushes it to the edge. */
-.picker-tag { flex: 0 0 auto; font-size: 0.7rem; font-weight: 600; letter-spacing: 0.02em;
-  padding: 0.15rem 0.45rem; border-radius: 999px; color: var(--text-dim);
-  background: rgba(0,0,0,0.07); }
 /* Sits before .apps-card-install in the markup (checkmark + homepage
    link to the left of Remove). */
 .apps-card-extras { flex: 0 0 auto; display: flex; align-items: center; gap: 0.5rem; margin-right: 0.5rem; }
@@ -803,7 +796,7 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
    vertical padding) despite .apps-btn-remove's own rule looking
    correct in isolation. */
 .apps-grid-list { display: flex; flex-direction: column; gap: 6px; }
-/* Sized to match .apps-btn-remove below, not .picker-tag -- it stands
+/* Sized to match .apps-btn-remove below -- it stands
    in for that button on a system-wide app and sits in the same slot, so
    a 0.7rem pill next to 0.85rem buttons read as an afterthought rather
    than as the card's own installed state. Muted rather than red: it is
@@ -3931,7 +3924,8 @@ def _apps_tab_panel_html(state, hits, total_pages):
     if _apps_preflight_supported(state.get("apps_app_id", "")):
         preflight_checked = "checked" if state.get("apps_preflight") else ""
         preflight_tooltip = (
-            "Helpful for multiplayer games, helps you coordinate settings when multiple "
+            "Make your controller work without going into emulator settings and helpful "
+            "for multiplayer games, helps you coordinate settings when multiple "
             "controllers are paired."
         )
         preflight_link = (
@@ -4685,13 +4679,6 @@ def _emulator_picker_html(names, current_emulator):
     def _row(name):
         icon_url = standalone_emulators.emulator_icon_url(name)
         consoles = standalone_emulators.EMULATORS.get(name, {}).get("consoles", "")
-        # Flags the entries whose shortcuts can be routed through
-        # Preflight, so that's visible while picking rather than only
-        # after picking (the toggle itself only appears further down
-        # the form, once an emulator that supports it is chosen).
-        tag = ""
-        if name in standalone_emulators.PREFLIGHT_EMULATORS:
-            tag = '<span class="picker-tag">Preflight</span>'
         return f"""
       <div class="apps-card console-picker-row" data-value="{html.escape(name)}" onclick="selfsteamEmEmulatorPicked(this)">
         <img class="apps-card-icon" src="{html.escape(icon_url)}" alt="" loading="lazy">
@@ -4699,7 +4686,7 @@ def _emulator_picker_html(names, current_emulator):
           <div class="apps-card-name">{html.escape(_display_name(name))}</div>
           <div class="apps-card-summary">{html.escape(consoles)}</div>
         </div>
-        {tag}
+        
       </div>"""
 
     rows = "".join(_row(n) for n in names)
@@ -4956,7 +4943,8 @@ def _emulators_tab_panel_html(state, chosen=None):
     if emulator in standalone_emulators.PREFLIGHT_EMULATORS:
         preflight_checked = "checked" if state.get("em_preflight") else ""
         preflight_tooltip = (
-            "Helpful for multiplayer games, helps you coordinate settings when multiple "
+            "Make your controller work without going into emulator settings and helpful "
+            "for multiplayer games, helps you coordinate settings when multiple "
             "controllers are paired."
         )
         # A real link, not folded into the tooltip's own text -- same
