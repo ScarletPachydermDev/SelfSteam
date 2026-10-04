@@ -27,7 +27,7 @@ A headless companion, a small web UI for adding Steam shortcuts (with SteamGridD
 - [x] Test all emulators from Emulators tab, ~~around 80%~~ 100% of them only have been tested.
 - [x] Add other game launchers + utilities
 - [ ] More testing and polishing
-- [ ] Marry [preflight](https://github.com/ScarletPachydermDev/Preflight) to this project to avoid controller layout issues in emulators. At the moment adding games from emulators tab require separate configuration for controllers. The goal of preflight is to avoid this.
+- [x] Marry [preflight](https://github.com/ScarletPachydermDev/Preflight) to this project to avoid controller layout issues in emulators. At the moment adding games from emulators tab require separate configuration for controllers. The goal of preflight is to avoid this.
 
 ## How to install
 Run on your terminal
