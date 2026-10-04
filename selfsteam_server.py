@@ -493,6 +493,8 @@ input[type=text]:focus, select:focus { border-color: var(--accent); }
 .field-with-clear:has(input:not(:placeholder-shown)) .name-field-icon { display: none; }
 .hint-row { display: flex; align-items: flex-start; gap: 0.5rem; font-size: 0.95rem; color: var(--text-dim); margin: 0; }
 .hint-row.warning { color: #c25b1f; }
+.hint-list { display: block; padding-left: 1.2rem; }
+.hint-list li + li { margin-top: 0.3rem; }
 .info-icon {
   flex: 0 0 auto; width: 1.15rem; height: 1.15rem; border-radius: 50%; margin-top: 0.05rem;
   background: var(--text-dim); color: #fff; font-size: 0.7rem; font-weight: 700; font-style: italic;
@@ -4911,19 +4913,23 @@ def _emulators_tab_panel_html(state, chosen=None):
     # content and fetches the Retro Rewind distribution itself on first
     # launch (~2.0 GB on disk when measured here), outside SelfSteam
     # entirely, so without warning it just looks like a hang.
-    wheelwizard_notice = ""
+    # Every hint below shows as one bulleted list under the picker.
+    notice_rows = []
     if emulator == "Vita3K":
         # Vita3K installs a game folder or .vpk itself on its first
         # launch (vita3k_launch.py) and, although it logs that it will
         # start the game afterwards, stops at its own library instead.
         # Every launch after that starts the game directly. A .pkg is
         # installed at Create, so this never applies to one.
-        wheelwizard_notice = """
-  <div class="field-group">
-    <div class="hint-row">The first launch of a game folder or .vpk installs it into Vita3K and stops at Vita3K's library. Quit and launch it again to play.</div>
-  </div>"""
-    if emulator == standalone_emulators.WHEEL_WIZARD_NAME:
-        notice_rows = []
+        notice_rows.append(
+            "The first launch of a game folder or .vpk installs it into Vita3K and "
+            "stops at Vita3K's library. Quit and launch it again to play."
+        )
+    elif emulator == "melonDS":
+        notice_rows.append("L3 swaps screens")
+    elif emulator == "Azahar":
+        notice_rows.append("L3 swaps screens, R3 cycles layouts")
+    elif emulator == standalone_emulators.WHEEL_WIZARD_NAME:
         if not standalone_emulators.installed(emulator):
             notice_rows.append(
                 "First launch downloads Mario Kart Retro Rewind, roughly 1.8&nbsp;GB, "
@@ -4934,9 +4940,12 @@ def _emulators_tab_panel_html(state, chosen=None):
             "cannot navigate it. You may need a mouse and keyboard, or a controller with a "
             "trackpad."
         )
-        rows_html = "".join(f'\n    <div class="hint-row">{r}</div>' for r in notice_rows)
+    wheelwizard_notice = ""
+    if notice_rows:
+        items = "".join(f"<li>{r}</li>" for r in notice_rows)
         wheelwizard_notice = f"""
-  <div class="field-group">{rows_html}
+  <div class="field-group">
+    <ul class="hint-row hint-list">{items}</ul>
   </div>"""
 
     preflight_block = ""
