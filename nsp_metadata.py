@@ -249,7 +249,8 @@ def read_dlc_content_nca_id(nsp_path, header_key, prod_keys_path):
     docstring on why). Confirmed against two real DLC files (see this
     module's own docstring)."""
     with open(nsp_path, "rb") as f:
-        entries = _pfs0_entries(f)
+        f.seek(0x100)
+        entries = _xci_secure_entries(f) if f.read(4) == b"HEAD" else _pfs0_entries(f)
         cnmt_entry = next((e for e in entries if e[0].endswith(".cnmt.nca")), None)
         if cnmt_entry is None:
             raise NspParseError(f"No *.cnmt.nca entry found in {nsp_path}")
@@ -332,6 +333,38 @@ def _pfs0_entries(f):
     return entries
 
 
+def _hfs0_entries(f, base):
+    """[(name, data_offset, size), ...] for an HFS0 container starting at
+    `base`. Like PFS0, but 0x40-byte entries (with a hash) and magic
+    "HFS0"; offsets are relative to the end of its own header."""
+    f.seek(base)
+    if f.read(4) != b"HFS0":
+        raise NspParseError("Not an HFS0 container")
+    num_files, string_table_size = struct.unpack("<II", f.read(8))
+    f.read(4)
+    raw = [struct.unpack("<QQI", f.read(0x40)[:20]) for _ in range(num_files)]
+    string_table = f.read(string_table_size)
+    data_start = base + 16 + num_files * 0x40 + string_table_size
+    entries = []
+    for offset, size, name_offset in raw:
+        name = string_table[name_offset:string_table.index(b"\x00", name_offset)].decode("utf-8")
+        entries.append((name, data_start + offset, size))
+    return entries
+
+
+def _xci_secure_entries(f):
+    """The files in a game card dump's (.xci) "secure" partition, where
+    the game's own NCAs live. The card header ("HEAD" at 0x100) gives the
+    root HFS0's offset at 0x130; the root lists the partitions. The
+    "update" partition holds system firmware NCAs, so only "secure"."""
+    f.seek(0x130)
+    (root,) = struct.unpack("<Q", f.read(8))
+    secure = next((e for e in _hfs0_entries(f, root) if e[0] == "secure"), None)
+    if secure is None:
+        raise NspParseError("No secure partition in this XCI")
+    return _hfs0_entries(f, secure[1])
+
+
 def read_title_id(nsp_path, header_key):
     """Open `nsp_path`, find its first *.cnmt.nca entry, decrypt just
     that NCA's header, and return the TitleIdInfo it describes. This is
@@ -344,7 +377,8 @@ def read_title_id(nsp_path, header_key):
     a readable cnmt.nca (wrong container type, no cnmt.nca entry, wrong
     header key, unsupported NCA format version)."""
     with open(nsp_path, "rb") as f:
-        entries = _pfs0_entries(f)
+        f.seek(0x100)
+        entries = _xci_secure_entries(f) if f.read(4) == b"HEAD" else _pfs0_entries(f)
         cnmt_entry = next((e for e in entries if e[0].endswith(".cnmt.nca")), None)
         if cnmt_entry is None:
             raise NspParseError(f"No *.cnmt.nca entry found in {nsp_path}")
