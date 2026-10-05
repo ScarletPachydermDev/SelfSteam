@@ -433,6 +433,7 @@ input[type=text]:focus, select:focus { border-color: var(--accent); }
    checkbox, this isn't a global restyle. */
 .toggle-switch { display: inline-flex; align-items: center; gap: 0.5rem; cursor: pointer; }
 .toggle-switch input[type=checkbox] { position: absolute; opacity: 0; width: 0; height: 0; }
+.toggle-switch:has(input:disabled) { opacity: 0.5; cursor: not-allowed; }
 .toggle-switch-track {
   position: relative; flex: 0 0 auto; width: 2.2rem; height: 1.25rem; border-radius: 999px;
   background: var(--border); transition: background 0.15s ease;
@@ -3939,7 +3940,7 @@ def _apps_tab_panel_html(state, hits, total_pages):
   <div class="field-group" style="margin-bottom:0.55rem">
     <div style="display:flex;align-items:center;gap:0.5rem">
       <label class="toggle-switch">
-        <input type="checkbox" name="apps_preflight" id="apps-preflight-toggle" form="{_ADD_FORM_ID}" {preflight_checked}>
+        <input type="checkbox" name="apps_preflight" id="apps-preflight-toggle" form="{_ADD_FORM_ID}" {preflight_checked} {preflight_disabled}>
         <span class="toggle-switch-track"></span>
         Enable preflight {_info_tooltip_icon_html(preflight_tooltip)}
       </label>
@@ -4949,8 +4950,11 @@ def _emulators_tab_panel_html(state, chosen=None):
   </div>"""
 
     preflight_block = ""
-    if emulator in standalone_emulators.PREFLIGHT_EMULATORS:
-        preflight_checked = "checked" if state.get("em_preflight") else ""
+    # Shown before an emulator is picked too, greyed out, so the page
+    # does not jump when one is; it only becomes usable once one is.
+    if not emulator or emulator in standalone_emulators.PREFLIGHT_EMULATORS:
+        preflight_checked = "checked" if emulator and state.get("em_preflight") else ""
+        preflight_disabled = "" if emulator else "disabled"
         preflight_tooltip = (
             "Make your controller work without going into emulator settings and helpful "
             "for multiplayer games, helps you coordinate settings when multiple "
@@ -4974,7 +4978,7 @@ def _emulators_tab_panel_html(state, chosen=None):
   <div class="field-group">
     <div style="display:flex;align-items:center;gap:0.5rem">
       <label class="toggle-switch">
-        <input type="checkbox" name="em_preflight" id="em-preflight-toggle" form="{_ADD_FORM_ID}" {preflight_checked}>
+        <input type="checkbox" name="em_preflight" id="em-preflight-toggle" form="{_ADD_FORM_ID}" {preflight_checked} {preflight_disabled}>
         <span class="toggle-switch-track"></span>
         Enable preflight {_info_tooltip_icon_html(preflight_tooltip)}
       </label>
