@@ -1111,6 +1111,17 @@ input[type=file]::file-selector-button {
      height gives it its own internal scroll instead. */
   .apps-grid-scroll { flex: none !important; max-height: 45vh; overflow-y: auto; }
 }
+/* Phones: the restart button and the SGDB badge each get a centred row
+   of their own, the same width, one above the other. The counter sits
+   right of the restart button, so an invisible twin of it on the left
+   keeps the button itself on the centre line; the badge's row is already
+   balanced by the heart and dark-mode buttons either side of it. */
+@media (max-width: 600px) {
+  .queue-actions, .selfsteam-header-actions { flex: 1 1 100% !important; justify-content: center; }
+  .queue-actions::before { content: ""; width: 1.9rem; flex: 0 0 auto; }
+  .queue-actions form { flex: 0 0 auto; }
+  .restart-btn, .sgdb-key-badge { width: 15rem !important; justify-content: center; text-align: center; }
+}
 </style></head><body>
 <header class="selfsteam-header">
   <div class="selfsteam-header-left">
