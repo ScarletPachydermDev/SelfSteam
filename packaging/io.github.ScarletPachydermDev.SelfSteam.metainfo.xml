@@ -26,6 +26,16 @@
   </categories>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="0.1.30" date="2026-10-06">
+      <description>
+        <ul>
+          <li>Switch updates and DLC are now recognised for .xci game dumps in Ryubing, not only .nsp ones</li>
+          <li>melonDS and Azahar now show which stick clicks swap screens and cycle layouts, and emulator hints are shown as a list</li>
+          <li>The Preflight toggle is always shown on the Emulators tab, greyed out until an emulator is picked</li>
+          <li>On phones, the restart button and the SteamGridDB badge are stacked and centred</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.29" date="2026-10-03">
       <description>
         <ul>
