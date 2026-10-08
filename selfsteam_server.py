@@ -46,7 +46,6 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import auth
-import auth_display
 import browser_catalog
 import config
 import create_webapp
@@ -6728,6 +6727,24 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
 
+        if parsed.path == "/code":
+            # For code_screen.py, running on this same machine: the code
+            # lives only in this process. Answered to 127.0.0.1 alone --
+            # from anywhere else it would just hand out the code.
+            if self.client_address[0] != "127.0.0.1":
+                self._send_html(render("<p>Not found</p>"), status=404)
+                return
+            body = json.dumps({
+                "code": auth.current_code(), "hostname": socket.gethostname(),
+                "ip": _local_ip(), "port": PORT, "logins": auth.logins,
+            }).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
         if parsed.path == "/login":
             # A remembered device (or a still-live session) landing on
             # /login directly -- e.g. an old bookmark/tab -- has nothing
@@ -6737,25 +6754,10 @@ class Handler(BaseHTTPRequestHandler):
             if self._is_authenticated():
                 self._redirect("/")
                 return
-            # Otherwise show the code whenever anyone lands on /login
-            # while not authenticated -- whether they got here via the
-            # redirect below, or navigated straight to /login themselves.
-            #
-            # ?launcher=1: the app itself asking (selfsteam_launcher.py),
-            # which from a Steam shortcut is the "game" Steam is running.
-            # It exits right after asking, and Steam then closes what it
-            # takes for that game's windows -- the code screen included,
-            # seen on a Steam Machine as the code blinking and vanishing.
-            # So the screen waits until Steam has finished with it.
-            if params.get("launcher"):
-                threading.Timer(3, auth_display.ensure_shown).start()
-            else:
-                auth_display.ensure_shown()
             self._send_html(render_login())
             return
 
         if not self._is_authenticated():
-            auth_display.ensure_shown()
             self._redirect("/login")
             return
 
@@ -7214,7 +7216,6 @@ class Handler(BaseHTTPRequestHandler):
             # than through the shared `body` variable every other
             # route uses.
             if not self._is_authenticated():
-                auth_display.ensure_shown()
                 self._redirect("/login")
                 return
             self._handle_ra_upload()
@@ -7224,7 +7225,6 @@ class Handler(BaseHTTPRequestHandler):
             # Same streaming-upload reasoning as /new/upload above, for
             # the Emulators tab's own ROM/BIOS/keys pickers.
             if not self._is_authenticated():
-                auth_display.ensure_shown()
                 self._redirect("/login")
                 return
             self._handle_em_upload()
@@ -7242,7 +7242,6 @@ class Handler(BaseHTTPRequestHandler):
             # _handle_em_upload (that one's single-file save_uploaded_
             # file model doesn't fit a batch of files in one POST).
             if not self._is_authenticated():
-                auth_display.ensure_shown()
                 self._redirect("/login")
                 return
             self._handle_em_dlc_upload()
@@ -7257,9 +7256,8 @@ class Handler(BaseHTTPRequestHandler):
             remember = bool(params.get("remember"))
             token = auth.try_login(submitted)
             if token is None:
-                self._send_html(render_login(error="Wrong or expired code -- check the TV for the current one."))
+                self._send_html(render_login(error="Wrong or expired code -- check the Steam Machine for the current one."))
                 return
-            auth_display.dismiss()
             cookie = http.cookies.SimpleCookie()
             cookie[SESSION_COOKIE] = token
             cookie[SESSION_COOKIE]["path"] = "/"
@@ -7275,7 +7273,6 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if not self._is_authenticated():
-            auth_display.ensure_shown()
             self._redirect("/login")
             return
 
@@ -8301,8 +8298,6 @@ class Handler(BaseHTTPRequestHandler):
         print(f"[selfsteam-server] {self.address_string()} - {fmt % args}")
 
 
-_FIRST_SHOW_POLL_INTERVAL = 10
-
 # Not instant on purpose -- a `flatpak update` isn't time-critical to
 # notice, and this is a real subprocess spawn (host_exec.wrap) every
 # time it fires, not just an in-memory check.
@@ -8375,29 +8370,6 @@ def _watch_for_update_and_restart():
             return
 
 
-def _watch_for_first_gamescope_entry():
-    """Shows the pairing screen exactly once on its own -- the first time
-    this process notices a real Game Mode/gamescope session while
-    config.py's own pending_first_show marker is still set (installer-set
-    once, on a genuinely fresh install only -- see its own docstring).
-    Polling, not a one-shot startup check, on purpose: covers both real
-    session shapes without needing to know which one applies -- a fresh
-    install finished in Desktop Mode, with this service either restarting
-    once Game Mode is entered (a single startup check would catch that)
-    or staying alive continuously across the switch with no restart at
-    all (only a poll loop catches that one). Every other page load's own
-    auth prompt (do_GET/do_POST's auth_display.ensure_shown() calls)
-    stays untouched and keeps working purely on-demand regardless."""
-    if not config.get_pending_first_show():
-        return
-    while config.get_pending_first_show():
-        if steamos_session.is_gamescope_session():
-            auth_display.ensure_shown()
-            config.set_pending_first_show(False)
-            return
-        time.sleep(_FIRST_SHOW_POLL_INTERVAL)
-
-
 def _check_preflight_update_on_selfsteam_version_change():
     """Runs Preflight's own update check (standalone_emulators.
     ensure_preflight_installed) once, the moment this process notices
@@ -8429,8 +8401,36 @@ def _check_preflight_update_on_selfsteam_version_change():
     config.set_last_seen_selfsteam_version(current_version)
 
 
+def _local_ip():
+    """Best-guess LAN-facing IP: a UDP "connection" to a public address
+    (no packet is sent) just asks the routing table which local
+    interface would be used."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.connect(("8.8.8.8", 80))
+        return sock.getsockname()[0]
+    except OSError:
+        return "127.0.0.1"
+    finally:
+        sock.close()
+
+
+CODE_SCREEN_PATH = os.path.expanduser("~/.local/share/selfsteam/code_screen.py")
+
+
+def _install_code_screen():
+    """Copy code_screen.py out of the Flatpak to where the host can run
+    it -- the Steam shortcut and the desktop app both start it there --
+    every start, so an update reaches it."""
+    try:
+        os.makedirs(os.path.dirname(CODE_SCREEN_PATH), exist_ok=True)
+        shutil.copy(os.path.join(os.path.dirname(os.path.abspath(__file__)), "code_screen.py"), CODE_SCREEN_PATH)
+    except OSError:
+        pass
+
+
 def main():
-    threading.Thread(target=_watch_for_first_gamescope_entry, daemon=True).start()
+    _install_code_screen()
     threading.Thread(target=_watch_for_update_and_restart, daemon=True).start()
     threading.Thread(target=_check_preflight_update_on_selfsteam_version_change, daemon=True).start()
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)

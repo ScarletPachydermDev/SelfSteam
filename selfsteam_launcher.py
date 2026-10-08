@@ -118,7 +118,9 @@ def _add_selfsteam_shortcut():
     try:
         create_webapp.register_steam_shortcut(
             "SelfSteam", None, assets,
-            launch_args=["/usr/bin/flatpak", "run", _APP_ID],
+            # The code screen itself, run directly: as the game Steam is
+            # running, Steam puts it in front and gives it the controller.
+            launch_args=["/usr/bin/python3", selfsteam_server.CODE_SCREEN_PATH],
         )
     except Exception:  # noqa: BLE001 -- no Steam, or a userdata it cannot write
         return
@@ -130,27 +132,24 @@ def _add_selfsteam_shortcut():
         _notify("SelfSteam", "Restart Steam to see the SelfSteam shortcut.")
 
 
-def _show_code_via_server():
-    """Ask the running server to show the pairing code, by opening its
-    /login page as a signed-out visitor would. The code only exists in
-    the server's own memory: a screen shown from this process would
-    carry a code of its own that the server has never heard of, and
-    could never be used. Launched from a Steam shortcut, this process is
-    also the "game" Steam is watching, and a window it foregrounds fights
-    Steam over the screen (seen on a Steam Machine: the code blinked,
-    then a black screen). Leaving the window to the server, and exiting,
-    takes the same path as every other time the code is shown.
-
-    Retries briefly: on a first install the service has only just been
-    started and may not be listening yet."""
-    url = f"http://127.0.0.1:{os.environ.get('SELFSTEAM_SERVER_PORT', '8845')}/login?launcher=1"
+def _wait_for_server():
+    """On a first install the service has only just been started and
+    may not be listening yet; the code screen needs it for the code."""
+    url = f"http://127.0.0.1:{os.environ.get('SELFSTEAM_SERVER_PORT', '8845')}/code"
     for _ in range(20):
         try:
             urllib.request.urlopen(url, timeout=5).read()
-            return True
+            return
         except OSError:
             time.sleep(0.5)
-    return False
+
+
+def _show_code_screen():
+    """Run the code screen on the host (see code_screen.py on why it
+    runs there), from the copy the server keeps outside the Flatpak --
+    put there now too, in case the server has not started yet."""
+    selfsteam_server._install_code_screen()
+    _host_run(["python3", selfsteam_server.CODE_SCREEN_PATH])
 
 
 def launcher_main():
@@ -159,19 +158,15 @@ def launcher_main():
     no-op check every time after that); always shows the pairing screen
     regardless of whether this run was the one that just installed the
     service or not -- clicking the app is a deliberate "I want to log
-    in" action every time, not just a first-run-only trigger."""
+    in" action every time, not just a first-run-only trigger. The code
+    screen is only ever opened from here and from the Steam shortcut."""
     if not _service_installed():
         _install_and_start_service()
         _notify("SelfSteam", "Running in the background -- will persist through Game Mode.")
-        # Already shown our own first-run notice directly above, right
-        # now -- clears the marker so the background gamescope-entry
-        # watcher (selfsteam_server._watch_for_first_gamescope_entry)
-        # doesn't also fire a second, redundant pairing screen the next
-        # time Game Mode happens to be entered.
         config.set_pending_first_show(False)
         _add_selfsteam_shortcut()
-    if not _show_code_via_server():
-        _notify("SelfSteam", "SelfSteam's background service isn't responding, so no code can be shown.")
+    _wait_for_server()
+    _show_code_screen()
 
 
 def main():

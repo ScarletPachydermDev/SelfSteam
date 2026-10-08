@@ -112,6 +112,11 @@ def forget_all_devices():
         _save_remembered({})
 
 
+# Successful code logins since start. code_screen.py watches it change
+# to know the code it shows has just been used, and close.
+logins = 0
+
+
 def _generate_code():
     return "".join(secrets.choice(_ALPHABET) for _ in range(CODE_LENGTH))
 
@@ -139,6 +144,8 @@ def try_login(submitted):
             return None
         _code = None
         _code_expires_at = 0.0
+        global logins
+        logins += 1
         token = secrets.token_urlsafe(24)
         _sessions[token] = time.time() + SESSION_TTL
         return token
