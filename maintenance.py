@@ -40,7 +40,7 @@ def run_with_steam_stopped(apply_fn, message="Applying changes…"):
     baselayer_prior = None
     if on_gamescope:
         splash_proc, baselayer_prior = gamescope_splash.launch_foregrounded(
-            host_exec.wrap_with_env(["python3", _SPLASH_SCRIPT, message], {"DISPLAY": ":0"}), window_titles.SPLASH_TITLE
+            host_exec.wrap_with_env(["python3", _SPLASH_SCRIPT], {"DISPLAY": ":0"}), window_titles.SPLASH_TITLE
         )
 
     try:

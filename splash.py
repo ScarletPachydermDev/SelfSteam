@@ -21,16 +21,14 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import window_titles  # noqa: E402
-from sdl_screen import DIM, SDL_QUIT, TEXT, Window, sdl  # noqa: E402
+from sdl_screen import SDL_QUIT, TEXT, Window, sdl  # noqa: E402
 
 _FONTS = {
     "message": (True, lambda w, h: min(96 * h / 1080, 80 * w / 1920)),
-    "sub": (False, 48),
 }
 
 
 def main():
-    message = sys.argv[1] if len(sys.argv) > 1 else "Applying changes…"
     stop = []
     signal.signal(signal.SIGTERM, lambda *_: stop.append(True))
     screen = Window(window_titles.SPLASH_TITLE, _FONTS)
@@ -47,8 +45,9 @@ def main():
                     if ((t * 2.2 - i * 0.35) % 2) < 1 else 0.0 for i in range(4)]
             screen.clear()
             screen.controllers(screen.h * 0.36, size_ratio=0.15, lift=lift)
-            screen.text("message", message, TEXT, screen.h * 0.6)
-            screen.text("sub", "Steam will be back in a moment", DIM, screen.h * 0.7)
+            # One line, whatever the change: the reason Steam is gone is
+            # the only thing worth reading from across the room.
+            screen.text("message", "Restarting Steam…", TEXT, screen.h * 0.62)
             screen.present()
             time.sleep(0.016)
     finally:
