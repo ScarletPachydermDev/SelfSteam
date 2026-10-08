@@ -19,6 +19,7 @@ doing two unrelated jobs.
 import os
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
 
@@ -52,38 +53,53 @@ def _service_installed():
     return result.returncode == 0
 
 
-def _install_and_start_service():
-    # Same real unit shape as install.sh's own -- EnvironmentFile pulls
-    # DISPLAY/XDG_RUNTIME_DIR from gamescope-session.target's own env
-    # file on a real Game Mode session (see install.sh's own comment on
-    # why this is required, not optional, for the auth screen/
-    # maintenance splash to be able to open a window at all). ExecStart
-    # runs this exact same launcher again, just with --service this
-    # time, so systemd's own view of "the command" and a user manually
-    # running `flatpak run ... --service` themselves are identical.
-    unit = f"""[Unit]
+def _unit_text():
+    # EnvironmentFile pulls DISPLAY/XDG_RUNTIME_DIR from
+    # gamescope-session.target's own env file on a Game Mode session, so
+    # windows the service opens (the maintenance splash) can reach the
+    # screen. ExecStart runs this same launcher with --service.
+    #
+    # --die-with-parent: without it, stopping or restarting the service
+    # ended only the outer `flatpak run`, and the sandboxed server under
+    # it kept running and kept port 8845, so the new one could not start
+    # (seen on a Steam Machine: a restart loop, and the old version still
+    # answering).
+    return f"""[Unit]
 Description=SelfSteam
 After=network-online.target
 
 [Service]
 Type=simple
 EnvironmentFile=-%t/gamescope-environment
-ExecStart=flatpak run {_APP_ID} --service
+ExecStart=flatpak run --die-with-parent {_APP_ID} --service
 Restart=on-failure
 RestartSec=5
 
 [Install]
 WantedBy=default.target
 """
+
+
+def _write_unit():
+    """Write the unit if it differs from what is installed. Returns
+    True if it changed."""
+    path = "~/.config/systemd/user/" + _SERVICE_NAME
+    current = _host_run(["sh", "-c", f"cat {path} 2>/dev/null"], capture_output=True, text=True).stdout
+    if current == _unit_text():
+        return False
     _host_run(
-        ["sh", "-c", "mkdir -p ~/.config/systemd/user && cat > ~/.config/systemd/user/" + _SERVICE_NAME],
-        input=unit, text=True, check=True,
+        ["sh", "-c", f"mkdir -p ~/.config/systemd/user && cat > {path}"],
+        input=_unit_text(), text=True, check=True,
     )
-    # loginctl enable-linger is what lets the service keep running at
-    # boot with no active login session -- same reasoning as install.sh's
-    # own call.
-    _host_run(["loginctl", "enable-linger"])
     _host_run(["systemctl", "--user", "daemon-reload"])
+    return True
+
+
+def _install_and_start_service():
+    _write_unit()
+    # loginctl enable-linger is what lets the service keep running at
+    # boot with no active login session.
+    _host_run(["loginctl", "enable-linger"])
     _host_run(["systemctl", "--user", "enable", "--now", _SERVICE_NAME])
 
 
@@ -98,6 +114,25 @@ def _notify(title, body):
 
 
 _ARTWORK_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "steam-artwork")
+
+
+def _game_running():
+    """True while Steam is running a game: every game Steam starts runs
+    under its reaper, with "SteamLaunch AppId=" on the command line."""
+    return _host_run(["pgrep", "-f", "SteamLaunch AppId="], capture_output=True).returncode == 0
+
+
+def _add_shortcut_after_update():
+    """Add the SelfSteam shortcut, once, from the service: on a fresh
+    install just after launcher_main starts it, and on an existing one
+    after the update that brings this. The Steam restart that makes
+    it appear waits until no game is running: an update can land in the
+    middle of one."""
+    if config.load().get("selfsteam_shortcut_added"):
+        return
+    while _game_running():
+        time.sleep(30)
+    _add_selfsteam_shortcut()
 
 
 def _add_selfsteam_shortcut():
@@ -124,6 +159,9 @@ def _add_selfsteam_shortcut():
         )
     except Exception:  # noqa: BLE001 -- no Steam, or a userdata it cannot write
         return
+    config.save(selfsteam_shortcut_added=True)
+    if not steam_restart.is_steam_running():
+        return  # Steam reads the new shortcut when it next starts
     _notify("SelfSteam", "Added SelfSteam to your Steam library. Restarting Steam in 5 seconds so it shows up.")
     time.sleep(5)
     try:
@@ -163,14 +201,22 @@ def launcher_main():
     if not _service_installed():
         _install_and_start_service()
         _notify("SelfSteam", "Running in the background -- will persist through Game Mode.")
-        config.set_pending_first_show(False)
-        _add_selfsteam_shortcut()
+        # The SelfSteam shortcut is added by the service just started
+        # (_add_shortcut_after_update), the same way as after an update;
+        # adding it here as well would restart Steam twice.
     _wait_for_server()
     _show_code_screen()
 
 
 def main():
     if "--service" in sys.argv[1:]:
+        try:
+            # Brings a unit from an older version up to date; it takes
+            # effect from the service's next start.
+            _write_unit()
+        except Exception:  # noqa: BLE001 -- never stop the server starting
+            pass
+        threading.Thread(target=_add_shortcut_after_update, daemon=True).start()
         selfsteam_server.main()
     else:
         launcher_main()
