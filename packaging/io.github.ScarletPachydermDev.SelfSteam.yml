@@ -1,11 +1,11 @@
 app-id: io.github.ScarletPachydermDev.SelfSteam
-runtime: org.gnome.Platform
-# Current stable branch confirmed live via Flathub's own API
-# (flathub.org/api/v2/summary/org.gnome.Platform -> "branch": "50"),
-# not guessed -- matches gridge-desktop's own manifest, which pins the
-# same branch.
-runtime-version: '50'
-sdk: org.gnome.Sdk
+runtime: org.freedesktop.Platform
+# Freedesktop, not GNOME: SelfSteam draws its two full-screen windows
+# with the host's own SDL2 (sdl_screen.py) and has no GTK left, so the
+# much larger GNOME runtime bought nothing. 25.08 is the base GNOME 50
+# itself is built on, so Python is the same 3.13 the wheels below pin.
+runtime-version: '25.08'
+sdk: org.freedesktop.Sdk
 command: selfsteam-launcher
 
 finish-args:
@@ -60,7 +60,7 @@ modules:
     # x86_64 only, matching this manifest's only real build target
     # (see .github/workflows/flatpak.yml's selfsteam-x86_64.flatpak) --
     # cryptography's own wheel is cp39-abi3 (works unchanged on
-    # org.gnome.Platform//50's Python 3.13), cffi's is not (a real
+    # org.freedesktop.Platform//25.08 Python 3.13), cffi's is not (a real
     # per-version C extension), pinned here to cp313 to match.
     buildsystem: simple
     build-commands:
@@ -150,7 +150,7 @@ modules:
       - install -Dm644 packaging/io.github.ScarletPachydermDev.SelfSteam.metainfo.xml
           /app/share/metainfo/io.github.ScarletPachydermDev.SelfSteam.metainfo.xml
       # Pre-rasterized PNGs, not the source SVG -- confirmed live that
-      # org.gnome.Sdk//50's appstreamcli-compose can't rasterize SVG
+      # the SDK's appstreamcli-compose can't rasterize SVG
       # itself during the build ("Unrecognised image file format" /
       # file-read-error, reproduced directly against appstreamcli, not
       # a manifest/build-script bug), so a raw SVG in hicolor/scalable
