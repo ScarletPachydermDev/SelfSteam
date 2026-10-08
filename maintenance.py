@@ -9,13 +9,15 @@ a normal window manager so nothing needs to be foregrounded manually.
 """
 import os
 import subprocess
-import sys
 
 import gamescope_splash
+import host_exec
 import steamos_session
 import window_titles
 
-_SPLASH_SCRIPT = os.path.join(os.path.dirname(__file__), "splash.py")
+# The host copy selfsteam_server._install_code_screen keeps up to date:
+# the splash draws with the host's own SDL (see sdl_screen.py).
+_SPLASH_SCRIPT = os.path.expanduser("~/.local/share/selfsteam/splash.py")
 
 # Functions:
 #   run_with_steam_stopped(apply_fn, message) -- stop Steam, show a splash, run apply_fn, restart Steam.
@@ -38,7 +40,7 @@ def run_with_steam_stopped(apply_fn, message="Applying changes…"):
     baselayer_prior = None
     if on_gamescope:
         splash_proc, baselayer_prior = gamescope_splash.launch_foregrounded(
-            [sys.executable, _SPLASH_SCRIPT, message], window_titles.SPLASH_TITLE
+            host_exec.wrap_with_env(["python3", _SPLASH_SCRIPT, message], {"DISPLAY": ":0"}), window_titles.SPLASH_TITLE
         )
 
     try:

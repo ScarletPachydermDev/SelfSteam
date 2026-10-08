@@ -8419,13 +8419,15 @@ CODE_SCREEN_PATH = os.path.expanduser("~/.local/share/selfsteam/code_screen.py")
 
 
 def _install_code_screen():
-    """Copy code_screen.py out of the Flatpak to where the host can run
-    it -- the Steam shortcut and the desktop app both start it there --
-    every start, so an update reaches it."""
+    """Copy the SDL screens (code_screen.py, splash.py and what they
+    import) out of the Flatpak to where the host can run them -- the
+    Steam shortcut, the desktop app and maintenance.py all start them
+    there -- every start, so an update reaches them."""
     try:
         os.makedirs(os.path.dirname(CODE_SCREEN_PATH), exist_ok=True)
         here = os.path.dirname(os.path.abspath(__file__))
-        shutil.copy(os.path.join(here, "code_screen.py"), CODE_SCREEN_PATH)
+        for name in ("code_screen.py", "splash.py", "sdl_screen.py", "window_titles.py"):
+            shutil.copy(os.path.join(here, name), os.path.join(os.path.dirname(CODE_SCREEN_PATH), name))
         shutil.copytree(os.path.join(here, "vendor", "code-screen"),
                         os.path.join(os.path.dirname(CODE_SCREEN_PATH), "code-screen"), dirs_exist_ok=True)
     except OSError:

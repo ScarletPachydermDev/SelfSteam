@@ -1,73 +1,60 @@
 #!/usr/bin/env python3
-"""Standalone fullscreen "please wait" window shown while Steam is down
-for a shortcuts.vdf/artwork write from the SelfSteam server. Separate
-entrypoint from selfsteam_server.py (the main server loop) since this
-needs to run headless-launched via gamescope_splash.launch_foregrounded(),
-not opened by a user.
+"""Full-screen "please wait" splash shown while Steam is down for a
+shortcuts.vdf/artwork write from the SelfSteam server (maintenance.py).
+
+Big on purpose: it covers a TV across the room for the seconds Steam is
+gone, so it has to read as "SelfSteam is working on it" at a glance.
+The four controllers hop one after another as the progress indicator.
+
+SDL2, drawn with sdl_screen.py like the code screen, and run on the host
+(see sdl_screen.py on why). It runs until maintenance.py ends it with
+SIGTERM, which is handled so SDL still closes its window cleanly.
 """
+
+import ctypes
+import math
+import os
 import signal
 import sys
+import time
 
-import gi
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-gi.require_version("Gtk", "4.0")
-from gi.repository import Gdk, GLib, Gtk  # noqa: E402
+import window_titles  # noqa: E402
+from sdl_screen import DIM, SDL_QUIT, TEXT, Window, sdl  # noqa: E402
 
-import window_titles
-
-# Functions:
-#   class SplashWindow -- the fullscreen "please wait" GTK window itself.
-#   main() -- entrypoint: parses argv, builds and shows a SplashWindow.
-
-# Plain Gtk4, deliberately no libadwaita: this runs natively on the host
-# (not inside SelfSteam's own Flatpak sandbox, which is where Adw
-# normally comes from), and SteamOS doesn't ship libadwaita for host
-# Python.
-
-_CSS = b"""
-label.selfsteam-splash-message { font-size: 24px; }
-window { background-color: #1e1e1e; color: #ffffff; }
-"""
-
-
-class SplashWindow(Gtk.ApplicationWindow):
-    def __init__(self, app, message):
-        super().__init__(application=app)
-        self.set_title(window_titles.SPLASH_TITLE)
-        self.fullscreen()
-
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16, valign=Gtk.Align.CENTER, halign=Gtk.Align.CENTER)
-        spinner = Gtk.Spinner(spinning=True, width_request=48, height_request=48)
-        label = Gtk.Label(label=message)
-        label.add_css_class("selfsteam-splash-message")
-        box.append(spinner)
-        box.append(label)
-        self.set_child(box)
+_FONTS = {
+    "message": (True, lambda w, h: min(96 * h / 1080, 80 * w / 1920)),
+    "sub": (False, 48),
+}
 
 
 def main():
     message = sys.argv[1] if len(sys.argv) > 1 else "Applying changes…"
-
-    app = Gtk.Application(application_id="io.github.ScarletPachydermDev.SelfSteam.Splash")
-
-    def on_activate(app):
-        provider = Gtk.CssProvider()
-        provider.load_from_data(_CSS)
-        Gtk.StyleContext.add_provider_for_display(
-            Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
-        )
-        win = SplashWindow(app, message)
-        win.present()
-        # See auth_screen.py's on_activate for why this matters: a bare
-        # SIGTERM (what maintenance.py's own teardown sends) skips all
-        # GTK/Wayland cleanup, and confirmed live that leaves Mutter's
-        # window stacking broken enough to freeze mouse input entirely,
-        # not just this window.
-        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, app.quit)
-
-    app.connect("activate", on_activate)
-    app.run([])
+    stop = []
+    signal.signal(signal.SIGTERM, lambda *_: stop.append(True))
+    screen = Window(window_titles.SPLASH_TITLE, _FONTS)
+    event = ctypes.create_string_buffer(64)  # SDL_Event is a 56-byte union
+    start = time.monotonic()
+    try:
+        while not stop:
+            while sdl.SDL_PollEvent(event):
+                if ctypes.c_uint32.from_buffer(event).value == SDL_QUIT:
+                    stop.append(True)
+            t = time.monotonic() - start
+            # Each controller hops in turn: a half-sine bump, staggered.
+            lift = [max(0.0, math.sin((t * 2.2 - i * 0.35) * math.pi)) ** 2 * 0.35
+                    if ((t * 2.2 - i * 0.35) % 2) < 1 else 0.0 for i in range(4)]
+            screen.clear()
+            screen.controllers(screen.h * 0.36, size_ratio=0.15, lift=lift)
+            screen.text("message", message, TEXT, screen.h * 0.6)
+            screen.text("sub", "Steam will be back in a moment", DIM, screen.h * 0.7)
+            screen.present()
+            time.sleep(0.016)
+    finally:
+        screen.close()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
