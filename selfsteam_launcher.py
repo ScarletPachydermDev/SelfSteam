@@ -59,11 +59,14 @@ def _unit_text():
     # windows the service opens (the maintenance splash) can reach the
     # screen. ExecStart runs this same launcher with --service.
     #
-    # --die-with-parent: without it, stopping or restarting the service
-    # ended only the outer `flatpak run`, and the sandboxed server under
-    # it kept running and kept port 8845, so the new one could not start
-    # (seen on a Steam Machine: a restart loop, and the old version still
-    # answering).
+    # ExecStop: flatpak runs the sandboxed server in a scope of its own,
+    # outside this service, so stopping or restarting the service ended
+    # only the outer `flatpak run` and the server kept port 8845; the new
+    # one could not start (seen on a Steam Machine: a restart loop, the
+    # old version still answering). `flatpak kill` ends the sandbox
+    # itself, as the update watcher already does. ExecStartPre does it
+    # again before every start, for a leftover ExecStop missed (seen:
+    # with the outer `flatpak run` already gone, systemd skipped it).
     return f"""[Unit]
 Description=SelfSteam
 After=network-online.target
@@ -71,7 +74,9 @@ After=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=-%t/gamescope-environment
-ExecStart=flatpak run --die-with-parent {_APP_ID} --service
+ExecStartPre=-flatpak kill {_APP_ID}
+ExecStart=flatpak run {_APP_ID} --service
+ExecStop=-flatpak kill {_APP_ID}
 Restart=on-failure
 RestartSec=5
 
