@@ -1,4 +1,7 @@
-# SelfSteam
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="screenshots/selfsteam-logo-light-text.svg">
+  <img src="screenshots/selfsteam-logo-dark-text.svg" alt="SelfSteam" height="88">
+</picture>
 
 A headless companion, a small web UI for adding Steam shortcuts (with SteamGridDB artwork) from another device, while the target machine stays in Steam's Game Mode. Just add rom, restart Steam and play.
 

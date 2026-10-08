@@ -277,6 +277,7 @@ PAGE_HEAD = """<!doctype html>
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SelfSteam</title>
+<link rel="icon" type="image/svg+xml" href="/vendor/selfsteam-logo.svg">
 <!--EXTRA_HEAD-->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -329,6 +330,8 @@ header.selfsteam-header {
 /* Links back to the shortcut gallery (the real home page) from
    anywhere else in the app. */
 .back-btn { width: 3.2rem; height: 3.2rem; }
+/* The logo takes the back button slot on top-level pages. */
+.selfsteam-logo { display: block; flex: 0 0 auto; object-fit: contain; }
 .queue-actions { display: flex; align-items: center; gap: 0.6rem; }
 .restart-btn {
   width: auto; margin: 0; padding: 0.65rem 1.3rem; border-radius: 20px; font-size: 0.9rem;
@@ -2100,7 +2103,7 @@ def render(body, page_title="Add Steam Shortcut", show_back=True, extra_head="")
     # next to it shifts left to fill the gap instead of staying put.
     back_btn_html = (
         f'<a class="icon-btn-round back-btn" href="/" title="Back to shortcuts">{_BACK_ICON_SVG}</a>'
-        if show_back else '<span class="icon-btn-round back-btn" style="visibility:hidden"></span>'
+        if show_back else '<img class="back-btn selfsteam-logo" src="/vendor/selfsteam-logo.svg" alt="SelfSteam">'
     )
     head = PAGE_HEAD.replace("<!--EXTRA_HEAD-->", extra_head)
     head = head.replace("<!--SGDB_KEY_BADGE-->", _sgdb_key_badge_html())
@@ -6709,6 +6712,18 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "application/javascript; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        # Unauthenticated too: the login page shows it as its tab icon.
+        if parsed.path == "/vendor/selfsteam-logo.svg":
+            with open(os.path.join(os.path.dirname(__file__), "vendor", "selfsteam-logo.svg"), "rb") as f:
+                body = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/svg+xml")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "max-age=86400")
             self.end_headers()
             self.wfile.write(body)
             return
