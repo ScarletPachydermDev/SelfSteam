@@ -75,7 +75,7 @@ class Screen(Window):
             self.text("body", "Restart the Steam Machine, or open SelfSteam from the desktop.", DIM, h * 0.57)
         else:
             self.controllers(h * 0.135)
-            self.text("small", info.get("hostname") or "", DIM, h * 0.19)
+            self.text("small", info.get("hostname") or "", TEXT, h * 0.19)
             self.text("body", "Open this address on your phone or computer:", DIM, h * 0.27)
             self.text("title", f"http://{info.get('ip')}:{info.get('port')}", ACCENT, h * 0.35)
             self.text("body", "and enter this code:", DIM, h * 0.45)
