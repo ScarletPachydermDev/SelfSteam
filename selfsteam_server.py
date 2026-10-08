@@ -276,7 +276,7 @@ PAGE_HEAD = """<!doctype html>
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SelfSteam</title>
-<link rel="icon" type="image/svg+xml" href="/vendor/selfsteam-logo.svg">
+<link rel="icon" type="image/png" href="/vendor/favicon.png">
 <!--EXTRA_HEAD-->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -6715,7 +6715,18 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
 
-        # Unauthenticated too: the login page shows it as its tab icon.
+        # Unauthenticated: the login page shows the tab icon too.
+        if parsed.path == "/vendor/favicon.png":
+            with open(os.path.join(os.path.dirname(__file__), "vendor", "favicon.png"), "rb") as f:
+                body = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "max-age=86400")
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
         if parsed.path == "/vendor/selfsteam-logo.svg":
             with open(os.path.join(os.path.dirname(__file__), "vendor", "selfsteam-logo.svg"), "rb") as f:
                 body = f.read()
