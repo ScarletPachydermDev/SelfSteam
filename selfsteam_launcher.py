@@ -143,7 +143,7 @@ def _show_code_via_server():
 
     Retries briefly: on a first install the service has only just been
     started and may not be listening yet."""
-    url = f"http://127.0.0.1:{os.environ.get('SELFSTEAM_SERVER_PORT', '8845')}/login"
+    url = f"http://127.0.0.1:{os.environ.get('SELFSTEAM_SERVER_PORT', '8845')}/login?launcher=1"
     for _ in range(20):
         try:
             urllib.request.urlopen(url, timeout=5).read()

@@ -6740,7 +6740,17 @@ class Handler(BaseHTTPRequestHandler):
             # Otherwise show the code whenever anyone lands on /login
             # while not authenticated -- whether they got here via the
             # redirect below, or navigated straight to /login themselves.
-            auth_display.ensure_shown()
+            #
+            # ?launcher=1: the app itself asking (selfsteam_launcher.py),
+            # which from a Steam shortcut is the "game" Steam is running.
+            # It exits right after asking, and Steam then closes what it
+            # takes for that game's windows -- the code screen included,
+            # seen on a Steam Machine as the code blinking and vanishing.
+            # So the screen waits until Steam has finished with it.
+            if params.get("launcher"):
+                threading.Timer(3, auth_display.ensure_shown).start()
+            else:
+                auth_display.ensure_shown()
             self._send_html(render_login())
             return
 
