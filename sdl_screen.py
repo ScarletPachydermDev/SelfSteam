@@ -247,15 +247,13 @@ class Window:
         sdl.SDL_RenderCopy(self.renderer, texture, None, ctypes.byref(rect))
         sdl.SDL_DestroyTexture(texture)
 
-    def controllers(self, center_y, size_ratio=0.07, lift=()):
-        """The four controllers in a row. lift: per-controller upward
-        offsets, in controller heights, for animating them."""
+    def controllers(self, center_y, size_ratio=0.07):
+        """The four controllers in a row."""
         size = int(self.h * size_ratio)
         gap = size // 4
         x = (self.w - (len(self.art) * size + (len(self.art) - 1) * gap)) // 2
-        for i, texture in enumerate(self.art):
-            dy = int(size * lift[i]) if i < len(lift) else 0
-            rect = SDL_Rect(x, int(center_y - size / 2) - dy, size, size)
+        for texture in self.art:
+            rect = SDL_Rect(x, int(center_y - size / 2), size, size)
             sdl.SDL_RenderCopy(self.renderer, texture, None, ctypes.byref(rect))
             x += size + gap
 
