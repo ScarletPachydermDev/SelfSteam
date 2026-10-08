@@ -240,7 +240,9 @@ class Screen:
         unit = self.h / 1080
         self.fonts = {
             "title": ttf.TTF_OpenFont(bold.encode(), max(12, int(64 * unit))),
-            "code": ttf.TTF_OpenFont(bold.encode(), max(24, int(300 * unit))),
+            # Capped by width too: on a 16:10 screen (Steam Deck, 1280x800)
+            # a size from the height alone ran the code into both edges.
+            "code": ttf.TTF_OpenFont(bold.encode(), max(24, int(min(300 * unit, 270 * self.w / 1920)))),
             "body": ttf.TTF_OpenFont(regular.encode(), max(12, int(44 * unit))),
             "small": ttf.TTF_OpenFont(regular.encode(), max(10, int(34 * unit))),
         }
