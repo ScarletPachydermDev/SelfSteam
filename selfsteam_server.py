@@ -278,8 +278,15 @@ PAGE_HEAD = """<!doctype html>
 <title>SelfSteam</title>
 <link rel="icon" type="image/png" href="/vendor/favicon.png">
 <!--EXTRA_HEAD-->
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* Inter, bundled (vendor/fonts, OFL), so a page makes no request to
+   Google Fonts and looks the same with no internet. One variable file
+   covers every weight. */
+@font-face {
+  font-family: 'Inter'; font-style: normal; font-weight: 100 900; font-display: swap;
+  src: url(/vendor/fonts/InterVariable.woff2) format('woff2');
+}
+</style>
 <style>
 /* Palette/spacing/radii lifted from the "Three-column UI draft" design
    handoff (Claude Design mockup) -- draft placeholder tokens per its
@@ -6744,6 +6751,17 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "image/png")
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "max-age=86400")
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        if parsed.path == "/vendor/fonts/InterVariable.woff2":
+            with open(os.path.join(os.path.dirname(__file__), "vendor", "fonts", "InterVariable.woff2"), "rb") as f:
+                body = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "font/woff2")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "max-age=604800")
             self.end_headers()
             self.wfile.write(body)
             return
