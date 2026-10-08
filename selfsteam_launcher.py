@@ -119,7 +119,10 @@ _ARTWORK_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor"
 def _game_running():
     """True while Steam is running a game: every game Steam starts runs
     under its reaper, with "SteamLaunch AppId=" on the command line."""
-    return _host_run(["pgrep", "-f", "SteamLaunch AppId="], capture_output=True).returncode == 0
+    # "[S]" so the pattern does not match itself: the flatpak-spawn
+    # carrying this pgrep is visible to it too, with the pattern in its
+    # own command line, and made every check say a game was running.
+    return _host_run(["pgrep", "-f", "[S]teamLaunch AppId="], capture_output=True).returncode == 0
 
 
 def _add_shortcut_after_update():
