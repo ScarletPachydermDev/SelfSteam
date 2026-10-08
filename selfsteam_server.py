@@ -8424,7 +8424,10 @@ def _install_code_screen():
     every start, so an update reaches it."""
     try:
         os.makedirs(os.path.dirname(CODE_SCREEN_PATH), exist_ok=True)
-        shutil.copy(os.path.join(os.path.dirname(os.path.abspath(__file__)), "code_screen.py"), CODE_SCREEN_PATH)
+        here = os.path.dirname(os.path.abspath(__file__))
+        shutil.copy(os.path.join(here, "code_screen.py"), CODE_SCREEN_PATH)
+        shutil.copytree(os.path.join(here, "vendor", "code-screen"),
+                        os.path.join(os.path.dirname(CODE_SCREEN_PATH), "code-screen"), dirs_exist_ok=True)
     except OSError:
         pass
 

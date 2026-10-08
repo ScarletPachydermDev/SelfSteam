@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """SelfSteam's pairing code screen: SDL2, fullscreen, controller-first.
 
-Shows the machine's name, the address to open on another device, and the
+Shows four controllers in the logo's colours, the machine's name, the address to open on another device, and the
 current code. Any button on a controller or keyboard closes it, and so
 does someone logging in with the code from another device.
 
@@ -118,6 +118,10 @@ sdl.SDL_SetHint.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
 sdl.SDL_DestroyRenderer.argtypes = [ctypes.c_void_p]
 sdl.SDL_DestroyWindow.argtypes = [ctypes.c_void_p]
 sdl.SDL_ShowCursor.argtypes = [ctypes.c_int]
+sdl.SDL_CreateRGBSurfaceWithFormatFrom.restype = ctypes.c_void_p
+sdl.SDL_CreateRGBSurfaceWithFormatFrom.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                                   ctypes.c_int, ctypes.c_uint32]
+SDL_PIXELFORMAT_ABGR8888 = 0x16762004  # bytes R, G, B, A in memory
 
 ttf.TTF_OpenFont.restype = ctypes.c_void_p
 ttf.TTF_OpenFont.argtypes = [ctypes.c_char_p, ctypes.c_int]
@@ -140,6 +144,68 @@ def _font_path(bold):
         if os.path.isfile(path):
             return path
     raise OSError("no font found")
+
+
+ART_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "code-screen")
+# The logo's four tiles, as controllers, in the logo's order.
+CONTROLLERS = ("yellow", "blue", "green", "red")
+
+
+def _load_png(path):
+    """(width, height, RGBA bytes) for an 8-bit RGBA, non-interlaced PNG.
+    SteamOS ships no SDL2_image, so like Preflight this decodes its own
+    art with zlib -- only the one format its art is exported in."""
+    import struct
+    import zlib
+    with open(path, "rb") as fh:
+        data = fh.read()
+    if data[:8] != b"\x89PNG\r\n\x1a\n":
+        raise ValueError("not a PNG")
+    pos, idat = 8, []
+    width = height = 0
+    while pos < len(data):
+        length, kind = struct.unpack(">I4s", data[pos:pos + 8])
+        chunk = data[pos + 8:pos + 8 + length]
+        pos += 12 + length
+        if kind == b"IHDR":
+            width, height, depth, ctype, _c, _f, interlace = struct.unpack(">IIBBBBB", chunk)
+            if depth != 8 or ctype != 6 or interlace:
+                raise ValueError("only 8-bit RGBA, non-interlaced")
+        elif kind == b"IDAT":
+            idat.append(chunk)
+        elif kind == b"IEND":
+            break
+    raw = zlib.decompress(b"".join(idat))
+    stride = width * 4
+    out = bytearray(height * stride)
+    prev = bytearray(stride)
+    i = 0
+    for y in range(height):
+        ftype = raw[i]
+        line = bytearray(raw[i + 1:i + 1 + stride])
+        i += 1 + stride
+        if ftype == 1:
+            for x in range(4, stride):
+                line[x] = (line[x] + line[x - 4]) & 0xFF
+        elif ftype == 2:
+            for x in range(stride):
+                line[x] = (line[x] + prev[x]) & 0xFF
+        elif ftype == 3:
+            for x in range(stride):
+                left = line[x - 4] if x >= 4 else 0
+                line[x] = (line[x] + ((left + prev[x]) >> 1)) & 0xFF
+        elif ftype == 4:
+            for x in range(stride):
+                a = line[x - 4] if x >= 4 else 0
+                b = prev[x]
+                c = prev[x - 4] if x >= 4 else 0
+                p = a + b - c
+                pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+                pred = a if pa <= pb and pa <= pc else (b if pb <= pc else c)
+                line[x] = (line[x] + pred) & 0xFF
+        out[y * stride:(y + 1) * stride] = line
+        prev = line
+    return width, height, bytes(out)
 
 
 def _fetch():
@@ -179,6 +245,18 @@ class Screen:
             "small": ttf.TTF_OpenFont(regular.encode(), max(10, int(34 * unit))),
         }
         self.controllers = []
+        sdl.SDL_SetHint(b"SDL_RENDER_SCALE_QUALITY", b"1")
+        self.art = []
+        for name in CONTROLLERS:
+            try:
+                w, h, pixels = _load_png(os.path.join(ART_DIR, f"controller-{name}.png"))
+            except (OSError, ValueError):
+                continue
+            buf = ctypes.create_string_buffer(pixels, len(pixels))
+            surface = sdl.SDL_CreateRGBSurfaceWithFormatFrom(buf, w, h, 32, w * 4, SDL_PIXELFORMAT_ABGR8888)
+            if surface:
+                self.art.append(sdl.SDL_CreateTextureFromSurface(self.renderer, surface))
+                sdl.SDL_FreeSurface(surface)
 
     def _open_pad(self, index):
         pad = sdl.SDL_GameControllerOpen(index) if sdl.SDL_IsGameController(index) else sdl.SDL_JoystickOpen(index)
@@ -196,16 +274,26 @@ class Screen:
         sdl.SDL_RenderCopy(self.renderer, texture, None, ctypes.byref(rect))
         sdl.SDL_DestroyTexture(texture)
 
+    def _controllers(self, center_y):
+        size = int(self.h * 0.07)
+        gap = size // 4
+        x = (self.w - (len(self.art) * size + (len(self.art) - 1) * gap)) // 2
+        for texture in self.art:
+            rect = SDL_Rect(x, int(center_y - size / 2), size, size)
+            sdl.SDL_RenderCopy(self.renderer, texture, None, ctypes.byref(rect))
+            x += size + gap
+
     def draw(self, info):
         sdl.SDL_SetRenderDrawColor(self.renderer, *BG, 255)
         sdl.SDL_RenderClear(self.renderer)
         h = self.h
         if info is None:
-            self._text("title", "SelfSteam", TEXT, h * 0.35)
+            self._controllers(h * 0.3)
             self._text("body", "SelfSteam's background service isn't running.", DIM, h * 0.5)
             self._text("body", "Restart the Steam Machine, or open SelfSteam from the desktop.", DIM, h * 0.57)
         else:
-            self._text("title", info.get("hostname") or "SelfSteam", TEXT, h * 0.17)
+            self._controllers(h * 0.135)
+            self._text("small", info.get("hostname") or "", DIM, h * 0.19)
             self._text("body", "Open this address on your phone or computer:", DIM, h * 0.27)
             self._text("title", f"http://{info.get('ip')}:{info.get('port')}", ACCENT, h * 0.35)
             self._text("body", "and enter this code:", DIM, h * 0.45)
@@ -245,6 +333,8 @@ class Screen:
             time.sleep(0.016)
 
     def close(self):
+        for texture in self.art:
+            sdl.SDL_DestroyTexture(texture)
         for font in self.fonts.values():
             if font:
                 ttf.TTF_CloseFont(font)
