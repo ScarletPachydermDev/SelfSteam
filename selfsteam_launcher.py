@@ -16,13 +16,16 @@ matching this project's existing pattern of small focused modules
 (see the many single-purpose files already here) rather than one file
 doing two unrelated jobs.
 """
+import os
 import subprocess
 import sys
+import time
 
 import auth_display
 import config
 import host_exec
 import selfsteam_server
+import steam_restart
 
 _SERVICE_NAME = "selfsteam.service"
 _APP_ID = "io.github.ScarletPachydermDev.SelfSteam"
@@ -94,6 +97,39 @@ def _notify(title, body):
     _host_run(["notify-send", title, body])
 
 
+_ARTWORK_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "steam-artwork")
+
+
+def _add_selfsteam_shortcut():
+    """Add a "SelfSteam" shortcut to Steam that opens the pairing code
+    screen, with SelfSteam's own artwork, then restart Steam so it shows
+    up. Steam only reads shortcuts.vdf at start, so without the restart
+    the shortcut would not appear until the next one. Warns first: the
+    restart closes Steam, which in Game Mode blanks the screen briefly.
+
+    Skipped quietly when Steam is not installed or has never been run
+    (no userdata folder to write to) -- SelfSteam still works without
+    it, from another device."""
+    import create_webapp  # heavy import; only needed on this one run
+    assets = {
+        os.path.splitext(f)[0]: os.path.join(_ARTWORK_DIR, f)
+        for f in os.listdir(_ARTWORK_DIR)
+    }
+    try:
+        create_webapp.register_steam_shortcut(
+            "SelfSteam", None, assets,
+            launch_args=["/usr/bin/flatpak", "run", _APP_ID],
+        )
+    except Exception:  # noqa: BLE001 -- no Steam, or a userdata it cannot write
+        return
+    _notify("SelfSteam", "Added SelfSteam to your Steam library. Restarting Steam in 5 seconds so it shows up.")
+    time.sleep(5)
+    try:
+        steam_restart.restart_steam()
+    except Exception:  # noqa: BLE001
+        _notify("SelfSteam", "Restart Steam to see the SelfSteam shortcut.")
+
+
 def launcher_main():
     """What runs when the user clicks the installed app icon. Sets up
     the persistent background service on the very first run only (a
@@ -110,6 +146,7 @@ def launcher_main():
         # doesn't also fire a second, redundant pairing screen the next
         # time Game Mode happens to be entered.
         config.set_pending_first_show(False)
+        _add_selfsteam_shortcut()
     auth_display.ensure_shown()
 
 
