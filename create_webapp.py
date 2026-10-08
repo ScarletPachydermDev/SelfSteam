@@ -488,7 +488,9 @@ def register_steam_shortcut(name, url, asset_paths, user_id=None, couch_mode=Fal
             continue
         ext = os.path.splitext(src)[1]
         dest = os.path.join(grid_dir, GRID_FILENAMES[basename].format(appid=appid, ext=ext))
-        shutil.copy2(src, dest)
+        # copy, not copy2: a fresh date. Files from inside the Flatpak
+        # carry a 1970 one, and Steam showed none of that artwork.
+        shutil.copy(src, dest)
         print(f"  + {os.path.basename(dest)}  <-  {src}")
         if basename == "icon":
             icon_dest = dest
@@ -617,7 +619,9 @@ def register_custom_shortcut(name, target, start_dir, launch_options, asset_path
             continue
         ext = os.path.splitext(src)[1]
         dest = os.path.join(grid_dir, GRID_FILENAMES[basename].format(appid=appid, ext=ext))
-        shutil.copy2(src, dest)
+        # copy, not copy2: a fresh date. Files from inside the Flatpak
+        # carry a 1970 one, and Steam showed none of that artwork.
+        shutil.copy(src, dest)
         print(f"  + {os.path.basename(dest)}  <-  {src}")
         if basename == "icon":
             icon_dest = dest

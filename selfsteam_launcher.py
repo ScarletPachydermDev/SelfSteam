@@ -20,8 +20,8 @@ import os
 import subprocess
 import sys
 import time
+import urllib.request
 
-import auth_display
 import config
 import host_exec
 import selfsteam_server
@@ -130,6 +130,29 @@ def _add_selfsteam_shortcut():
         _notify("SelfSteam", "Restart Steam to see the SelfSteam shortcut.")
 
 
+def _show_code_via_server():
+    """Ask the running server to show the pairing code, by opening its
+    /login page as a signed-out visitor would. The code only exists in
+    the server's own memory: a screen shown from this process would
+    carry a code of its own that the server has never heard of, and
+    could never be used. Launched from a Steam shortcut, this process is
+    also the "game" Steam is watching, and a window it foregrounds fights
+    Steam over the screen (seen on a Steam Machine: the code blinked,
+    then a black screen). Leaving the window to the server, and exiting,
+    takes the same path as every other time the code is shown.
+
+    Retries briefly: on a first install the service has only just been
+    started and may not be listening yet."""
+    url = f"http://127.0.0.1:{os.environ.get('SELFSTEAM_SERVER_PORT', '8845')}/login"
+    for _ in range(20):
+        try:
+            urllib.request.urlopen(url, timeout=5).read()
+            return True
+        except OSError:
+            time.sleep(0.5)
+    return False
+
+
 def launcher_main():
     """What runs when the user clicks the installed app icon. Sets up
     the persistent background service on the very first run only (a
@@ -147,7 +170,8 @@ def launcher_main():
         # time Game Mode happens to be entered.
         config.set_pending_first_show(False)
         _add_selfsteam_shortcut()
-    auth_display.ensure_shown()
+    if not _show_code_via_server():
+        _notify("SelfSteam", "SelfSteam's background service isn't responding, so no code can be shown.")
 
 
 def main():
