@@ -961,6 +961,24 @@ input[type=file]::file-selector-button {
   color: var(--text-dim);
 }
 .add-poster-plus { font-size: 3.5rem; line-height: 1; font-weight: 300; }
+/* The add button gets a row of its own, above the gallery: one big
+   panel, the width of the poster grid (5 columns of 230px + gaps),
+   clickable anywhere, with the "+" tile on the left and its label
+   beside it. */
+.add-row {
+  display: flex; align-items: center; gap: 2rem; width: 100%; max-width: 1246px; box-sizing: border-box;
+  margin: 0 auto 1rem; padding: 1.2rem 2rem 1.2rem 1.2rem; border-radius: 16px;
+  background: var(--card-bg); color: var(--text); text-decoration: none;
+}
+.add-row:hover { outline: 3px solid var(--accent); }
+.add-row .add-poster-frame { width: 188px; height: 271px; }
+.add-row-label { font-size: 2.6rem; font-weight: 700; letter-spacing: -0.01em; }
+@media (max-width: 600px) {
+  .add-row { gap: 1rem; padding: 0.8rem; }
+  .add-row .add-poster-frame { width: 110px; height: 160px; }
+  .add-row .add-poster { width: 99px; height: 149px; }
+  .add-row-label { font-size: 1.6rem; }
+}
 /* Steam Deck-class widths (~1280px) still fit 3 columns side by side
    (the 960px breakpoint below is what actually stacks them), but
    min-width:280px/320px per column plus the base padding/gaps above
@@ -6579,15 +6597,18 @@ def render_gallery():
     }
     cards_html = "".join(_poster_card_html(s, pending_removal_appids) for s in shortcuts)
     return render(f"""
+<a class="add-row" href="/new">
+  <span class="add-poster-frame">
+    <span class="add-poster">
+      <span class="add-poster-plus">+</span>
+    </span>
+  </span>
+  <span class="add-row-label">Add new shortcut</span>
+</a>
 <div class="gallery-header">
   <h2>Non Steam shortcuts</h2>
 </div>
 <div class="gallery-grid">
-  <a class="add-poster-frame" href="/new" title="Add a shortcut">
-    <span class="add-poster">
-      <span class="add-poster-plus">+</span>
-    </span>
-  </a>
   {cards_html}
 </div>
 """, page_title=_hostname(), show_back=False)
