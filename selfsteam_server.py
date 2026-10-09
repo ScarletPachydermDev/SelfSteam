@@ -965,14 +965,15 @@ input[type=file]::file-selector-button {
   display: flex; align-items: center; justify-content: center; color: var(--text-dim);
 }
 .add-card-label { font-size: 1.8rem; font-weight: 700; }
-/* Title and category headings line up with the poster grid's own left
-   edge (5 columns of 230px + 4 gaps of 24px). */
-.gallery-header, .gallery-category { width: 100%; max-width: 1246px; margin-left: auto; margin-right: auto; }
+/* Title and group headings sit inside the poster grid, each spanning a
+   whole row, so they line up with its first column at any width. */
+.gallery-title, .gallery-category { grid-column: 1 / -1; margin: 0; }
+.gallery-title { font-size: 1.3rem; }
 .gallery-category {
-  margin-top: 0.4rem; margin-bottom: 0.8rem; font-size: 1rem; font-weight: 700;
+  margin-top: 0.6rem; font-size: 1rem; font-weight: 700;
   text-transform: uppercase; letter-spacing: 0.06em; color: var(--text);
 }
-.gallery-category + .gallery-grid { margin-bottom: 1.6rem; }
+.gallery-sections { row-gap: 18px; padding-bottom: 2.5rem; }
 @media (max-width: 600px) {
   .add-card { gap: 1rem; padding: 10px 1.4rem 10px 10px; }
   .add-card-tile { width: 99px; height: 149px; }
@@ -6596,21 +6597,24 @@ def render_gallery():
     }
     # Grouped by how each shortcut was made -- the same fields
     # _poster_card_html's Edit link already branches on -- in this order.
-    # A shortcut SelfSteam did not make itself goes with Apps.
-    groups = {"Sites": [], "Apps": [], "Games": []}
+    # Others: shortcuts SelfSteam did not make (added in Steam itself),
+    # whose kind it cannot know.
+    groups = {"Games": [], "Sites": [], "Apps": [], "Others": []}
     for shortcut in shortcuts:
         if shortcut.get("ra_console") or shortcut.get("em_emulator"):
             groups["Games"].append(shortcut)
         elif shortcut.get("url"):
             groups["Sites"].append(shortcut)
-        else:
+        elif shortcut.get("managed") or shortcut.get("apps_app_id"):
             groups["Apps"].append(shortcut)
+        else:
+            groups["Others"].append(shortcut)
+    # One grid for every group, headings spanning a whole row: a heading
+    # then always starts at the grid's own first column, however many
+    # columns the window fits.
     sections_html = "".join(
-        f"""
-<h3 class="gallery-category">{name}</h3>
-<div class="gallery-grid">
-  {"".join(_poster_card_html(s, pending_removal_appids) for s in items)}
-</div>"""
+        f'<h3 class="gallery-category">{name}</h3>'
+        + "".join(_poster_card_html(s, pending_removal_appids) for s in items)
         for name, items in groups.items() if items
     )
     return render(f"""
@@ -6620,10 +6624,10 @@ def render_gallery():
     <span class="add-card-label">Add new shortcut</span>
   </a>
 </div>
-<div class="gallery-header">
-  <h2>Non Steam shortcuts</h2>
+<div class="gallery-grid gallery-sections">
+  <h2 class="gallery-title">Non Steam shortcuts</h2>
+  {sections_html}
 </div>
-{sections_html}
 """, page_title=_hostname(), show_back=False)
 
 
