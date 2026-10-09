@@ -950,41 +950,33 @@ input[type=file]::file-selector-button {
   cursor: pointer; text-decoration: none; color: #fff;
 }
 .poster-icon-btn:disabled { opacity: 0.55; cursor: not-allowed; }
-/* Outer box matches .shortcut-poster's own flex-item footprint exactly
-   (230x270) so row alignment holds no matter where this tile sits in
-   the grid -- confirmed live: with only the inner 166x249 box as the
-   flex item (its old shape), moving this tile to the front of the grid
-   made its shorter flex-item height throw off the whole first row's
-   vertical alignment, not just this one tile. The visible "+" box
-   itself stays inset the same way as a real poster's own artwork
-   region (.poster-art's own left:11px/top:11px/166x249) -- the add
-   card still has no blue frame graphic of its own, so aligning by
-   outer edges alone would leave its "+" sitting visibly higher than
-   every other poster's real content. */
-.add-poster-frame { position: relative; width: 230px; height: 270px; flex: 0 0 auto; text-decoration: none; }
-.add-poster {
-  position: absolute; left: 11px; top: 11px; width: 166px; height: 249px; border-radius: 8px; background: var(--skeleton);
-  display: flex; align-items: center; justify-content: center;
-  color: var(--text-dim);
-}
 .add-poster-plus { font-size: 3.5rem; line-height: 1; font-weight: 300; }
-/* The add button gets a row of its own, above the gallery: one big
-   panel, the width of the poster grid (5 columns of 230px + gaps),
-   clickable anywhere, with the "+" tile on the left and its label
-   beside it. */
-.add-row {
-  display: flex; align-items: center; gap: 2rem; width: 100%; max-width: 1246px; box-sizing: border-box;
-  margin: 0 auto 1rem; padding: 1.2rem 2rem 1.2rem 1.2rem; border-radius: 16px;
-  background: var(--card-bg); color: var(--text); text-decoration: none;
+/* The add button: a card of its own, centred above the gallery -- the
+   grey "+" tile with its label beside it, clickable anywhere. */
+.add-card-row { display: flex; justify-content: center; margin: 0.4rem 0 1.6rem; }
+.add-card {
+  display: flex; align-items: center; gap: 1.6rem; padding: 12px 2.4rem 12px 12px;
+  background: var(--card-bg); border-radius: 14px; box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+  color: var(--text); text-decoration: none;
 }
-.add-row:hover { outline: 3px solid var(--accent); }
-.add-row .add-poster-frame { width: 188px; height: 271px; }
-.add-row-label { font-size: 2.6rem; font-weight: 700; letter-spacing: -0.01em; }
+.add-card:hover { outline: 3px solid var(--accent); }
+.add-card-tile {
+  width: 166px; height: 249px; flex: 0 0 auto; border-radius: 8px; background: var(--skeleton);
+  display: flex; align-items: center; justify-content: center; color: var(--text-dim);
+}
+.add-card-label { font-size: 1.8rem; font-weight: 700; }
+/* Title and category headings line up with the poster grid's own left
+   edge (5 columns of 230px + 4 gaps of 24px). */
+.gallery-header, .gallery-category { width: 100%; max-width: 1246px; margin-left: auto; margin-right: auto; }
+.gallery-category {
+  margin-top: 0.4rem; margin-bottom: 0.8rem; font-size: 1rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.06em; color: var(--text);
+}
+.gallery-category + .gallery-grid { margin-bottom: 1.6rem; }
 @media (max-width: 600px) {
-  .add-row { gap: 1rem; padding: 0.8rem; }
-  .add-row .add-poster-frame { width: 110px; height: 160px; }
-  .add-row .add-poster { width: 99px; height: 149px; }
-  .add-row-label { font-size: 1.6rem; }
+  .add-card { gap: 1rem; padding: 10px 1.4rem 10px 10px; }
+  .add-card-tile { width: 99px; height: 149px; }
+  .add-card-label { font-size: 1.4rem; }
 }
 /* Steam Deck-class widths (~1280px) still fit 3 columns side by side
    (the 960px breakpoint below is what actually stacks them), but
@@ -6602,22 +6594,36 @@ def render_gallery():
     pending_removal_appids = {
         str(item["appid"]) for item in pending_queue.all_items() if item.get("type") == "remove"
     }
-    cards_html = "".join(_poster_card_html(s, pending_removal_appids) for s in shortcuts)
+    # Grouped by how each shortcut was made -- the same fields
+    # _poster_card_html's Edit link already branches on -- in this order.
+    # A shortcut SelfSteam did not make itself goes with Apps.
+    groups = {"Sites": [], "Apps": [], "Games": []}
+    for shortcut in shortcuts:
+        if shortcut.get("ra_console") or shortcut.get("em_emulator"):
+            groups["Games"].append(shortcut)
+        elif shortcut.get("url"):
+            groups["Sites"].append(shortcut)
+        else:
+            groups["Apps"].append(shortcut)
+    sections_html = "".join(
+        f"""
+<h3 class="gallery-category">{name}</h3>
+<div class="gallery-grid">
+  {"".join(_poster_card_html(s, pending_removal_appids) for s in items)}
+</div>"""
+        for name, items in groups.items() if items
+    )
     return render(f"""
-<a class="add-row" href="/new">
-  <span class="add-poster-frame">
-    <span class="add-poster">
-      <span class="add-poster-plus">+</span>
-    </span>
-  </span>
-  <span class="add-row-label">Add new shortcut</span>
-</a>
+<div class="add-card-row">
+  <a class="add-card" href="/new">
+    <span class="add-card-tile"><span class="add-poster-plus">+</span></span>
+    <span class="add-card-label">Add new shortcut</span>
+  </a>
+</div>
 <div class="gallery-header">
   <h2>Non Steam shortcuts</h2>
 </div>
-<div class="gallery-grid">
-  {cards_html}
-</div>
+{sections_html}
 """, page_title=_hostname(), show_back=False)
 
 
