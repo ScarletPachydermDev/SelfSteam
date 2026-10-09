@@ -6617,6 +6617,11 @@ def render_gallery():
         + "".join(_poster_card_html(s, pending_removal_appids) for s in items)
         for name, items in groups.items() if items
     )
+    # Nothing at all to list: no title either, just the add card.
+    gallery_html = f"""<div class="gallery-grid gallery-sections">
+  <h2 class="gallery-title">Non Steam shortcuts</h2>
+  {sections_html}
+</div>""" if sections_html else ""
     return render(f"""
 <div class="add-card-row">
   <a class="add-card" href="/new">
@@ -6624,10 +6629,7 @@ def render_gallery():
     <span class="add-card-label">Add new shortcut</span>
   </a>
 </div>
-<div class="gallery-grid gallery-sections">
-  <h2 class="gallery-title">Non Steam shortcuts</h2>
-  {sections_html}
-</div>
+{gallery_html}
 """, page_title=_hostname(), show_back=False)
 
 
