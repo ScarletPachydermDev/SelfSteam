@@ -26,6 +26,21 @@
   </categories>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="0.1.31" date="2026-10-09">
+      <description>
+        <ul>
+          <li>SelfSteam has its own logo, app icon and Steam artwork</li>
+          <li>A SelfSteam shortcut is added to your Steam library, after a fresh install or this update, and Steam restarts to show it (after any game you are playing)</li>
+          <li>New pairing code screen: open the SelfSteam shortcut to see the address and code. Any controller button or key closes it, and it closes by itself once you log in</li>
+          <li>The code screen no longer pops up on its own when a device opens SelfSteam's page</li>
+          <li>The screen shown while Steam restarts now just says "Restarting Steam…", in big text</li>
+          <li>Home page: a new "Add new shortcut" card, and shortcuts grouped into Games, Sites, Apps and Others</li>
+          <li>The font is bundled, so pages no longer load anything from Google</li>
+          <li>SelfSteam now runs on the smaller Freedesktop runtime instead of GNOME</li>
+          <li>Restarting SelfSteam's background service no longer leaves the old one running</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.30" date="2026-10-06">
       <description>
         <ul>
