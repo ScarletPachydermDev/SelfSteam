@@ -6,10 +6,11 @@
 </p>
 <p align="center"><sub>A headless companion, a small web UI for adding Steam shortcuts (with SteamGridDB artwork) from another device, while the target machine stays in Steam's Game Mode. Just add rom, restart Steam and play.</sub></p>
 
+
 ![](screenshots/main.png)
 
 > [!NOTE]
-> Flathub repo is needed for the GNOME runtime dependency, RetroArch and emulators.
+> Flathub repo is needed for RetroArch, apps and emulators.
 
 ## Features
 + Add streaming or any websites as a Steam shortcut
@@ -24,14 +25,15 @@
 + Auto update flatpak
 + Convert .nsz Switch roms to .nsp automatically so Ryujinx/Eden can load them
 + Automatic overscan cropping for N64 games in RetroArch
-+ 3D consoles at RetroArch and at Emulators tab render at 1080p by default (one step lower on a Steam Deck). A resolution you set yourself is never overridden. 
++ 3D consoles at RetroArch and at Emulators tab render at 1080p by default (one step lower on a Steam Deck). A resolution you set yourself is never overridden.
++ Optional [preflight](https://github.com/ScarletPachydermDev/Preflight) toggle to make controllers work without having the need to get into emulator settings.
   
-## To be done
+<!-- ## To be done
 - [ ] App icon
 - [x] Test all emulators from Emulators tab, ~~around 80%~~ 100% of them only have been tested.
 - [x] Add other game launchers + utilities
 - [ ] More testing and polishing
-- [x] Marry [preflight](https://github.com/ScarletPachydermDev/Preflight) to this project to avoid controller layout issues in emulators. At the moment adding games from emulators tab require separate configuration for controllers. The goal of preflight is to avoid this.
+- [x] Marry [preflight](https://github.com/ScarletPachydermDev/Preflight) to this project to avoid controller layout issues in emulators. At the // moment adding games from emulators tab require separate configuration for controllers. The goal of preflight is to avoid this. -->
 
 ## How to install
 Run on your terminal
