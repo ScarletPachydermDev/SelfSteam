@@ -45,12 +45,13 @@ flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/fl
 
 SelfSteam doesn't vendor code from any of these, but real behavior/patterns here were confirmed by actually reading their own source, not guessed -- each one credited in the relevant file's own comments too:
 
-- **[ChimeraOS](https://github.com/ChimeraOS/chimera)** -- the pairing-code auth screen's layout (`chimera_app/authenticator.py`) and the confirmed reason Steam needs to be fully stopped before writing `shortcuts.vdf` (its own periodic re-save silently clobbers an in-place edit).
-- **[emerytech/couchside](https://github.com/emerytech/couchside)** -- the same no-accounts, code-on-screen pairing pattern.
-- **[ChimeraOS/gamescope-session](https://github.com/ChimeraOS/gamescope-session)** (its bundled `gamescope-fg` tool) -- the `STEAM_GAME`/`GAMESCOPECTRL_BASELAYER_APPID` X11 mechanism `gamescope_splash.py` reimplements directly, so this has no runtime dependency on it being installed.
-- **[Jellyfin's own Flatpak](https://github.com/flathub/org.jellyfin.JellyfinServer)** -- confirmed the real, working shape for a background-service Flatpak (a sandbox can't touch `~/.config/systemd/user`/`systemctl` itself, so setup has to happen through an escape hatch or a copy-paste script).
-- **[SteamGridDB/steam-rom-manager](https://github.com/SteamGridDB/steam-rom-manager)** -- Artwork source and `_ra_guess_name_from_filename`'s ROM-filename cleanup is a ported version of its own `fuzzy-matcher.ts`.
+- **[ChimeraOS](https://github.com/ChimeraOS/chimera)** 
+- **[emerytech/couchside](https://github.com/emerytech/couchside)** 
+- **[ChimeraOS/gamescope-session](https://github.com/ChimeraOS/gamescope-session)** 
+- **[Jellyfin's own Flatpak](https://github.com/flathub/org.jellyfin.JellyfinServer)** 
+- **[SteamGridDB/steam-rom-manager](https://github.com/SteamGridDB/steam-rom-manager)** 
 - **[mateussouzaweb/nicedeck](https://github.com/mateussouzaweb/nicedeck)**
+- **[Rhastago/NonSteamScraper](https://github.com/Rhastago/NonSteamScraper)**
 
 ## Donate
 
