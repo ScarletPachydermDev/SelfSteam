@@ -59,14 +59,15 @@ def _unit_text():
     # windows the service opens (the maintenance splash) can reach the
     # screen. ExecStart runs this same launcher with --service.
     #
-    # ExecStop: flatpak runs the sandboxed server in a scope of its own,
-    # outside this service, so stopping or restarting the service ended
-    # only the outer `flatpak run` and the server kept port 8845; the new
-    # one could not start (seen on a Steam Machine: a restart loop, the
-    # old version still answering). `flatpak kill` ends the sandbox
-    # itself, as the update watcher already does. ExecStartPre does it
-    # again before every start, for a leftover ExecStop missed (seen:
-    # with the outer `flatpak run` already gone, systemd skipped it).
+    # ExecStop/ExecStartPre: flatpak runs the sandboxed server in a scope
+    # of its own, outside this service, so stopping or restarting the
+    # service ended only the outer `flatpak run` and the server kept port
+    # 8845; the new one could not start (seen on a Steam Machine: a
+    # restart loop, the old version still answering). So the server
+    # process itself is ended, before every start too, for a leftover a
+    # stop missed. Matched by its own command line, not `flatpak kill`:
+    # that would also end the app's other instances -- the launcher
+    # restarting this service after an update, for one.
     return f"""[Unit]
 Description=SelfSteam
 After=network-online.target
@@ -74,9 +75,9 @@ After=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=-%t/gamescope-environment
-ExecStartPre=-flatpak kill {_APP_ID}
+ExecStartPre=-/bin/sh -c "pkill -f '[s]elfsteam_launcher.py --service'; sleep 1"
 ExecStart=flatpak run {_APP_ID} --service
-ExecStop=-flatpak kill {_APP_ID}
+ExecStop=-/bin/sh -c "pkill -f '[s]elfsteam_launcher.py --service'"
 Restart=on-failure
 RestartSec=5
 
@@ -198,6 +199,21 @@ def _show_code_screen():
     _host_run(["python3", selfsteam_server.CODE_SCREEN_PATH])
 
 
+def _server_outdated():
+    """True if a SelfSteam instance is running an older build than the
+    one installed: `flatpak ps` gives each instance's commit."""
+    installed = _host_run(["flatpak", "info", "--show-commit", _APP_ID],
+                          capture_output=True, text=True).stdout.strip()
+    running = _host_run(["flatpak", "ps", "--columns=application,commit"],
+                        capture_output=True, text=True).stdout
+    for line in running.splitlines():
+        app_id, _, commit = line.partition("\t")
+        commit = commit.strip()
+        if app_id == _APP_ID and commit and installed and not installed.startswith(commit):
+            return True
+    return False
+
+
 def launcher_main():
     """What runs when the user clicks the installed app icon. Sets up
     the persistent background service on the very first run only (a
@@ -212,6 +228,13 @@ def launcher_main():
         # The SelfSteam shortcut is added by the service just started
         # (_add_shortcut_after_update), the same way as after an update;
         # adding it here as well would restart Steam twice.
+    elif _server_outdated():
+        # An update installed while the old server keeps running until
+        # its own watcher notices (up to 15 minutes). Until then it
+        # answers with the old code screen and has not added the Steam
+        # shortcut -- seen on a Steam Deck right after updating.
+        _write_unit()
+        _host_run(["systemctl", "--user", "restart", _SERVICE_NAME])
     _wait_for_server()
     _show_code_screen()
 
