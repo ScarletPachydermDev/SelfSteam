@@ -6233,6 +6233,18 @@ def _em_display_name(name):
     return standalone_emulators.EMULATORS.get(name, {}).get("display_name", name)
 
 
+def _as_nsp(path):
+    """A Switch update or DLC as an emulator can load it: a .nsz
+    (compressed) is converted to .nsp first, as the game itself already
+    is at launch. Ryubing and Eden cannot read .nsz, and an update they
+    cannot read stops the game from starting at all -- seen with Trivial
+    Pursuit Live 2: "Couldn't find any application", ResultFsPathNotFound.
+    Left as it is when conversion is not possible (no keys yet)."""
+    if path and path.lower().endswith(".nsz"):
+        return standalone_emulators.convert_nsz_to_nsp(path) or path
+    return path
+
+
 def _run_commit_in_background(items, label):
     def apply():
         for item in items:
@@ -7936,7 +7948,7 @@ class Handler(BaseHTTPRequestHandler):
                         _ra_safe_join(row["path"]) for row in dlc_rows
                         if row["kind"] == "update"
                     ]
-                    update_abs_paths = [p for p in update_abs_paths if p]
+                    update_abs_paths = [_as_nsp(p) for p in update_abs_paths if p]
                     standalone_emulators.install_switch_title_updates(
                         standalone_emulators.EMULATORS[em_emulator],
                         f"{rom_title_id_base:016x}", update_abs_paths,
@@ -7947,7 +7959,7 @@ class Handler(BaseHTTPRequestHandler):
                     for row in dlc_rows:
                         if row["kind"] != "dlc":
                             continue
-                        dlc_abs = _ra_safe_join(row["path"])
+                        dlc_abs = _as_nsp(_ra_safe_join(row["path"]))
                         if not dlc_abs or not header_key_path:
                             continue
                         try:
@@ -7970,7 +7982,7 @@ class Handler(BaseHTTPRequestHandler):
                     _ra_safe_join(row["path"]) for row in dlc_rows
                     if row["kind"] in ("update", "dlc")
                 ]
-                dlc_update_abs_paths = [p for p in dlc_update_abs_paths if p]
+                dlc_update_abs_paths = [_as_nsp(p) for p in dlc_update_abs_paths if p]
                 standalone_emulators.install_eden_dlc_and_updates(dlc_update_abs_paths, em_emulator)
             elif em_emulator in standalone_emulators.PS4_DLC_UPDATE_EMULATORS:
                 em_dlc_state = _em_dlc_state_unpacked(params)
