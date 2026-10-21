@@ -6237,8 +6237,8 @@ def _as_nsp(path):
     """A Switch update or DLC as an emulator can load it: a .nsz
     (compressed) is converted to .nsp first, as the game itself already
     is at launch. Ryubing and Eden cannot read .nsz, and an update they
-    cannot read stops the game from starting at all -- seen with Trivial
-    Pursuit Live 2: "Couldn't find any application", ResultFsPathNotFound.
+    cannot read stops the game from starting at all ("Couldn't find any
+    application", ResultFsPathNotFound).
     Left as it is when conversion is not possible (no keys yet)."""
     if path and path.lower().endswith(".nsz"):
         return standalone_emulators.convert_nsz_to_nsp(path) or path
