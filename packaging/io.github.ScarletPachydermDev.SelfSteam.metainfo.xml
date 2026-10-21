@@ -26,6 +26,14 @@
   </categories>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="0.1.32" date="2026-10-21">
+      <description>
+        <ul>
+          <li>The code screen no longer closes by itself on a Steam Deck: moving a stick closed it, now only a button press does</li>
+          <li>Opening SelfSteam right after an update now restarts its background service straight away, so the new code screen and the SelfSteam Steam shortcut appear without waiting</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.31" date="2026-10-09">
       <description>
         <ul>
