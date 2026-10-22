@@ -66,6 +66,20 @@ APPS = {
         # Unversioned name, and an arm64 build sits beside it.
         "binary_asset_re": re.compile(r"^QuiverLauncher-linux-x64\.AppImage$"),
     },
+    "io.github.domsvoboda.XodusNexus": {
+        "name": "Xodus Nexus",
+        # Real description, confirmed via the repo's own GitHub
+        # "description" field.
+        "summary": "Open-source Xbox-inspired desktop launcher for Xodus",
+        "icon": "https://raw.githubusercontent.com/domsvoboda/xodus-nexus/main/assets/icon.png",
+        "homepage": "https://github.com/domsvoboda/xodus-nexus",
+        "install_type": "github",
+        # The list, not releases/latest: the same repo also publishes
+        # backend releases (backend-v*) with no AppImage, and whichever
+        # of the two went out last is "latest".
+        "release_api": "https://api.github.com/repos/domsvoboda/xodus-nexus/releases?per_page=20",
+        "binary_asset_re": re.compile(r"^Xodus-Nexus-.*-x86_64\.AppImage$"),
+    },
 }
 
 # Same layout convention as standalone_emulators._binary_dir -- a
@@ -99,11 +113,18 @@ def _install_github(app_id, entry):
         releases = [releases]
     if not releases:
         raise RuntimeError(f"{entry['name']}: release API returned no releases")
-    release = releases[0]
+    # The newest stable release that actually has the AppImage: a repo
+    # can publish other releases beside the app's own (see Xodus Nexus).
     asset_re = entry["binary_asset_re"]
-    match = next((a for a in release["assets"] if asset_re.match(a["name"])), None)
+    match = None
+    for release in releases:
+        if release.get("prerelease") or release.get("draft"):
+            continue
+        match = next((a for a in release["assets"] if asset_re.match(a["name"])), None)
+        if match:
+            break
     if not match:
-        raise RuntimeError(f"{entry['name']} {release.get('tag_name', '?')}: no asset matching {asset_re.pattern!r}")
+        raise RuntimeError(f"{entry['name']} {releases[0].get('tag_name', '?')}: no asset matching {asset_re.pattern!r}")
     dest_path = binary_path(app_id)
     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
     dl_req = urllib.request.Request(match["browser_download_url"], headers={"User-Agent": "SelfSteam"})
