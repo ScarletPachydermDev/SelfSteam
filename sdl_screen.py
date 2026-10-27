@@ -3,7 +3,7 @@ pairing code screen (code_screen.py) and the "please wait" splash shown
 while Steam restarts (splash.py).
 
 Both run on the host, not in SelfSteam's Flatpak, through ctypes against
-the system's own libSDL2 and libSDL2_ttf -- the same zero-dependency way
+the system's own libSDL2 and FreeType -- the same zero-dependency way
 Preflight draws its screens. SteamOS ships no SDL2_image, so PNG art is
 decoded here with zlib. The server copies these files out of the Flatpak
 to ~/.local/share/selfsteam/ at start, where the host can run them.
@@ -68,7 +68,7 @@ def _load(names):
 
 
 sdl = _load(["SDL2"])
-ttf = _load(["SDL2_ttf"])
+ft = _load(["freetype"])
 
 sdl.SDL_CreateWindow.restype = ctypes.c_void_p
 sdl.SDL_CreateWindow.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_uint32]
@@ -99,15 +99,88 @@ sdl.SDL_CreateRGBSurfaceWithFormatFrom.argtypes = [ctypes.c_void_p, ctypes.c_int
                                                    ctypes.c_int, ctypes.c_uint32]
 SDL_PIXELFORMAT_ABGR8888 = 0x16762004  # bytes R, G, B, A in memory
 
-ttf.TTF_OpenFont.restype = ctypes.c_void_p
-ttf.TTF_OpenFont.argtypes = [ctypes.c_char_p, ctypes.c_int]
-ttf.TTF_CloseFont.argtypes = [ctypes.c_void_p]
-ttf.TTF_RenderUTF8_Blended.restype = ctypes.POINTER(SDL_Surface)
-ttf.TTF_RenderUTF8_Blended.argtypes = [ctypes.c_void_p, ctypes.c_char_p, SDL_Color]
+ft.FT_Init_FreeType.argtypes = [ctypes.POINTER(ctypes.c_void_p)]
+ft.FT_New_Face.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_long, ctypes.POINTER(ctypes.c_void_p)]
+ft.FT_Set_Pixel_Sizes.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_uint]
+ft.FT_Load_Char.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int32]
+ft.FT_Done_Face.argtypes = [ctypes.c_void_p]
+ft.FT_Done_FreeType.argtypes = [ctypes.c_void_p]
+_FT_LOAD_RENDER = 0x4
+
+# Offsets into FreeType's public structs on 64-bit Linux (freetype.h):
+# FT_FaceRec.glyph and .size, FT_SizeRec.metrics.ascender/descender
+# (26.6 fixed point), and in FT_GlyphSlotRec the advance, the rendered
+# FT_Bitmap (rows, width, pitch, buffer) and bitmap_left/top.
+_FACE_GLYPH, _FACE_SIZE = 152, 160
+_SIZE_ASCENDER, _SIZE_DESCENDER = 48, 56
+_SLOT_ADVANCE_X = 128
+_SLOT_ROWS, _SLOT_WIDTH, _SLOT_PITCH, _SLOT_BUFFER = 152, 156, 160, 168
+_SLOT_LEFT, _SLOT_TOP = 192, 196
+
+
+class _Font:
+    """Text rendered with FreeType itself, through ctypes. Not SDL2_ttf:
+    SteamOS 3.9 dropped it (the Steam Deck has sdl2-compat and SDL3_ttf
+    only), which left the code screen crashing on start. FreeType is the
+    engine SDL2_ttf was built on and is on every desktop Linux."""
+
+    _lib = None
+
+    def __init__(self, path, px):
+        if _Font._lib is None:
+            lib = ctypes.c_void_p()
+            if ft.FT_Init_FreeType(ctypes.byref(lib)) != 0:
+                raise OSError("FT_Init_FreeType failed")
+            _Font._lib = lib
+        self.face = ctypes.c_void_p()
+        if ft.FT_New_Face(_Font._lib, path.encode(), 0, ctypes.byref(self.face)) != 0:
+            raise OSError(f"cannot open font {path}")
+        ft.FT_Set_Pixel_Sizes(self.face, 0, px)
+        size = ctypes.c_void_p.from_address(self.face.value + _FACE_SIZE).value
+        self.ascender = ctypes.c_long.from_address(size + _SIZE_ASCENDER).value >> 6
+        self.descender = ctypes.c_long.from_address(size + _SIZE_DESCENDER).value >> 6
+
+    def render(self, text, color):
+        """(width, height, RGBA bytes): text in color on transparent."""
+        slot = ctypes.c_void_p.from_address(self.face.value + _FACE_GLYPH).value
+        height = self.ascender - self.descender
+        glyphs, x = [], 0
+        for ch in text:
+            if ft.FT_Load_Char(self.face, ord(ch), _FT_LOAD_RENDER) != 0:
+                continue
+            rows = ctypes.c_uint.from_address(slot + _SLOT_ROWS).value
+            width = ctypes.c_uint.from_address(slot + _SLOT_WIDTH).value
+            pitch = ctypes.c_int.from_address(slot + _SLOT_PITCH).value
+            buf = ctypes.c_void_p.from_address(slot + _SLOT_BUFFER).value
+            left = ctypes.c_int.from_address(slot + _SLOT_LEFT).value
+            top = ctypes.c_int.from_address(slot + _SLOT_TOP).value
+            bitmap = ctypes.string_at(buf, abs(pitch) * rows) if buf and rows else b""
+            glyphs.append((x + left, self.ascender - top, width, rows, pitch, bitmap))
+            x += ctypes.c_long.from_address(slot + _SLOT_ADVANCE_X).value >> 6
+        width = max([x] + [gx + gw for gx, _y, gw, *_ in glyphs]) or 1
+        alpha = bytearray(width * height)
+        for gx, gy, gw, gh, pitch, bitmap in glyphs:
+            for row in range(gh):
+                y = gy + row
+                if not 0 <= y < height:
+                    continue
+                src = bitmap[row * pitch:row * pitch + gw]
+                for col, a in enumerate(src):
+                    i = y * width + gx + col
+                    if 0 <= gx + col < width and a > alpha[i]:
+                        alpha[i] = a
+        r, g, b = color
+        pixels = bytearray(width * height * 4)
+        pixels[0::4], pixels[1::4], pixels[2::4] = bytes([r]) * len(alpha), bytes([g]) * len(alpha), bytes([b]) * len(alpha)
+        pixels[3::4] = alpha
+        return width, height, bytes(pixels)
+
+    def close(self):
+        ft.FT_Done_Face(self.face)
 
 
 def font_path(bold):
-    """A real font file for SDL_ttf, which cannot ask fontconfig itself."""
+    """A real font file for FreeType, which cannot ask fontconfig itself."""
     try:
         out = subprocess.run(["fc-match", "-f", "%{file}", "sans:bold" if bold else "sans"],
                              capture_output=True, text=True, timeout=5).stdout.strip()
@@ -195,8 +268,6 @@ class Window:
         flags = SDL_INIT_VIDEO | (SDL_INIT_JOYSTICK | SDL_INIT_GAMECONTROLLER if input_devices else 0)
         if sdl.SDL_Init(flags) != 0:
             raise OSError("SDL_Init failed")
-        if ttf.TTF_Init() != 0:
-            raise OSError("TTF_Init failed")
         self.window = sdl.SDL_CreateWindow(
             title.encode(), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1280, 720,
             SDL_WINDOW_FULLSCREEN_DESKTOP | SDL_WINDOW_SHOWN)
@@ -213,7 +284,7 @@ class Window:
         self.fonts = {}
         for name, (bold, size) in fonts.items():
             px = size(self.w, self.h) if callable(size) else size * self.h / 1080
-            self.fonts[name] = ttf.TTF_OpenFont(paths[bold].encode(), max(10, int(px)))
+            self.fonts[name] = _Font(paths[bold], max(10, int(px)))
         sdl.SDL_SetHint(b"SDL_RENDER_SCALE_QUALITY", b"1")
         self.art = []
         for name in CONTROLLERS:
@@ -237,11 +308,12 @@ class Window:
     def text(self, font, text, color, center_y):
         if not text:
             return
-        surface = ttf.TTF_RenderUTF8_Blended(self.fonts[font], text.encode(), SDL_Color(*color, 255))
+        tw, th, pixels = self.fonts[font].render(text, color)
+        buf = ctypes.create_string_buffer(pixels, len(pixels))
+        surface = sdl.SDL_CreateRGBSurfaceWithFormatFrom(buf, tw, th, 32, tw * 4, SDL_PIXELFORMAT_ABGR8888)
         if not surface:
             return
         texture = sdl.SDL_CreateTextureFromSurface(self.renderer, surface)
-        tw, th = surface.contents.w, surface.contents.h
         sdl.SDL_FreeSurface(surface)
         rect = SDL_Rect((self.w - tw) // 2, int(center_y - th / 2), tw, th)
         sdl.SDL_RenderCopy(self.renderer, texture, None, ctypes.byref(rect))
@@ -261,9 +333,7 @@ class Window:
         for texture in self.art:
             sdl.SDL_DestroyTexture(texture)
         for font in self.fonts.values():
-            if font:
-                ttf.TTF_CloseFont(font)
+            font.close()
         sdl.SDL_DestroyRenderer(self.renderer)
         sdl.SDL_DestroyWindow(self.window)
-        ttf.TTF_Quit()
         sdl.SDL_Quit()

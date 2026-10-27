@@ -223,6 +223,12 @@ def launcher_main():
     in" action every time, not just a first-run-only trigger. The code
     screen is only ever opened from here and from the Steam shortcut."""
     if not _service_installed():
+        # A fresh install, maybe over an earlier one whose settings
+        # outlived it (~/.var/app is kept on uninstall): the note that
+        # the Steam shortcut was added belongs to that install, and left
+        # as it was, no shortcut is ever added again -- seen on a Steam
+        # Deck after reinstalling. The service started next adds it.
+        config.save(selfsteam_shortcut_added=False)
         _install_and_start_service()
         _notify("SelfSteam", "Running in the background -- will persist through Game Mode.")
         # The SelfSteam shortcut is added by the service just started
