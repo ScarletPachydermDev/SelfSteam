@@ -540,7 +540,7 @@ def calibrate(core_name, rom_path, keys):
             # reports a bigger border, and must not be the one that
             # decides the crop.
             extra = this if extra is None else [min(a, b) for a, b
-                                                in zip(extra, this)]
+                                                in zip(extra, this, strict=False)]
             _log(f"sample {taken}: leftover {box} of {width}px -> add {extra}")
             if taken >= _MIN_SAMPLES:
                 result = _commit(core_name, rom_path, applied, extra, keys)
@@ -559,7 +559,7 @@ def _commit(core_name, rom_path, applied, extra, keys):
     """Add this session's leftover to the crop already in force."""
     if extra is None:
         return None
-    offsets = [a + e for a, e in zip(applied, extra)]
+    offsets = [a + e for a, e in zip(applied, extra, strict=False)]
     if max(offsets) < _MIN_BORDER_NATIVE:
         # A game like GoldenEye, which fills its frame.
         _log(f"borders {offsets} too small to crop")

@@ -91,9 +91,9 @@ def verify_api_key(key):
     except urllib.error.HTTPError as e:
         if e.code in (401, 403):
             return False
-        raise SGDBError(f"SGDB API error {e.code} verifying key: {e.read().decode(errors='replace')}")
+        raise SGDBError(f"SGDB API error {e.code} verifying key: {e.read().decode(errors='replace')}") from e
     except urllib.error.URLError as e:
-        raise SGDBError(f"Network error verifying SGDB key: {e.reason}")
+        raise SGDBError(f"Network error verifying SGDB key: {e.reason}") from e
 
 
 def _get(path, params=None):
@@ -111,7 +111,7 @@ def _get(path, params=None):
         with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.load(resp)
     except urllib.error.HTTPError as e:
-        raise SGDBError(f"SGDB API error {e.code} for {path}: {e.read().decode(errors='replace')}")
+        raise SGDBError(f"SGDB API error {e.code} for {path}: {e.read().decode(errors='replace')}") from e
     except urllib.error.URLError as e:
         # Broader than HTTPError -- covers DNS failures, connection
         # refused, no route to host, etc. Confirmed this silently
@@ -120,7 +120,7 @@ def _get(path, params=None):
         # reaching a caller's except SGDBError) when the sandbox had no
         # network access at all; the same gap would just as easily hit
         # a real user's dropped WiFi mid-search outside any sandbox too.
-        raise SGDBError(f"Network error reaching SGDB for {path}: {e.reason}")
+        raise SGDBError(f"Network error reaching SGDB for {path}: {e.reason}") from e
     if not data.get("success"):
         raise SGDBError(f"SGDB API returned failure for {path}: {data}")
     return data["data"]

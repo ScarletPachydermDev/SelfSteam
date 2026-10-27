@@ -70,7 +70,7 @@ def search_category(category, page=1):
         with urllib.request.urlopen(req, timeout=20) as resp:
             data = json.load(resp)
     except (urllib.error.URLError, OSError, json.JSONDecodeError) as e:
-        raise RuntimeError(f"Flathub category browse failed: {e}")
+        raise RuntimeError(f"Flathub category browse failed: {e}") from e
     return _drop_blocked(data.get("hits", [])), data.get("totalPages", 1)
 
 
@@ -97,5 +97,5 @@ def search_apps(query, page=1):
         with urllib.request.urlopen(req, timeout=20) as resp:
             data = json.load(resp)
     except (urllib.error.URLError, OSError, json.JSONDecodeError) as e:
-        raise RuntimeError(f"Flathub search failed: {e}")
+        raise RuntimeError(f"Flathub search failed: {e}") from e
     return _drop_blocked(data.get("hits", [])), data.get("totalPages", 1)

@@ -64,7 +64,6 @@ import standalone_emulators
 import service_resolver
 import sgdb_client as sgdb
 import steam_paths
-import steamos_session
 
 # Functions, grouped:
 #

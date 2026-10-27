@@ -266,8 +266,8 @@ def _wheelwizard_configure(entry, game_path):
                 loaded = json.load(f)
             if isinstance(loaded, dict):
                 data = loaded
-        except (OSError, ValueError):
-            raise RuntimeError("Wheel Wizard's config.json is unreadable")
+        except (OSError, ValueError) as e:
+            raise RuntimeError("Wheel Wizard's config.json is unreadable") from e
     dolphin_app_id = EMULATORS["Dolphin"]["app_id"]
     # Wheel Wizard validates three settings, not two. Without
     # UserFolderPath it logs "InvalidUserFolderPath (UserFolderPath)"
@@ -3563,7 +3563,7 @@ def install_binary(name):
     # "Connection reset by peer" case the download loop already handles.
     releases = None
     last_meta_error = None
-    for attempt in range(1, _INSTALL_ATTEMPTS + 1):
+    for _attempt in range(1, _INSTALL_ATTEMPTS + 1):
         try:
             with urllib.request.urlopen(req, timeout=30) as resp:
                 releases = json.load(resp)
@@ -3593,7 +3593,7 @@ def install_binary(name):
     # on an otherwise fine connection, succeeding immediately on retry)
     # to just retry rather than surface as a one-shot failure.
     last_error = None
-    for attempt in range(1, _INSTALL_ATTEMPTS + 1):
+    for _attempt in range(1, _INSTALL_ATTEMPTS + 1):
         try:
             with urllib.request.urlopen(dl_req, timeout=300) as resp, open(dest_path, "wb") as f:
                 shutil.copyfileobj(resp, f)
@@ -3628,7 +3628,7 @@ def install_flathub_app_id(app_id):
 
     last_result = None
     last_error = None
-    for attempt in range(1, _INSTALL_ATTEMPTS + 1):
+    for _attempt in range(1, _INSTALL_ATTEMPTS + 1):
         try:
             # capture_output (not check=True) -- CalledProcessError's
             # own .stderr is None without this, which is exactly why

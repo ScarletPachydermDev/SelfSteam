@@ -50,7 +50,6 @@ Functions:
       payload content NCA.
 """
 import io
-import os
 import struct
 from dataclasses import dataclass
 
@@ -198,7 +197,7 @@ def _ctr_decrypt(content_key, upper_counter, base_offset, data):
         block = data[i : i + 16]
         counter = upper_counter.to_bytes(8, "big") + ((base_offset + i) // 0x10).to_bytes(8, "big")
         keystream = _aes_ecb_encrypt(content_key, counter)
-        out += bytes(a ^ b for a, b in zip(block, keystream[: len(block)]))
+        out += bytes(a ^ b for a, b in zip(block, keystream[: len(block)], strict=False))
     return bytes(out)
 
 
@@ -296,7 +295,6 @@ def _decrypt_nca_header(data, header_key):
     checkout) -- flagged so it's the first thing to double check if
     decryption ever produces a wrong-looking magic/title ID."""
     key1, key2 = header_key[:16], header_key[16:]
-    cipher = Cipher(algorithms.AES(key1 + key2), modes.XTS(b"\x00" * 16))
     out = bytearray()
     for sector_index in range(len(data) // _NCA_HEADER_SECTOR_SIZE):
         tweak = sector_index.to_bytes(16, "big")

@@ -1,0 +1,13 @@
+# Ruff (Python linter) settings for SelfSteam. CI runs `ruff check` on
+# every push (.github/workflows/lint.yml).
+#
+# The rules checked are the ones that find real mistakes, not style:
+# Pyflakes (F: undefined names, unused imports and variables), syntax
+# errors (E9), Pylint errors (PLE) and flake8-bugbear (B: likely bugs).
+target-version = "py313"
+line-length = 120
+# Third-party code bundled as-is (python-xlib, six), and the graft index.
+extend-exclude = ["vendor", "graft"]
+
+[lint]
+select = ["F", "E9", "PLE", "B"]

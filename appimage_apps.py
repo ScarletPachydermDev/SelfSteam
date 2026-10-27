@@ -156,4 +156,4 @@ def install(app_id):
         else:
             raise NotImplementedError(f"install_type {entry['install_type']!r} not implemented")
     except (urllib.error.URLError, OSError) as e:
-        raise RuntimeError(f"{entry['name']}: install failed: {e}")
+        raise RuntimeError(f"{entry['name']}: install failed: {e}") from e
