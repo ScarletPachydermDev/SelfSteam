@@ -26,6 +26,16 @@
   </categories>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="0.1.34" date="2026-10-27">
+      <description>
+        <ul>
+          <li>Xodus Nexus is now available on the Apps tab (AppImage)</li>
+          <li>AppImage apps now install from the newest stable release that actually has the AppImage</li>
+          <li>Fixed the Apps tab failing to load when Wheel Wizard was picked</li>
+          <li>Code checks (ruff) now run on every change, and the small issues they found are fixed</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.33" date="2026-10-21">
       <description>
         <ul>
