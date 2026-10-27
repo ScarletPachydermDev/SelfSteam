@@ -3971,7 +3971,7 @@ def _apps_tab_panel_html(state, hits, total_pages):
   <div class="field-group" style="margin-bottom:0.55rem">
     <div style="display:flex;align-items:center;gap:0.5rem">
       <label class="toggle-switch">
-        <input type="checkbox" name="apps_preflight" id="apps-preflight-toggle" form="{_ADD_FORM_ID}" {preflight_checked} {preflight_disabled}>
+        <input type="checkbox" name="apps_preflight" id="apps-preflight-toggle" form="{_ADD_FORM_ID}" {preflight_checked}>
         <span class="toggle-switch-track"></span>
         Enable preflight {_info_tooltip_icon_html(preflight_tooltip)}
       </label>
