@@ -25,7 +25,7 @@ engine it was built on, and every desktop Linux has it. (`sdl_screen.py`)
 
 **The server never shows the code on its own.** Only the app and its Steam
 shortcut open the code screen, so nothing pops up over a game when a phone
-opens the page.
+opens the page anymore.
 
 **1080p by default, one step lower on a Steam Deck, never over your own
 setting.** A fixed, predictable target; SelfSteam only changes a value it
