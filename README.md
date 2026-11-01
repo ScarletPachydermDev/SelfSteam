@@ -41,17 +41,6 @@ Run on your terminal
 flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo && flatpak remote-add --user --if-not-exists selfsteam https://raw.githubusercontent.com/ScarletPachydermDev/SelfSteam/master/packaging/io.github.ScarletPachydermDev.SelfSteam.flatpakrepo && flatpak install --user selfsteam io.github.ScarletPachydermDev.SelfSteam
 ```
 
-## Documentation
-
-| | |
-|---|---|
-| [Install](docs/INSTALL.md) | Installing, updating, uninstalling |
-| [Using SelfSteam](docs/USING.md) | Pairing a device, the home page, each tab |
-| [Supported](docs/SUPPORTED.md) | Emulators, RetroArch consoles and cores, apps |
-| [How it works](docs/ARCHITECTURE.md) | The service, shortcuts, the code screen, updates |
-| [Decisions](docs/DECISIONS.md) | Why things are the way they are |
-| [Development](docs/DEVELOPMENT.md) | Layout, test copy, checks, releases |
-
 ## Known limitations
 
 - Not on Flathub: SelfSteam needs wide host access (Steam's files, restarting Steam, installing emulators) and ships from its own Flatpak repo.
@@ -62,7 +51,7 @@ flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/fl
 
 ## AI disclosure
 
-SelfSteam is written with AI assistance (Claude), directed and tested on real hardware by its author.
+SelfSteam is written with AI assistance (Claude), directed and tested on real hardware by me.
 
 ## Friend projects
 
