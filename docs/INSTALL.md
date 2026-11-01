@@ -2,8 +2,9 @@
 
 ## Requirements
 
-- An **x86_64 (x64)** device: a Steam Deck, a Steam Machine, or an x86_64 PC
-  running a Steam gamescope session. SelfSteam is only built for x86_64.
+- **Linux on x86_64 (x64)**: a Steam Deck, a Steam Machine, or an x86_64
+  Linux PC running a Steam gamescope session. SelfSteam is only built for
+  x86_64 Linux; it does not run on Windows or macOS.
 - SteamOS, or another distribution with a gamescope session (Bazzite,
   ChimeraOS). SteamOS is the most tested.
 - The Flathub remote, for RetroArch, apps and emulators.

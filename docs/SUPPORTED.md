@@ -1,7 +1,8 @@
 # Supported
 
-SelfSteam runs on x86_64 (x64) only: the Steam Deck, the Steam Machine, and
-x86_64 PCs with a Steam gamescope session. The Flatpak is built for x86_64,
+SelfSteam is made for Linux on x86_64 (x64) only: the Steam Deck, the
+Steam Machine, and x86_64 Linux PCs with a Steam gamescope session. It does
+not run on Windows or macOS. The Flatpak is built for x86_64,
 and so are the emulators and AppImages it installs.
 
 ## Emulators tab
