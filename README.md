@@ -41,6 +41,17 @@ Run on your terminal
 flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo && flatpak remote-add --user --if-not-exists selfsteam https://raw.githubusercontent.com/ScarletPachydermDev/SelfSteam/master/packaging/io.github.ScarletPachydermDev.SelfSteam.flatpakrepo && flatpak install --user selfsteam io.github.ScarletPachydermDev.SelfSteam
 ```
 
+## Known limitations
+
+- Not on Flathub: SelfSteam needs wide host access (Steam's files, restarting Steam, installing emulators) and ships from its own Flatpak repo.
+- Emulators installed both as Flatpak and AppImage keep separate saves.
+- Controllers in emulators need setting up once, or the optional [Preflight](https://github.com/ScarletPachydermDev/Preflight) toggle.
+- Tested on SteamOS (Steam Deck, Steam Machine). Other gamescope sessions (Bazzite, ChimeraOS) should work but are less tested.
+
+## AI disclosure
+
+SelfSteam is written with AI assistance (Claude), directed and tested on real hardware by its author.
+
 ## Friend projects
 
 SelfSteam doesn't vendor code from any of these, but real behavior/patterns here were confirmed by actually reading their own source, not guessed -- each one credited in the relevant file's own comments too:
