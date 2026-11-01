@@ -45,7 +45,7 @@ flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/fl
 
 - Not on Flathub: SelfSteam needs wide host access (Steam's files, restarting Steam, installing emulators) and ships from its own Flatpak repo.
 - Emulators installed both as Flatpak and AppImage keep separate saves.
-- Controllers in emulators need setting up once, or the optional [Preflight](https://github.com/ScarletPachydermDev/Preflight) toggle.
+- Controllers in emulators need setting up once, to solve that I added the optional [Preflight](https://github.com/ScarletPachydermDev/Preflight) toggle.
 - Linux on x86_64 (x64) only, no Windows or macOS: built for the Steam Deck and Steam Machine, and the emulators and AppImages it installs are x86_64 builds.
 - Tested on SteamOS (Steam Deck, Steam Machine). Other gamescope sessions (Bazzite, ChimeraOS) should work but are less tested.
 
