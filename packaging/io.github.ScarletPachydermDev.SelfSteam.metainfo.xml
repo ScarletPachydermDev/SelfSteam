@@ -26,6 +26,14 @@
   </categories>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="0.1.36" date="2026-11-01">
+      <description>
+        <ul>
+          <li>Preflight works again on SteamOS 3.9: it used a library SteamOS removed, so games with Preflight on failed to start. Updating SelfSteam updates Preflight</li>
+          <li>New documentation: install, using, supported emulators and consoles, how it works, decisions, development</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.35" date="2026-10-27">
       <description>
         <ul>
