@@ -5,8 +5,8 @@ RetroArch names a game's save after the ROM file alone, and SelfSteam
 keeps every core's saves in one shared folder (retroarch_cores.
 share_saves_between_cores, so switching cores keeps the save). That
 lets two consoles' games with the same file name share one save:
-"Mario Tennis (USA).n64" and "Mario Tennis (USA).gbc" both write
-"Mario Tennis (USA).srm", and playing one wipes the other. Reported to
+"Game.n64" and "Game.gbc" both write "Game.srm", and playing one wipes
+the other. Reported to
 EmuDeck as data loss (dragoonDorise/EmuDeck#1341).
 
 A folder per console fixes both at once: cores for one console still

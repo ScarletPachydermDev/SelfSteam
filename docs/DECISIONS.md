@@ -97,8 +97,8 @@ mid-game. Your own setting wins, as with the resolution.
 
 **RetroArch saves: one folder per console.** RetroArch names a save after
 the ROM file alone. One shared folder for every core means switching
-cores keeps your save, but also let "Mario Tennis" on N64 and on Game Boy
-Color overwrite each other. A folder per console keeps both: cores for one
+cores keeps your save, but also let two consoles' games with the same file
+name overwrite each other. A folder per console keeps both: cores for one
 console still share it, two consoles never do. RetroArch has no such
 option, so it is passed at each launch with `--appendconfig`. A game's
 old save moves into its folder on first launch. (`ra_saves.py`)
