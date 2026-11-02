@@ -32,6 +32,7 @@ stays.
 
 import json
 import os
+import subprocess
 import sys
 import xml.etree.ElementTree as ET
 
@@ -234,6 +235,19 @@ REQUIRES = {
                       "3D", "Renderer"), "0", "1")],
 }
 
+# Settings written with the resolution, under the same rules, that are
+# not about it. Dolphin: hybrid ubershaders (2), with every shader built
+# before the game starts, so a new effect does not stutter the game the
+# first time it is drawn. Values from Dolphin's ShaderCompilationMode.
+ALSO = {
+    "Dolphin": [
+        (_ini(_flatpak("org.DolphinEmu.dolphin-emu", "config", "dolphin-emu", "GFX.ini"),
+              "Settings", "ShaderCompilationMode"), "0", "2"),
+        (_ini(_flatpak("org.DolphinEmu.dolphin-emu", "config", "dolphin-emu", "GFX.ini"),
+              "Settings", "WaitForShadersBeforeStarting"), "False", "True"),
+    ],
+}
+
 # How a launch command names each app: its Flatpak ID, or for an AppImage
 # a fragment of its path. Wheel Wizard plays in the real Dolphin, with
 # Dolphin's own config, so it maps to Dolphin.
@@ -292,6 +306,8 @@ def apply(name):
     rows = [(setting[0], setting[1], setting[3] if _deck() else setting[2], "resolution")]
     rows += [(acc, default, value, f"requires{i}")
              for i, (acc, default, value) in enumerate(REQUIRES.get(name, []))]
+    rows += [(acc, default, value, f"also{i}")
+             for i, (acc, default, value) in enumerate(ALSO.get(name, []))]
     changed = False
     for (path, read, write), default, value, label in rows:
         if not os.path.isfile(path) and name not in CREATE_IF_MISSING:
@@ -314,6 +330,149 @@ def apply(name):
             pass
 
 
+# --- Dolphin widescreen ---------------------------------------------------
+# Dolphin ships 16:9 codes for many GameCube and Wii games in its own
+# Sys/GameSettings, off by default. This turns the game's one on, the
+# same as ticking it under Properties > Gecko Codes: nothing is copied,
+# only the code's name is written to the player's GameSettings/<ID>.ini.
+# Once per game: if the player later unticks it, it stays off.
+
+_DOLPHIN_ID = "org.DolphinEmu.dolphin-emu"
+_DOLPHIN_USER = _flatpak(_DOLPHIN_ID, "data", "dolphin-emu")
+# A disc header's magic word, and how far into the header it sits. The
+# header is at 0 in an ISO/GCM, 0x200 in a WBFS and 0x58 in an RVZ/WIA,
+# so the first 64 KiB is scanned rather than one offset trusted.
+_DISC_MAGIC = ((b"\x5d\x1c\x9e\xa3", 0x18), (b"\xc2\x33\x9f\x3d", 0x1c))  # Wii, GameCube
+_DISC_SCAN_BYTES = 0x10000
+_WIDESCREEN_NAMES = ("16:9 widescreen", "widescreen", "16:9")
+
+
+def disc_game_id(path):
+    """The six-character game ID from a Dolphin disc image, or None."""
+    try:
+        with open(path, "rb") as fh:
+            buf = fh.read(_DISC_SCAN_BYTES)
+    except OSError:
+        return None
+    for magic, offset in _DISC_MAGIC:
+        at = buf.find(magic)
+        while at != -1:
+            start = at - offset
+            if start >= 0:
+                game_id = buf[start:start + 6]
+                if len(game_id) == 6 and game_id.isalnum() and game_id.upper() == game_id:
+                    return game_id.decode("ascii")
+            at = buf.find(magic, at + 1)
+    return None
+
+
+def _dolphin_sys_settings():
+    try:
+        out = subprocess.run(["flatpak", "info", "--show-location", _DOLPHIN_ID],
+                             capture_output=True, text=True, timeout=10).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    path = os.path.join(out, "files", "share", "dolphin-emu", "Sys", "GameSettings")
+    return path if out and os.path.isdir(path) else None
+
+
+def _widescreen_code(sys_dir, game_id):
+    """("Gecko" or "ActionReplay", code name) for the game's 16:9 code in
+    Dolphin's own files, read from <ID>.ini and the region-free <ID3>.ini."""
+    found = []
+    for name in (f"{game_id}.ini", f"{game_id[:3]}.ini"):
+        try:
+            with open(os.path.join(sys_dir, name), encoding="utf-8", errors="replace") as fh:
+                lines = fh.readlines()
+        except OSError:
+            continue
+        section = None
+        for line in lines:
+            line = line.strip()
+            if line.startswith("[") and line.endswith("]"):
+                section = line[1:-1]
+            elif section in ("Gecko", "ActionReplay") and line.startswith("$"):
+                found.append((section, line[1:].split(" [", 1)[0].strip()))
+    for wanted in _WIDESCREEN_NAMES:
+        for section, code in found:
+            if code.lower() == wanted or (wanted == "16:9" and "16:9" in code.lower()):
+                return section, code
+    return None
+
+
+def apply_widescreen(argv):
+    rom = next((a.strip("'\"") for a in reversed(argv) if os.path.isfile(a.strip("'\""))), None)
+    game_id = rom and disc_game_id(rom)
+    if not game_id:
+        return
+    try:
+        with open(_notes_path(), encoding="utf-8") as fh:
+            notes = json.load(fh)
+    except (OSError, ValueError):
+        notes = {}
+    note_key = f"Dolphin::widescreen::{game_id}"
+    if note_key in notes:
+        return  # done once already; what the file says now is the player's
+    sys_dir = _dolphin_sys_settings()
+    code = sys_dir and _widescreen_code(sys_dir, game_id)
+    if code:
+        section, name = code
+        user_ini = os.path.join(_DOLPHIN_USER, "GameSettings", f"{game_id}.ini")
+        enabled = f"{section}_Enabled"
+        if not _listed(user_ini, enabled, f"${name}"):
+            _append_line(user_ini, enabled, f"${name}")
+        set_ini_key(_flatpak(_DOLPHIN_ID, "config", "dolphin-emu", "Dolphin.ini"),
+                    "Core", "EnableCheats", "True", sep=" = ")
+    notes[note_key] = code[1] if code else None
+    try:
+        os.makedirs(os.path.dirname(_notes_path()), exist_ok=True)
+        with open(_notes_path(), "w", encoding="utf-8") as fh:
+            json.dump(notes, fh, indent=1)
+    except OSError:
+        pass
+
+
+def _listed(path, section, line_text):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            lines = [line.strip() for line in fh]
+    except OSError:
+        return False
+    in_section = False
+    for line in lines:
+        if line.startswith("[") and line.endswith("]"):
+            in_section = line == f"[{section}]"
+        elif in_section and line == line_text:
+            return True
+    return False
+
+
+def _append_line(path, section, line_text):
+    """Add a bare line (Dolphin's code lists are names, not key=value) to
+    the end of [section], creating it and the file if missing."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            lines = fh.readlines()
+    except FileNotFoundError:
+        lines = []
+    if lines and not lines[-1].endswith("\n"):
+        lines[-1] += "\n"
+    header = f"[{section}]"
+    start = next((i for i, line in enumerate(lines) if line.strip() == header), None)
+    if start is None:
+        if lines and lines[-1].strip():
+            lines.append("\n")
+        lines += [header + "\n", line_text + "\n"]
+    else:
+        end = next((i for i in range(start + 1, len(lines)) if lines[i].strip().startswith("[")), len(lines))
+        while end > start + 1 and not lines[end - 1].strip():
+            end -= 1
+        lines.insert(end, line_text + "\n")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.writelines(lines)
+
+
 def app_for_command(argv):
     joined = " ".join(argv)
     for marker, name in _COMMAND_MARKERS.items():
@@ -327,6 +486,8 @@ def main(argv):
     if name:
         try:
             apply(name)
+            if name == "Dolphin":
+                apply_widescreen(argv[1:])
         except Exception:
             pass  # never stop a game from starting
     return 0
