@@ -26,6 +26,16 @@
   </categories>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="0.1.37" date="2026-11-02">
+      <description>
+        <ul>
+          <li>Dolphin: shaders are built before the game starts, so effects no longer stutter the first time they appear</li>
+          <li>Dolphin and PCSX2: their own widescreen codes and patches are turned on, so supported games fill a 16:9 screen. Turning one off in the emulator keeps it off</li>
+          <li>RetroArch: saves are kept in one folder per console, so two games with the same file name on different consoles no longer overwrite each other's save</li>
+          <li>Games no longer build their shaders again for every new shortcut: each emulator keeps one shader cache</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.36" date="2026-11-01">
       <description>
         <ul>
