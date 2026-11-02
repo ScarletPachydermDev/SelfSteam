@@ -68,6 +68,9 @@ python3 "$(dirname "$0")/ra_overscan.py" "$@" >/dev/null 2>&1 &
 # Vita3K; everything else runs exactly as given.
 case "$*" in
     *Vita3K*) exec python3 "$(dirname "$0")/vita3k_launch.py" "$@" ;;
+    # One save folder per console, so two consoles' games with the same
+    # file name do not share a save. ra_saves.py runs the command itself.
+    *org.libretro.RetroArch*) exec python3 "$(dirname "$0")/ra_saves.py" "$@" ;;
 esac
 
 exec "$@"

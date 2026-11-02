@@ -113,6 +113,7 @@ _LAUNCHER_COPY_ITEMS = [
     "ra_overscan.py",
     "ra_resolution.py",
     "vita3k_launch.py",
+    "ra_saves.py",
     "emu_resolution.py",
     "vendor",
 ]
@@ -162,6 +163,7 @@ flatpak-spawn --host python3 "$(dirname "$0")/ra_overscan.py" "$@" >/dev/null 2>
 # Vita3K: see launch.sh -- the same helper, run on the host.
 case "$*" in
     *Vita3K*) set -- python3 "$(dirname "$0")/vita3k_launch.py" "$@" ;;
+    *org.libretro.RetroArch*) set -- python3 "$(dirname "$0")/ra_saves.py" "$@" ;;
 esac
 if [ -n "$WAYLAND_DISPLAY" ]; then
     exec flatpak-spawn --host --env=DISPLAY="$DISPLAY" --env=WAYLAND_DISPLAY="$WAYLAND_DISPLAY" "$@"
