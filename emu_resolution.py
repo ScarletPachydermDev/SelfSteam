@@ -246,6 +246,13 @@ ALSO = {
         (_ini(_flatpak("org.DolphinEmu.dolphin-emu", "config", "dolphin-emu", "GFX.ini"),
               "Settings", "WaitForShadersBeforeStarting"), "False", "True"),
     ],
+    # PCSX2's own per-game widescreen patches (patches.zip, in the
+    # Flatpak). Each one sets the 16:9 aspect itself, so a game with no
+    # patch keeps its 4:3 picture instead of being stretched.
+    "PCSX2": [
+        (_ini(_flatpak("net.pcsx2.PCSX2", "config", "PCSX2", "inis", "PCSX2.ini"),
+              "EmuCore", "EnableWideScreenPatches"), "false", "true"),
+    ],
 }
 
 # How a launch command names each app: its Flatpak ID, or for an AppImage
