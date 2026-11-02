@@ -64,6 +64,8 @@ SelfSteam doesn't vendor code from any of these, but real behavior/patterns here
 - **[SteamGridDB/steam-rom-manager](https://github.com/SteamGridDB/steam-rom-manager)** 
 - **[mateussouzaweb/nicedeck](https://github.com/mateussouzaweb/nicedeck)**
 - **[Rhastago/NonSteamScraper](https://github.com/Rhastago/NonSteamScraper)**
+- **[dragoonDorise/EmuDeck](https://github.com/dragoonDorise/EmuDeck)**
+
 
 ## Donate
 
