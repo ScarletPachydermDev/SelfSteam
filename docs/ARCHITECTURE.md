@@ -45,6 +45,11 @@ to `~/.local/share/selfsteam/` when it starts.
   tab app; keys, firmware, DLC and updates; `.nsz` conversion; Preflight.
 - `retroarch_cores.py`: consoles, cores, BIOS files and RetroArch settings.
 - `appimage_apps.py`: the Apps tab's AppImages.
+- `launch.sh`: every shortcut runs through it. Before the game starts it
+  sets resolution and other defaults (`ra_resolution.py`,
+  `emu_resolution.py`, `ra_overscan.py`), points the driver's shader cache
+  at the app's own folder, and hands RetroArch launches to `ra_saves.py`
+  for their per-console save folder.
 - `sgdb_client.py`: SteamGridDB artwork.
 
 ## Updates

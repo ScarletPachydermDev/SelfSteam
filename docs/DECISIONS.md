@@ -85,6 +85,31 @@ Emulators tab (`emu_resolution.py`):
 Not included: Rosalie's Mupen GUI (not checked yet), and PPSSPP, which
 already matches its window by itself.
 
+**Widescreen from the emulator's own codes.** Dolphin and PCSX2 both ship
+per-game widescreen codes, off by default. SelfSteam only turns on the
+one for the game being launched: nothing is copied in, and a game without
+one keeps its 4:3 picture instead of being stretched. Dolphin's is done
+once per game, so a code you untick stays off. (`emu_resolution.py`)
+
+**Dolphin builds shaders before the game starts.** Hybrid ubershaders,
+waiting for them at launch: a short pause at start instead of stutter
+mid-game. Your own setting wins, as with the resolution.
+
+**RetroArch saves: one folder per console.** RetroArch names a save after
+the ROM file alone. One shared folder for every core means switching
+cores keeps your save, but also let "Mario Tennis" on N64 and on Game Boy
+Color overwrite each other. A folder per console keeps both: cores for one
+console still share it, two consoles never do. RetroArch has no such
+option, so it is passed at each launch with `--appendconfig`. A game's
+old save moves into its folder on first launch. (`ra_saves.py`)
+
+**One shader cache per emulator, not per shortcut.** Steam gives every
+shortcut its own driver shader cache, and the Flatpak keeps it, so a
+game built its shaders again for each new shortcut, or after being played
+in the emulator itself (30+ minutes for a heavy PS3 game). `launch.sh`
+points the cache at the emulator's own folder, the one it uses outside
+Steam.
+
 **Changes are queued, then Steam restarts once.** Steam only reads
 shortcuts when it starts, and a file written behind a running Steam can be
 overwritten by it.

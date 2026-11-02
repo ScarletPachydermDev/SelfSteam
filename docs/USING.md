@@ -50,3 +50,11 @@ restarts Steam, since Steam only reads its shortcuts when it starts. A
 - 3D consoles render at 1080p by default (one step lower on a Steam Deck);
   a resolution you set yourself is never changed.
 - N64 games in RetroArch get their black borders cropped automatically.
+- Dolphin builds a game's shaders before it starts, so effects do not
+  stutter the first time they appear.
+- Dolphin and PCSX2 games with a widescreen code or patch fill a 16:9
+  screen. Turn one off in the emulator and it stays off.
+- RetroArch keeps saves in one folder per console (`saves/Nintendo 64/`
+  and so on), so same-named games on two consoles never share a save.
+- Each emulator keeps one shader cache, so a new shortcut for a game does
+  not build its shaders again.
