@@ -2965,8 +2965,8 @@ def _ra_guess_name_from_filename(rel_path):
     base = _RA_LEADING_CATALOG_NUM_RE.sub("", base)
     base = _RA_PAREN_BRACKET_RE.sub("", base)
     # Same trailing-", The" reorder SRM's own fuzzy-matcher.ts does
-    # (/(.*?),\s*(the)/i), e.g. "Legend of Zelda, The" -> "The Legend of
-    # Zelda" -- run after brackets are stripped so a trailing region tag
+    # (/(.*?),\s*(the)/i), e.g. "Game Title, The" -> "The Game Title"
+    # -- run after brackets are stripped so a trailing region tag
     # doesn't shield the comma from the end-of-string match.
     the_match = _RA_TRAILING_THE_RE.match(base.strip())
     if the_match:
@@ -3584,7 +3584,7 @@ def _apps_shortcut_app_ids():
     _add_standalone_emulator_shortcut's own "ROM file not found" check),
     it's never a bare launcher for the emulator app on its own. Counting
     it here would make Dolphin's own Apps-tab card show a checkmark
-    just because *some* Dolphin-launched game (e.g. Mario Galaxy) has a
+    just because *some* Dolphin-launched game has a
     shortcut, which reads as "Dolphin itself was added" when it wasn't
     -- confirmed wrong by the user (2026-08-25) after an earlier version
     of this function counted em_emulator shortcuts too."""
