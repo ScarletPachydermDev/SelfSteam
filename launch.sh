@@ -62,6 +62,35 @@ python3 "$(dirname "$0")/ra_resolution.py" "$@" >/dev/null 2>&1
 python3 "$(dirname "$0")/emu_resolution.py" "$@" >/dev/null 2>&1
 python3 "$(dirname "$0")/ra_overscan.py" "$@" >/dev/null 2>&1 &
 
+# Shader cache: one per app, not one per shortcut. Steam points the
+# driver's cache at steamapps/shadercache/<shortcut id>, and the
+# Flatpak keeps that, so a game built its shaders again from scratch
+# for every new shortcut, or after being played in the emulator itself
+# (dragoonDorise/EmuDeck#1777; checked on a Steam Machine). A Flatpak
+# gets the folder it uses outside Steam, an AppImage one of its own.
+app=""
+after_run=""
+for arg in "$@"; do
+    if [ -n "$after_run" ]; then
+        case "$arg" in -*) continue ;; esac
+        app="$arg"
+        break
+    fi
+    [ "$arg" = "run" ] && after_run=1
+done
+cache=""
+if [ -n "$app" ] && [ -d "$HOME/.var/app/$app" ]; then
+    cache="$HOME/.var/app/$app/cache"
+else
+    for arg in "$@"; do
+        case "$arg" in *.AppImage) cache="$HOME/.cache/selfsteam-shaders/$(basename "$arg" .AppImage)" ;; esac
+    done
+fi
+if [ -n "$cache" ]; then
+    mkdir -p "$cache"
+    export MESA_SHADER_CACHE_DIR="$cache" MESA_GLSL_CACHE_DIR="$cache" __GL_SHADER_DISK_CACHE_PATH="$cache/nvidiav1"
+fi
+
 # Vita3K cannot start a game from the file a shortcut points at, and
 # would reinstall the whole game on every launch if given its folder
 # instead -- vita3k_launch.py works out which command to run. Only for
