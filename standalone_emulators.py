@@ -560,6 +560,7 @@ def _switch_keys_dirs():
         # sandboxed-vs-real split this list already makes for Ryubing.
         _flatpak_data_dir(EDEN_FLATHUB_APP_ID, "eden", "keys"),
         os.path.join(nextendo_root(), "system"),
+        os.path.join(nextendo_citron_root(), "keys"),
     ]
 
 
@@ -912,7 +913,8 @@ EDEN_FLATHUB_APP_ID = "dev.eden_emu.eden"
 NEXTENDO_NAME = "Nextendo Ryujinx"
 SWITCH_DLC_UPDATE_EMULATORS = {"Ryubing", "Ryubing (AppImage)", "Ryubing Canary (AppImage)", NEXTENDO_NAME}
 # The Nextendo tab's whole emulator list; the Emulators tab hides these.
-NEXT_EMULATORS = (NEXTENDO_NAME,)
+NEXTENDO_CITRON_NAME = "Nextendo Citron"
+NEXT_EMULATORS = (NEXTENDO_NAME, NEXTENDO_CITRON_NAME)
 
 
 def nextendo_root():
@@ -969,6 +971,61 @@ def nextendo_launcher_path():
         with open(path, "w") as f:
             f.write(_NEXTENDO_LAUNCHER)
     os.chmod(path, 0o755)
+    return path
+
+
+def nextendo_citron_root():
+    """Citron's portable "user" folder. Citron goes portable when a
+    user/ folder sits in its working directory (path_util.cpp), so the
+    launch wrapper below cds next to it first."""
+    return os.path.join(_binary_dir(NEXTENDO_CITRON_NAME), "user")
+
+
+# Citron Nextendo has no setup wizard. Its "Toggle Nextendo Account"
+# hotkey (Ctrl+F, main window) starts the browser sign-in while no
+# account is linked, so the wrapper presses it once the main window
+# (titled "citron ...") is up, and only while
+# user/config/nextendo_account.txt is missing.
+_NEXTENDO_CITRON_LAUNCHER = """#!/bin/sh
+DIR="$(cd "$(dirname "$0")" && pwd)"
+mkdir -p "$DIR/user"
+cd "$DIR" || exit 1
+if [ ! -s "$DIR/user/config/nextendo_account.txt" ] && command -v xdotool >/dev/null 2>&1; then
+  (
+    i=0
+    while [ $i -lt 120 ]; do
+      WIN="$(xdotool search --name '^citron ' 2>/dev/null | head -n 1)"
+      if [ -n "$WIN" ]; then
+        sleep 3
+        xdotool windowactivate --sync "$WIN" 2>/dev/null
+        xdotool key --window "$WIN" ctrl+f
+        exit 0
+      fi
+      sleep 0.5
+      i=$((i + 1))
+    done
+  ) &
+fi
+exec "$DIR/APPIMAGE" "$@"
+"""
+
+
+def nextendo_citron_launcher_path():
+    entry = EMULATORS[NEXTENDO_CITRON_NAME]
+    appimage = os.path.basename(_binary_path(NEXTENDO_CITRON_NAME, entry))
+    path = os.path.join(_binary_dir(NEXTENDO_CITRON_NAME), "citron-selfsteam.sh")
+    content = _NEXTENDO_CITRON_LAUNCHER.replace("APPIMAGE", appimage)
+    try:
+        with open(path) as f:
+            current = f.read()
+    except OSError:
+        current = None
+    if current != content:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write(content)
+    os.chmod(path, 0o755)
+    os.makedirs(nextendo_citron_root(), exist_ok=True)
     return path
 
 
@@ -1253,7 +1310,7 @@ def switch_registered_dlc_and_updates(entry, title_id_base_hex):
 # itself -- no per-file JSON metadata needed the way dlc.json/
 # updates.json are for Ryubing, just getting the real file into a
 # directory Eden already knows to scan.
-EDEN_DLC_UPDATE_EMULATORS = set(EDEN_EMULATORS) | {EDEN_FLATHUB_NAME}
+EDEN_DLC_UPDATE_EMULATORS = set(EDEN_EMULATORS) | {EDEN_FLATHUB_NAME, NEXTENDO_CITRON_NAME}
 
 
 def _eden_config_path(name=None):
@@ -1361,6 +1418,20 @@ def install_eden_dlc_and_updates(abs_paths, name=None):
     already exists on disk, falling back to a real copy across
     filesystems."""
     if not abs_paths:
+        return
+    if name == NEXTENDO_CITRON_NAME:
+        # Citron seeds sdmc/citron/content into its external content
+        # dirs on first start (qt_config.cpp), so dropping files there
+        # needs no config edit, even before its first launch.
+        target_dir = os.path.join(nextendo_citron_root(), "sdmc", "citron", "content")
+        os.makedirs(target_dir, exist_ok=True)
+        for src in abs_paths:
+            dest = os.path.join(target_dir, os.path.basename(src))
+            if not os.path.exists(dest):
+                try:
+                    os.link(src, dest)
+                except OSError:
+                    shutil.copy2(src, dest)
         return
     # Flathub Eden is sandboxed and its own manifest grants no
     # filesystem access at all, so without this it cannot read the
@@ -3457,6 +3528,23 @@ EMULATORS = {
         "keys_tooltip": "Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
         "bootstrap_config": _nextendo_bootstrap_config,
     },
+    NEXTENDO_CITRON_NAME: {
+        "install_type": "binary",
+        "display_name": "Citron Nextendo",
+        # Citron with the Nextendo account system. Gitea publishes a
+        # rolling "nightly-linux" release next to a Windows one; the
+        # x86_64 AppImage without PGO runs on any x86-64 CPU.
+        "release_api": "https://git.nextendo.network/api/v1/repos/NextendoNetwork/citron-nextendo/releases?limit=10",
+        "binary_asset_re": re.compile(r"^citron_nightly-[0-9a-f]+-linux-x86_64-use-nopgo\.AppImage$"),
+        "consoles": "Nintendo Switch",
+        "needs_bios": False,
+        "needs_keys": True,
+        "needs_firmware": True,
+        "args": _eden_args,
+        "keys_installed": _switch_keys_installed,
+        "install_keys": _switch_install_keys,
+        "keys_tooltip": "Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
+    },
     "Vita3K": {
         "install_type": "binary",
         # Real GitHub, not DMCA-blocked -- confirmed live (unlike Eden's
@@ -3640,13 +3728,14 @@ def picker_emulator_names(install_type):
 # variant.
 # Every emulator on the Emulators tab: Preflight has a backend for each
 # one (its own BACKENDS table, checked against its repo 2026-10-02).
-PREFLIGHT_EMULATORS = frozenset(EMULATORS)
+PREFLIGHT_EMULATORS = frozenset(EMULATORS) - {NEXTENDO_CITRON_NAME}
 
 EMULATOR_ICON_SLUGS = {
     "Dolphin": "dolphin",
     WHEEL_WIZARD_NAME: "wheelwizard",
     "Ryubing": "ryujinx",
     NEXTENDO_NAME: "nextendo",
+    NEXTENDO_CITRON_NAME: "citron-nextendo",
     EDEN_FLATHUB_NAME: "eden",
     "Cemu": "cemu",
     "Flycast": "flycast",
@@ -3725,6 +3814,8 @@ def binary_launch_paths(name):
         return ()
     if name == NEXTENDO_NAME:
         return (path, os.path.join(_binary_dir(name), "publish", "Ryujinx-selfsteam.sh"))
+    if name == NEXTENDO_CITRON_NAME:
+        return (path, os.path.join(_binary_dir(name), "citron-selfsteam.sh"))
     return (path,)
 
 
@@ -3808,9 +3899,13 @@ def install_binary(name):
         raise RuntimeError(f"{name}: release API failed after {_INSTALL_ATTEMPTS} attempts: {last_meta_error}")
     if not releases:
         raise RuntimeError(f"{name}: release API returned no releases")
-    release = releases[0]
-
     asset_re = entry["binary_asset_re"]
+    # A repo can publish per-platform releases (Citron Nextendo has a
+    # Windows and a Linux one), so take the newest with a matching asset.
+    release = next(
+        (r for r in releases if any(asset_re.match(a["name"]) for a in r.get("assets", ()))),
+        releases[0],
+    )
     match = next((a for a in release["assets"] if asset_re.match(a["name"])), None)
     if not match:
         raise RuntimeError(f"{name} {release.get('tag_name', '?')}: no asset matching {asset_re.pattern!r}")
@@ -4117,6 +4212,8 @@ def _emulator_argv(name, entry, romfile, zrif):
             return None
         if name == NEXTENDO_NAME:
             path = nextendo_launcher_path()
+        elif name == NEXTENDO_CITRON_NAME:
+            path = nextendo_citron_launcher_path()
         # Vita3K .pkg is a real, separate case, not just another
         # content-path -- see install_vita3k_pkg's own docstring for
         # why: --pkg/--zrif only installs, the actual launch afterward
@@ -4353,6 +4450,24 @@ def firmware_installed(name):
     entry = EMULATORS.get(name)
     if not entry:
         return None
+    if name == NEXTENDO_CITRON_NAME:
+        registered = _citron_registered_dir()
+        if os.path.isdir(registered) and any(n.endswith(".nca") for n in os.listdir(registered)):
+            try:
+                with open(_firmware_marker_path(os.path.dirname(registered))) as f:
+                    return f.read().strip() or "installed"
+            except OSError:
+                return f"{len(os.listdir(registered))} titles"
+        # Copy over firmware another Switch emulator already has.
+        for contents_dir in _ryujinx_family_contents_dirs():
+            src = os.path.join(contents_dir, "registered")
+            if os.path.isdir(src) and os.listdir(src):
+                _citron_copy_registered(src, registered)
+                marker = _firmware_marker_path(contents_dir)
+                if os.path.isfile(marker):
+                    shutil.copy2(marker, _firmware_marker_path(os.path.dirname(registered)))
+                return firmware_installed(name)
+        return None
 
     dirs = _ryujinx_family_contents_dirs()
     source_contents_dir = None
@@ -4386,6 +4501,22 @@ def firmware_installed(name):
         if marker:
             return marker
     return f"{count} titles"
+
+
+def _citron_registered_dir():
+    return os.path.join(nextendo_citron_root(), "nand", "system", "Contents", "registered")
+
+
+def _citron_copy_registered(src_registered, dest_registered):
+    """Ryujinx keeps firmware as <id>.nca/00 folders; yuzu-family
+    emulators like Citron want flat <id>.nca files."""
+    if os.path.isdir(dest_registered):
+        shutil.rmtree(dest_registered)
+    os.makedirs(dest_registered)
+    for nca in os.listdir(src_registered):
+        src = os.path.join(src_registered, nca)
+        part = os.path.join(src, "00")
+        shutil.copy2(part if os.path.isdir(src) else src, os.path.join(dest_registered, nca))
 
 
 def install_keys(name, keys_path):
@@ -4449,6 +4580,12 @@ def install_firmware_zip(name, zip_path):
                 with z.open(info) as src, open(os.path.join(dest_dir, "00"), "wb") as dst:
                     shutil.copyfileobj(src, dst)
 
+        if name == NEXTENDO_CITRON_NAME:
+            registered = _citron_registered_dir()
+            _citron_copy_registered(extract_root, registered)
+            with open(_firmware_marker_path(os.path.dirname(registered)), "w") as f:
+                f.write(os.path.basename(zip_path))
+            return registered
         last_registered_dir = None
         for contents_dir in _ryujinx_family_contents_dirs():
             os.makedirs(contents_dir, exist_ok=True)

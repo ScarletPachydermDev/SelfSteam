@@ -5045,16 +5045,22 @@ def _emulators_tab_panel_html(state, chosen=None):
             "The first launch of a game folder or .vpk installs it into Vita3K and "
             "stops at Vita3K's library. Quit and launch it again to play."
         )
-    elif emulator == standalone_emulators.NEXTENDO_NAME:
+    elif emulator in standalone_emulators.NEXT_EMULATORS:
         # Nextendo signs in through a browser on this machine, from its
         # own setup wizard (shown while portable/nextendo_setup_done is
         # missing), and only hands out online play and its shared
         # shader cache once signed in -- nothing SelfSteam can do from
         # this page.
-        notice_rows.append(
-            "The first launch opens Nextendo's setup, which signs in to your Nextendo "
-            "account in a browser. A mouse and keyboard (or a controller's touchpads) may be needed."
-        )
+        if emulator == standalone_emulators.NEXTENDO_CITRON_NAME:
+            notice_rows.append(
+                "Until you sign in, each launch opens the Nextendo sign-in in a browser. "
+                "A mouse and keyboard (or a controller's touchpads) may be needed."
+            )
+        else:
+            notice_rows.append(
+                "The first launch opens Nextendo's setup, which signs in to your Nextendo "
+                "account in a browser. A mouse and keyboard (or a controller's touchpads) may be needed."
+            )
         version_row = (
             "Online play needs the exact game version Nextendo asks for. Add that update "
             "below, and link Discord on your Nextendo account if it asks."
