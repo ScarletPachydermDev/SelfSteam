@@ -5006,7 +5006,15 @@ def _emulators_tab_panel_html(state, chosen=None):
             existing = []
         if any(sc.get("name") == name_default and sc.get("em_emulator") and sc["em_emulator"] != emulator
                for sc in existing):
-            display = standalone_emulators.EMULATORS.get(emulator, {}).get("display_name", emulator)
+            entry = standalone_emulators.EMULATORS.get(emulator, {})
+            display = entry.get("display_name", emulator)
+            # Flathub and AppImage builds can share a display name
+            # ("Ryubing"), so say which package; Nextendo builds already
+            # carry it in their name.
+            if emulator not in standalone_emulators.NEXT_EMULATORS:
+                package = "Flathub" if entry.get("install_type") == "flathub" else "AppImage"
+                if package not in display:
+                    display = f"{display} {package}"
             name_default = f"{name_default} ({display})"
     name_reset_href = _em_url("/new", state, em_name_cleared=("" if name_cleared else "1"))
     name_reset_title = "Reset to guessed name" if name_cleared else "Clear"
