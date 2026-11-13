@@ -1017,6 +1017,52 @@ def _nextendo_bootstrap_config(entry):
 _SHADER_CACHE_FILE_RE = re.compile(r"^(guest|shared|vulkan_\w+|opengl\w*)\.(data|toc)$", re.IGNORECASE)
 
 
+_NEXTENDO_CATALOG_URL = "https://nextendo.network/service-catalog/v1/game-catalog"
+_nextendo_catalog = {"at": 0.0, "games": None}
+
+
+def _nextendo_catalog_games():
+    """Nextendo's game list (which games have online play, and which
+    versions it accepts). Fetched from the public catalog at most once an
+    hour; falls back to the copy Nextendo itself saved, if any. The
+    signature is not checked: this only feeds a hint on the page."""
+    import base64
+    now = time.time()
+    if _nextendo_catalog["games"] is not None and now - _nextendo_catalog["at"] < 3600:
+        return _nextendo_catalog["games"]
+
+    def _games(envelope):
+        payload = envelope["payload"]
+        payload += "=" * (-len(payload) % 4)
+        return json.loads(base64.urlsafe_b64decode(payload))["games"]
+
+    games = None
+    try:
+        req = urllib.request.Request(_NEXTENDO_CATALOG_URL, headers={"User-Agent": "SelfSteam"})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            games = _games(json.load(resp))
+    except Exception:  # noqa: BLE001 -- offline or a changed format: try the local copy
+        try:
+            with open(os.path.join(nextendo_root(), "service-catalog-v1", "catalog.cache.json")) as f:
+                games = _games(json.loads(json.load(f)["Envelope"]))
+        except Exception:  # noqa: BLE001
+            games = None
+    if games is not None:
+        _nextendo_catalog.update(at=now, games=games)
+    return games
+
+
+def nextendo_online_versions(title_id_base):
+    """(accepted versions, recommended) for one game's online play, or
+    None when Nextendo doesn't list it or the list can't be read."""
+    tid = f"{title_id_base:016x}"
+    for game in _nextendo_catalog_games() or ():
+        if tid in [t.lower() for t in game.get("title_ids", ())]:
+            versions = game.get("versions") or {}
+            return list(versions.get("accepted") or ()), versions.get("recommended")
+    return None
+
+
 def install_nextendo_shader_cache(title_id_base, paths):
     """Puts a shared shader cache in Nextendo's own folder for one game,
     games/<title id>/cache/shader -- where Nextendo's own community

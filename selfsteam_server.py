@@ -664,14 +664,12 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
 .tab-bar a[href="#tab-url"] { background: #fff; color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
 #tab-apps:target ~ .selfsteam-columns .tab-bar a[href="#tab-url"],
 #tab-retroarch:target ~ .selfsteam-columns .tab-bar a[href="#tab-url"],
-#tab-emulators:target ~ .selfsteam-columns .tab-bar a[href="#tab-url"],
-#tab-nextendo:target ~ .selfsteam-columns .tab-bar a[href="#tab-url"] {
+#tab-emulators:target ~ .selfsteam-columns .tab-bar a[href="#tab-url"] {
   background: transparent; color: var(--text-dim); box-shadow: none;
 }
 #tab-apps:target ~ .selfsteam-columns .tab-bar a[href="#tab-apps"],
 #tab-retroarch:target ~ .selfsteam-columns .tab-bar a[href="#tab-retroarch"],
-#tab-emulators:target ~ .selfsteam-columns .tab-bar a[href="#tab-emulators"],
-#tab-nextendo:target ~ .selfsteam-columns .tab-bar a[href="#tab-nextendo"] {
+#tab-emulators:target ~ .selfsteam-columns .tab-bar a[href="#tab-emulators"] {
   background: #fff; color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,0.12);
 }
 /* flex:1 on both so whichever tab is active can stretch to fill the
@@ -702,18 +700,10 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
 .tab-panel-url { display: flex; }
 #tab-apps:target ~ .selfsteam-columns .tab-panels .tab-panel-url,
 #tab-retroarch:target ~ .selfsteam-columns .tab-panels .tab-panel-url,
-#tab-emulators:target ~ .selfsteam-columns .tab-panels .tab-panel-url,
-#tab-nextendo:target ~ .selfsteam-columns .tab-panels .tab-panel-url { display: none; }
+#tab-emulators:target ~ .selfsteam-columns .tab-panels .tab-panel-url { display: none; }
 #tab-apps:target ~ .selfsteam-columns .tab-panels .tab-panel-apps,
 #tab-retroarch:target ~ .selfsteam-columns .tab-panels .tab-panel-retroarch,
-#tab-emulators:target ~ .selfsteam-columns .tab-panels .tab-panel-emulators,
-/* The Nextendo tab is the Emulators tab's own panels in Nextendo mode
-   (em_next, see _EM_STATE_KEYS): same columns, its own emulator list. */
-#tab-nextendo:target ~ .selfsteam-columns .tab-panels .tab-panel-emulators { display: flex; }
-#tab-nextendo:target ~ .selfsteam-columns .middle-panel-url,
-#tab-nextendo:target ~ .selfsteam-columns .right-panel-url { display: none; }
-#tab-nextendo:target ~ .selfsteam-columns .middle-panel-emulators,
-#tab-nextendo:target ~ .selfsteam-columns .right-panel-emulators { display: flex; }
+#tab-emulators:target ~ .selfsteam-columns .tab-panels .tab-panel-emulators
 /* Middle/right columns: URL's own content is the default (also what
    Apps falls back to showing, same as before RetroArch/Emulators had
    any content of their own) -- only switches away from it when that
@@ -1708,7 +1698,7 @@ function selfsteamEmNav(a) {
 function selfsteamEmFormNav(form) {
   var qs = new URLSearchParams(new FormData(form)).toString();
   var action = form.getAttribute("action").split("#")[0];
-  selfsteamEmFetch(action + "?" + qs + (qs.indexOf("em_next=1") >= 0 ? "#tab-nextendo" : "#tab-emulators"));
+  selfsteamEmFetch(action + "?" + qs + "#tab-emulators");
 }
 
 // Deliberately excludes selfsteam-apps-tab-panel, unlike RA/Emulators'
@@ -3265,9 +3255,8 @@ def _retroarch_tab_panel_html(state, chosen=None):
 # the auto-install mechanism differs once Create Steam Shortcut is
 # clicked (see _add_standalone_emulator_shortcut).
 _EM_STATE_KEYS = [
-    # em_next: "1" while this state belongs to the Nextendo tab rather
-    # than the Emulators tab -- both share every picker below, only the
-    # emulator list and the tab the page lands back on differ.
+    # em_next: "1" while the Nextendo source is picked (beside Flathub
+    # and AppImage): only the emulator list and notices differ.
     "em_next", "em_install_source", "em_emulator",
     "em_rompath", "em_romfile", "em_romsource",
     "em_biospath", "em_biosfile", "em_biossource", "em_bios_skip",
@@ -3359,7 +3348,7 @@ def _em_qs(state, **overrides):
 
 
 def _em_fragment(state):
-    return "#tab-nextendo" if state.get("em_next") else "#tab-emulators"
+    return "#tab-emulators"
 
 
 def _em_url(path, state, **overrides):
@@ -4850,9 +4839,13 @@ def _emulators_tab_panel_html(state, chosen=None):
     # picker (retroarch_cores.CONSOLES), where console is the meaningful
     # grouping, this tab's own label is "EmulatorName - Console", so
     # alphabetical-by-emulator is what the user actually asked for here.
-    # The Nextendo tab lists only Nextendo's own builds, whatever their
-    # install type, and the Emulators tab never lists them.
-    next_tab = bool(state.get("em_next"))
+    # The Nextendo source lists only Nextendo's own builds, whatever their
+    # install type, and the other sources never list them.
+    # Nextendo is a third install source beside Flathub and AppImage;
+    # em_next marks it (kept so older links still land there).
+    next_tab = bool(state.get("em_next")) or install_source == "nextendo"
+    if next_tab:
+        install_source = "nextendo"
     if next_tab:
         names = list(standalone_emulators.NEXT_EMULATORS)
     else:
@@ -4882,7 +4875,7 @@ def _emulators_tab_panel_html(state, chosen=None):
         # catalogs, so "Cemu (Flathub)" being selected while viewing the
         # AppImage list would just be wrong, not merely stale.
         href = _em_url(
-            "/new", state, em_install_source=value, em_emulator="",
+            "/new", state, em_install_source=value, em_next=("1" if value == "nextendo" else ""), em_emulator="",
             em_romfile="", em_biosfile="", em_bios2file="", em_bios3file="", em_bios4file="",
             em_keysfile="", em_firmwarefile="", em_resolved="",
         )
@@ -4893,10 +4886,12 @@ def _emulators_tab_panel_html(state, chosen=None):
     # apps_appimage_tooltip -- see its comment for why.
     appimage_tooltip_text = "AppImages are downloaded directly from the emulator developer's own GitHub releases."
     appimage_tooltip = f'<span style="position:relative;top:0.05rem">{_info_tooltip_icon_html(appimage_tooltip_text)}</span>'
-    source_toggle = "" if next_tab else f"""
+    nextendo_tooltip = f'<span style="position:relative;top:0.05rem">{_info_tooltip_icon_html("Nextendo builds of emulators, with their own accounts and online play.")}</span>'
+    source_toggle = f"""
     <div class="source-toggle" style="margin-bottom:0.6rem">
       {_source_toggle_link("flathub", "Flathub")}
       {_source_toggle_link("binary", "AppImage", appimage_tooltip)}
+      {_source_toggle_link("nextendo", "Nextendo", nextendo_tooltip)}
     </div>"""
 
     # bios_slots (xemu so far): more than one required BIOS-type file,
@@ -5060,10 +5055,22 @@ def _emulators_tab_panel_html(state, chosen=None):
             "The first launch opens Nextendo's setup, which signs in to your Nextendo "
             "account in a browser. A mouse and keyboard (or a controller's touchpads) may be needed."
         )
-        notice_rows.append(
+        version_row = (
             "Online play needs the exact game version Nextendo asks for. Add that update "
             "below, and link Discord on your Nextendo account if it asks."
         )
+        if state.get("em_romfile"):
+            rom_tid, _rows, _err = _em_dlc_classify(state)
+            online = standalone_emulators.nextendo_online_versions(rom_tid) if rom_tid else None
+            if online and online[0]:
+                wanted = " or ".join(f"<strong>{html.escape(v)}</strong>" for v in online[0])
+                version_row = (
+                    f"Online play needs version {wanted} of this game. Add that update "
+                    "below, and link Discord on your Nextendo account if it asks."
+                )
+            elif rom_tid is not None and online is None and standalone_emulators._nextendo_catalog["games"]:
+                version_row = "Nextendo doesn't list this game for online play."
+        notice_rows.append(version_row)
     elif emulator == "melonDS":
         notice_rows.append("L3 swaps screens")
     elif emulator == "Azahar":
@@ -5444,7 +5451,7 @@ def render_custom_page(cu_state, cu_candidates_by_category=None, cu_chosen=None,
 
 _FORM_TABS = [
     ("tab-url", "URL"), ("tab-apps", "Apps"), ("tab-retroarch", "RetroArch"),
-    ("tab-emulators", "Emulators"), ("tab-nextendo", "Nextendo"),
+    ("tab-emulators", "Emulators"),
 ]
 
 
@@ -5468,16 +5475,8 @@ def _tab_bar_targets_html():
 def _tab_bar_html(em_state):
     # Plain links (#tab-url etc.), not radio-paired <label for=...> --
     # see _tab_bar_targets_html for why this moved off form controls.
-    # Emulators and Nextendo share one set of panels, so moving between
-    # the two is a real page load that starts the other one blank; a
-    # fragment alone would show this one's picks under the other's name.
-    next_mode = bool(em_state.get("em_next"))
-    hrefs = {
-        "tab-emulators": "/new#tab-emulators" if next_mode else "#tab-emulators",
-        "tab-nextendo": "#tab-nextendo" if next_mode else "/new?em_next=1#tab-nextendo",
-    }
     labels = "".join(
-        f'<a href="{hrefs.get(tab_id, "#" + tab_id)}" class="tab-label">{label}</a>' for tab_id, label in _FORM_TABS
+        f'<a href="#{tab_id}" class="tab-label">{label}</a>' for tab_id, label in _FORM_TABS
     )
     return f'<div class="tab-bar">{labels}</div>'
 
@@ -6619,7 +6618,8 @@ def _poster_card_html(shortcut, pending_removal_appids):
         romfile_rel = os.path.relpath(shortcut["em_romfile"], _RA_ROOT)
         edit_href = _em_url("/new", {
             "em_emulator": shortcut["em_emulator"],
-            "em_next": "1" if shortcut["em_emulator"] in standalone_emulators.NEXT_EMULATORS else "",
+            **({"em_next": "1", "em_install_source": "nextendo"}
+               if shortcut["em_emulator"] in standalone_emulators.NEXT_EMULATORS else {}),
             "em_romfile": romfile_rel,
             "em_preflight": "1" if shortcut.get("em_preflight") else "",
             "em_edit_appid": str(appid), "em_edit_name": name,
@@ -8220,7 +8220,8 @@ class Handler(BaseHTTPRequestHandler):
             self._redirect(_em_url("/new", {
                 "em_emulator": em_emulator, "em_install_source": em_install_source,
                 "em_rompath": em_rompath, "em_romsource": em_romsource,
-                "em_next": (params.get("em_next") or [""])[0],
+                **({"em_next": "1", "em_install_source": "nextendo"}
+                   if em_emulator in standalone_emulators.NEXT_EMULATORS else {}),
             }))
         except Exception as e:  # noqa: BLE001 -- surfaced to the user, not swallowed
             self._send_html(render_done(match_name, ok=False, error=e))
