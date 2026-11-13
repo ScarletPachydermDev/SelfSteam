@@ -2647,7 +2647,9 @@ def _em_needs_unpacking(state):
         state.get("em_keysfile", ""),
         # A firmware zip is used as it is; only other archives unpack.
         "" if firmware.lower().endswith(".zip") else firmware,
-        *[p for p in state.get("em_extra_paths", "").split(_EM_DLC_SEP) if p],
+        # Nextendo's picker holds a shader cache, read as a zip as it is.
+        *([] if state.get("em_emulator") in standalone_emulators.NEXT_EMULATORS
+          else [p for p in state.get("em_extra_paths", "").split(_EM_DLC_SEP) if p]),
         *_em_dlc_paths_list(state),
     ])
 
@@ -4539,12 +4541,21 @@ def _em_extra_picker_section(state):
     <div id="{dom_prefix}-upload-panel" style="display:{upload_display};margin-top:0.6rem">{upload_panel}</div>
     <div id="{dom_prefix}-local-panel" style="display:{local_display}">{local_panel}</div>"""
 
-    hint = (
-        "Files that belong next to the disc image: an .sbi for LibCrypt games "
-        "(Crash Team Racing and other PAL discs), extra .bin tracks for a .cue, "
-        "or the discs an .m3u lists. An .sbi is renamed to match the disc image, "
-        "which is how DuckStation finds it."
-    )
+    if emulator in standalone_emulators.NEXT_EMULATORS:
+        label = "Shader cache (optional)"
+        hint = (
+            "A Ryujinx shader cache for this game: a zip, or its guest.data/guest.toc "
+            "files. Some games stutter online without one. Nextendo also offers its own "
+            "cache for games it has one for, after you sign in."
+        )
+    else:
+        label = "Additional files (.sbi, .bin, .m3u) (optional)"
+        hint = (
+            "Files that belong next to the disc image: an .sbi for LibCrypt games "
+            "(Crash Team Racing and other PAL discs), extra .bin tracks for a .cue, "
+            "or the discs an .m3u lists. An .sbi is renamed to match the disc image, "
+            "which is how DuckStation finds it."
+        )
     body = f"""
     {rows_block}
     {picker_ui}"""
@@ -4554,7 +4565,7 @@ def _em_extra_picker_section(state):
     return f"""
   <div class="field-group">
     <label class="field-label" style="display:flex;align-items:center;gap:0.4rem;min-width:0">
-      <span style="flex:0 1 auto;min-width:0">Additional files (.sbi, .bin, .m3u) (optional) {_info_tooltip_icon_html(hint)}</span>
+      <span style="flex:0 1 auto;min-width:0">{label} {_info_tooltip_icon_html(hint)}</span>
       <span id="em-extra-upload-status" class="upload-status" style="display:none">Uploading<span class="spinner"></span></span>
     </label>
     {body}
@@ -7905,7 +7916,8 @@ class Handler(BaseHTTPRequestHandler):
         # archive usually holds prod.keys and title.keys together.
         try:
             em_bios_slot_files = {k: _unpacked(v) for k, v in em_bios_slot_files.items()}
-            em_extra_abs = [_unpacked(p) for p in em_extra_abs]
+            if em_emulator not in standalone_emulators.NEXT_EMULATORS:
+                em_extra_abs = [_unpacked(p) for p in em_extra_abs]
             if em_keysfile_abs and archives.is_archive(em_keysfile_abs):
                 em_keysfile_abs = _unpacked_archive(em_keysfile_abs)
             if em_firmwarefile_abs and archives.is_archive(em_firmwarefile_abs):
@@ -7984,7 +7996,14 @@ class Handler(BaseHTTPRequestHandler):
             # Companion files go next to the disc image, which is where
             # the emulator looks for them -- see standalone_emulators.
             # install_extra_files.
-            if em_extra_abs:
+            if em_extra_abs and em_emulator in standalone_emulators.NEXT_EMULATORS:
+                # A shader cache, keyed by the game's title ID -- read
+                # after install_keys above, which it needs.
+                _set_install_step("Installing shader cache")
+                header_key = nsp_metadata.read_header_key(standalone_emulators.switch_prod_keys_path())
+                title_id_base = nsp_metadata.read_title_id(romfile_abs, header_key).title_id_base
+                standalone_emulators.install_nextendo_shader_cache(title_id_base, em_extra_abs)
+            elif em_extra_abs:
                 standalone_emulators.install_extra_files(romfile_abs, em_extra_abs)
             for prefix, bios_abs in em_bios_slot_files.items():
                 standalone_emulators.install_bios_slot(em_emulator, prefix, bios_abs)

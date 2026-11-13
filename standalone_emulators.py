@@ -923,6 +923,90 @@ def nextendo_root():
     return os.path.join(_binary_dir(NEXTENDO_NAME), "publish", "portable")
 
 
+def _nextendo_bootstrap_config(entry):
+    """A Config.json for Nextendo before its first launch, copied from
+    the newest Ryujinx-family one on this machine.
+
+    Without it, Preflight runs before Nextendo has written its own and,
+    finding none beside the binary, falls back to ~/.config/Ryujinx --
+    the Ryubing AppImage's config -- so the controllers it sets up land
+    in the wrong emulator (seen on a Steam Machine). An older version
+    number is fine: Ryujinx migrates a config forward on load; only a
+    missing or version-0 one is thrown away (see _ryubing_configure_
+    game_dir).
+
+    Fullscreen without a title bar or log console, and 1080p rendering
+    (one step lower on a Deck's own screen), applied once when seeding;
+    after that the file is Nextendo's and the player's."""
+    config_path = os.path.join(nextendo_root(), "Config.json")
+    if os.path.isfile(config_path):
+        return
+    candidates = []
+    for path in (
+        _flatpak_config_dir("io.github.ryubing.Ryujinx", "Ryujinx", "Config.json"),
+        _xdg_config_dir("Ryujinx", "Config.json"),
+    ):
+        try:
+            with open(path) as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict) and data.get("version"):
+            candidates.append(data)
+    if not candidates:
+        return
+    data = max(candidates, key=lambda d: d["version"])
+    data.update(
+        start_fullscreen=True, show_title_bar=False, show_console=False,
+        res_scale=1 if emu_resolution._deck() else 2,
+    )
+    os.makedirs(nextendo_root(), exist_ok=True)
+    with open(config_path, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+_SHADER_CACHE_FILE_RE = re.compile(r"^(guest|shared|vulkan_\w+|opengl\w*)\.(data|toc)$", re.IGNORECASE)
+
+
+def install_nextendo_shader_cache(title_id_base, paths):
+    """Puts a shared shader cache in Nextendo's own folder for one game,
+    games/<title id>/cache/shader -- where Nextendo's own community
+    cache download installs to (NextendoCacheSync.ShaderInstallPath).
+
+    paths are zips or loose files; only Ryujinx shader cache files
+    (guest/shared .data/.toc, and the per-GPU vulkan_*/opengl* ones) are
+    taken, wherever they sit inside a zip, so a folder-in-a-zip download
+    works as it is. Whatever was there before is kept as shader.old.
+    Returns the files written."""
+    shader_dir = os.path.join(nextendo_root(), "games", f"{title_id_base:016x}", "cache", "shader")
+    staging = shader_dir + ".new"
+    shutil.rmtree(staging, ignore_errors=True)
+    os.makedirs(staging)
+    written = []
+    for path in paths:
+        if zipfile.is_zipfile(path):
+            with zipfile.ZipFile(path) as zf:
+                for info in zf.infolist():
+                    name = os.path.basename(info.filename)
+                    if info.is_dir() or not _SHADER_CACHE_FILE_RE.match(name):
+                        continue
+                    with zf.open(info) as src, open(os.path.join(staging, name), "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+                    written.append(name)
+        elif _SHADER_CACHE_FILE_RE.match(os.path.basename(path)):
+            shutil.copy2(path, os.path.join(staging, os.path.basename(path)))
+            written.append(os.path.basename(path))
+    if not written:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise RuntimeError("No Ryujinx shader cache files (guest.data, guest.toc...) found in the shader cache pick")
+    if os.path.isdir(shader_dir):
+        old = shader_dir + ".old"
+        shutil.rmtree(old, ignore_errors=True)
+        os.rename(shader_dir, old)
+    os.rename(staging, shader_dir)
+    return [os.path.join(shader_dir, n) for n in written]
+
+
 def _switch_games_dir(entry):
     """Real per-title games/ directory Ryujinx/Ryubing keeps dlc.json
     and updates.json under (AppDataManager.GamesDirPath in its own
@@ -1806,7 +1890,9 @@ def is_never_a_rom(path):
     return os.path.splitext(path)[1].lower() in NEVER_ROM_EXTENSIONS
 
 
-EXTRA_FILES_EMULATORS = frozenset({"DuckStation"})
+# Nextendo's picker takes a shader cache instead -- see
+# install_nextendo_shader_cache.
+EXTRA_FILES_EMULATORS = frozenset({"DuckStation", NEXTENDO_NAME})
 
 # Disc images that can have companion files worth carrying. Companions
 # only make sense next to a disc image, so this is also what decides
@@ -3274,6 +3360,7 @@ EMULATORS = {
         "keys_installed": _switch_keys_installed,
         "install_keys": _switch_install_keys,
         "keys_tooltip": "Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
+        "bootstrap_config": _nextendo_bootstrap_config,
     },
     "Vita3K": {
         "install_type": "binary",
