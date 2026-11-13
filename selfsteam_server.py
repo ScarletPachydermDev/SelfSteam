@@ -703,7 +703,7 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
 #tab-emulators:target ~ .selfsteam-columns .tab-panels .tab-panel-url { display: none; }
 #tab-apps:target ~ .selfsteam-columns .tab-panels .tab-panel-apps,
 #tab-retroarch:target ~ .selfsteam-columns .tab-panels .tab-panel-retroarch,
-#tab-emulators:target ~ .selfsteam-columns .tab-panels .tab-panel-emulators
+#tab-emulators:target ~ .selfsteam-columns .tab-panels .tab-panel-emulators { display: flex; }
 /* Middle/right columns: URL's own content is the default (also what
    Apps falls back to showing, same as before RetroArch/Emulators had
    any content of their own) -- only switches away from it when that
