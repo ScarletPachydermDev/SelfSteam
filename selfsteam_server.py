@@ -707,12 +707,13 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
 #tab-apps:target ~ .selfsteam-columns .tab-panels .tab-panel-apps,
 #tab-retroarch:target ~ .selfsteam-columns .tab-panels .tab-panel-retroarch,
 #tab-emulators:target ~ .selfsteam-columns .tab-panels .tab-panel-emulators,
-#tab-nextendo:target ~ .selfsteam-columns .tab-panels .tab-panel-nextendo { display: flex; }
-/* The Nextendo tab is an intro with a link into the Emulators tab: no
-   middle/right columns of its own and nothing to create from here. */
+/* The Nextendo tab is the Emulators tab's own panels in Nextendo mode
+   (em_next, see _EM_STATE_KEYS): same columns, its own emulator list. */
+#tab-nextendo:target ~ .selfsteam-columns .tab-panels .tab-panel-emulators { display: flex; }
 #tab-nextendo:target ~ .selfsteam-columns .middle-panel-url,
-#tab-nextendo:target ~ .selfsteam-columns .right-panel-url,
-#tab-nextendo:target ~ .selfsteam-columns #selfsteam-add-button { display: none; }
+#tab-nextendo:target ~ .selfsteam-columns .right-panel-url { display: none; }
+#tab-nextendo:target ~ .selfsteam-columns .middle-panel-emulators,
+#tab-nextendo:target ~ .selfsteam-columns .right-panel-emulators { display: flex; }
 /* Middle/right columns: URL's own content is the default (also what
    Apps falls back to showing, same as before RetroArch/Emulators had
    any content of their own) -- only switches away from it when that
@@ -1666,7 +1667,7 @@ function selfsteamEmNav(a) {
 function selfsteamEmFormNav(form) {
   var qs = new URLSearchParams(new FormData(form)).toString();
   var action = form.getAttribute("action").split("#")[0];
-  selfsteamEmFetch(action + "?" + qs + "#tab-emulators");
+  selfsteamEmFetch(action + "?" + qs + (qs.indexOf("em_next=1") >= 0 ? "#tab-nextendo" : "#tab-emulators"));
 }
 
 // Deliberately excludes selfsteam-apps-tab-panel, unlike RA/Emulators'
@@ -3221,7 +3222,10 @@ def _retroarch_tab_panel_html(state, chosen=None):
 # the auto-install mechanism differs once Create Steam Shortcut is
 # clicked (see _add_standalone_emulator_shortcut).
 _EM_STATE_KEYS = [
-    "em_install_source", "em_emulator",
+    # em_next: "1" while this state belongs to the Nextendo tab rather
+    # than the Emulators tab -- both share every picker below, only the
+    # emulator list and the tab the page lands back on differ.
+    "em_next", "em_install_source", "em_emulator",
     "em_rompath", "em_romfile", "em_romsource",
     "em_biospath", "em_biosfile", "em_biossource", "em_bios_skip",
     # bios2/bios3/bios4: extra BIOS-type file slots beyond the single
@@ -3311,8 +3315,14 @@ def _em_qs(state, **overrides):
     return "&".join(f"{k}={urllib.parse.quote(str(merged[k]))}" for k in _EM_STATE_KEYS if merged.get(k))
 
 
+def _em_fragment(state):
+    return "#tab-nextendo" if state.get("em_next") else "#tab-emulators"
+
+
 def _em_url(path, state, **overrides):
-    return f"{path}?{_em_qs(state, **overrides)}#tab-emulators"
+    merged = dict(state)
+    merged.update(overrides)
+    return f"{path}?{_em_qs(state, **overrides)}{_em_fragment(merged)}"
 
 
 def _em_dlc_classify(state):
@@ -4310,7 +4320,7 @@ def _em_picker_section(prefix, label, state, already_installed=None, info_toolti
       {upload_status}
     </label>"""
 
-    upload_action = f"/new/upload-em?{_em_qs(state)}&slot={prefix}#tab-emulators"
+    upload_action = f"/new/upload-em?{_em_qs(state)}&slot={prefix}{_em_fragment(state)}"
     upload_panel = f"""
     <form method="post" enctype="multipart/form-data" action="{upload_action}">
       <input type="file" name="file" onchange="selfsteamShowUploading('{dom_prefix}'); selfsteamEmUploadFetch(this)">
@@ -4495,7 +4505,7 @@ def _em_extra_picker_section(state):
     if picker_open:
         dom_prefix = "em-extra-source"
         source = state.get("em_extrasource") or "local"
-        upload_action = f"/new/upload-em-extra?{_em_qs(state)}#tab-emulators"
+        upload_action = f"/new/upload-em-extra?{_em_qs(state)}{_em_fragment(state)}"
         upload_panel = f"""
     <form method="post" enctype="multipart/form-data" action="{upload_action}">
       <input type="file" name="file"
@@ -4657,7 +4667,7 @@ def _em_dlc_picker_section(state):
     if picker_open:
         dom_prefix = "em-dlc-source"
         source = state.get("em_dlcsource") or "local"
-        upload_action = f"/new/upload-em-dlc?{_em_qs(state)}#tab-emulators"
+        upload_action = f"/new/upload-em-dlc?{_em_qs(state)}{_em_fragment(state)}"
         upload_panel = f"""
     <form method="post" enctype="multipart/form-data" action="{upload_action}">
       <input type="file" name="file"
@@ -4775,10 +4785,17 @@ def _emulators_tab_panel_html(state, chosen=None):
     # picker (retroarch_cores.CONSOLES), where console is the meaningful
     # grouping, this tab's own label is "EmulatorName - Console", so
     # alphabetical-by-emulator is what the user actually asked for here.
-    names = sorted(
-        standalone_emulators.picker_emulator_names(install_source),
-        key=lambda n: n.lower(),
-    )
+    # The Nextendo tab lists only Nextendo's own builds, whatever their
+    # install type, and the Emulators tab never lists them.
+    next_tab = bool(state.get("em_next"))
+    if next_tab:
+        names = list(standalone_emulators.NEXT_EMULATORS)
+    else:
+        names = sorted(
+            (n for n in standalone_emulators.picker_emulator_names(install_source)
+             if n not in standalone_emulators.NEXT_EMULATORS),
+            key=lambda n: n.lower(),
+        )
     emulator_picker_html = _emulator_picker_html(names, emulator)
 
     # id="em-console-form-{k}" mirrors the RA tab's own "ra-console-
@@ -4808,7 +4825,7 @@ def _emulators_tab_panel_html(state, chosen=None):
     # apps_appimage_tooltip -- see its comment for why.
     appimage_tooltip_text = "AppImages are downloaded directly from the emulator developer's own GitHub releases."
     appimage_tooltip = f'<span style="position:relative;top:0.05rem">{_info_tooltip_icon_html(appimage_tooltip_text)}</span>'
-    source_toggle = f"""
+    source_toggle = "" if next_tab else f"""
     <div class="source-toggle" style="margin-bottom:0.6rem">
       {_source_toggle_link("flathub", "Flathub")}
       {_source_toggle_link("binary", "AppImage", appimage_tooltip)}
@@ -5042,13 +5059,13 @@ def _emulators_tab_panel_html(state, chosen=None):
     return f"""
   <div class="field-group">
     {source_toggle}
-    <form method="get" action="/new#tab-emulators" style="margin:0">
+    <form method="get" action="/new{_em_fragment(state)}" style="margin:0">
       {hidden_fields}
       <input type="hidden" name="em_emulator" id="em-emulator-hidden" value="{html.escape(emulator)}">
       {emulator_picker_html}
     </form>
   </div>
-  {wheelwizard_notice}
+  {"" if next_tab else wheelwizard_notice}
   {preflight_block}
   {bios_block}
   {keys_block}
@@ -5057,6 +5074,7 @@ def _emulators_tab_panel_html(state, chosen=None):
   {extra_block}
   {dlc_block}
   {zrif_block}
+  {wheelwizard_notice if next_tab else ""}
   <div class="selfsteam-spacer"></div>
   {rpcs3_firmware_warning}
   {name_field}"""
@@ -5118,7 +5136,7 @@ def _em_sgdb_search_bar_html(state, chosen=None):
     # looking box that can't do anything read as a real bug.
     disabled = "" if (state.get("em_romfile") and sgdb.has_api_key()) else " disabled"
     return f"""
-<form action="/new#tab-emulators" method="get">
+<form action="/new{_em_fragment(state)}" method="get">
   {hidden}
   <div class="search-field-row">
     <div class="field-with-clear">
@@ -5356,25 +5374,6 @@ _FORM_TABS = [
 ]
 
 
-def _nextendo_tab_panel_html():
-    # The game itself is set up in the Emulators tab with Nextendo
-    # picked: ROM, keys, firmware, updates/DLC and Preflight all work
-    # there already. This tab is the way in, plus what that tab cannot
-    # say on its own.
-    href = _em_url("/new", {}, em_install_source="binary", em_emulator=standalone_emulators.NEXTENDO_NAME)
-    return f"""
-<p>Nextendo is a Ryujinx build with its own accounts and online play. SelfSteam installs it
-separately from Ryubing, so its keys, saves and settings never mix with Ryubing's.</p>
-<ul>
-  <li>The first launch opens Nextendo's setup, which signs in to your Nextendo account in a browser.
-  A mouse and keyboard (or a controller's touchpads) may be needed for that one step.</li>
-  <li>Online play needs the exact game version Nextendo asks for, and some games need Discord
-  linked on your Nextendo account.</li>
-  <li>Once signed in, Nextendo offers its shared shader cache for supported games.</li>
-</ul>
-<a class="source-label active" href="{html.escape(href)}">Add a Nextendo game</a>"""
-
-
 def _tab_bar_targets_html():
     # Emitted just above .selfsteam-columns (see render_page) -- empty
     # :target anchor markers, not radio inputs. The radio-hack version
@@ -5392,10 +5391,20 @@ def _tab_bar_targets_html():
     return "".join(f'<span id="{tab_id}"></span>' for tab_id, _label in _FORM_TABS)
 
 
-def _tab_bar_html():
+def _tab_bar_html(em_state):
     # Plain links (#tab-url etc.), not radio-paired <label for=...> --
     # see _tab_bar_targets_html for why this moved off form controls.
-    labels = "".join(f'<a href="#{tab_id}" class="tab-label">{label}</a>' for tab_id, label in _FORM_TABS)
+    # Emulators and Nextendo share one set of panels, so moving between
+    # the two is a real page load that starts the other one blank; a
+    # fragment alone would show this one's picks under the other's name.
+    next_mode = bool(em_state.get("em_next"))
+    hrefs = {
+        "tab-emulators": "/new#tab-emulators" if next_mode else "#tab-emulators",
+        "tab-nextendo": "#tab-nextendo" if next_mode else "/new?em_next=1#tab-nextendo",
+    }
+    labels = "".join(
+        f'<a href="{hrefs.get(tab_id, "#" + tab_id)}" class="tab-label">{label}</a>' for tab_id, label in _FORM_TABS
+    )
     return f'<div class="tab-bar">{labels}</div>'
 
 
@@ -6074,7 +6083,7 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
 
     left = f"""
 <div class="card">
-  {_tab_bar_html()}
+  {_tab_bar_html(em_state)}
   <div class="tab-panels">
     <div class="tab-panel tab-panel-url" id="selfsteam-url-tab-panel">
       <form action="/search" method="get" style="display:flex;flex-direction:column;gap:0.9rem;flex:1;min-height:0">
@@ -6091,9 +6100,6 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
     </div>
     <div class="tab-panel tab-panel-emulators" id="selfsteam-em-tab-panel">
       {_emulators_tab_panel_html(em_state, em_chosen)}
-    </div>
-    <div class="tab-panel tab-panel-nextendo">
-      {_nextendo_tab_panel_html()}
     </div>
   </div>
   {add_button}
@@ -6538,6 +6544,7 @@ def _poster_card_html(shortcut, pending_removal_appids):
         romfile_rel = os.path.relpath(shortcut["em_romfile"], _RA_ROOT)
         edit_href = _em_url("/new", {
             "em_emulator": shortcut["em_emulator"],
+            "em_next": "1" if shortcut["em_emulator"] in standalone_emulators.NEXT_EMULATORS else "",
             "em_romfile": romfile_rel,
             "em_preflight": "1" if shortcut.get("em_preflight") else "",
             "em_edit_appid": str(appid), "em_edit_name": name,
@@ -8130,6 +8137,7 @@ class Handler(BaseHTTPRequestHandler):
             self._redirect(_em_url("/new", {
                 "em_emulator": em_emulator, "em_install_source": em_install_source,
                 "em_rompath": em_rompath, "em_romsource": em_romsource,
+                "em_next": (params.get("em_next") or [""])[0],
             }))
         except Exception as e:  # noqa: BLE001 -- surfaced to the user, not swallowed
             self._send_html(render_done(match_name, ok=False, error=e))

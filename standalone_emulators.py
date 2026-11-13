@@ -909,6 +909,8 @@ EDEN_FLATHUB_APP_ID = "dev.eden_emu.eden"
 # set.
 NEXTENDO_NAME = "Nextendo"
 SWITCH_DLC_UPDATE_EMULATORS = {"Ryubing", "Ryubing (AppImage)", "Ryubing Canary (AppImage)", NEXTENDO_NAME}
+# The Nextendo tab's whole emulator list; the Emulators tab hides these.
+NEXT_EMULATORS = (NEXTENDO_NAME,)
 
 
 def nextendo_root():
@@ -3459,6 +3461,7 @@ EMULATOR_ICON_SLUGS = {
     "Dolphin": "dolphin",
     WHEEL_WIZARD_NAME: "wheelwizard",
     "Ryubing": "ryujinx",
+    NEXTENDO_NAME: "nextendo",
     EDEN_FLATHUB_NAME: "eden",
     "Cemu": "cemu",
     "Flycast": "flycast",
