@@ -4862,6 +4862,9 @@ def _emulators_tab_panel_html(state, chosen=None):
             key=lambda n: n.lower(),
         )
     emulator_picker_html = _emulator_picker_html(names, emulator)
+    # Keyed on the emulator, not em_next, so a nav that drops em_next
+    # can't move Nextendo's notices back to the top.
+    notices_last = next_tab or emulator in standalone_emulators.NEXT_EMULATORS
 
     # id="em-console-form-{k}" mirrors the RA tab's own "ra-console-
     # form-{k}" -- see selfsteamToggleSource's own comment on why its
@@ -5130,7 +5133,7 @@ def _emulators_tab_panel_html(state, chosen=None):
       {emulator_picker_html}
     </form>
   </div>
-  {"" if next_tab else wheelwizard_notice}
+  {"" if notices_last else wheelwizard_notice}
   {preflight_block}
   {bios_block}
   {keys_block}
@@ -5139,7 +5142,7 @@ def _emulators_tab_panel_html(state, chosen=None):
   {dlc_block}
   {extra_block}
   {zrif_block}
-  {wheelwizard_notice if next_tab else ""}
+  {wheelwizard_notice if notices_last else ""}
   <div class="selfsteam-spacer"></div>
   {rpcs3_firmware_warning}
   {name_field}"""
