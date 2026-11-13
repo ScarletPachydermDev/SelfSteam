@@ -6076,6 +6076,7 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
   <input type="hidden" name="em_keysfile" value="{html.escape(em_state.get('em_keysfile', ''))}">
   <input type="hidden" name="em_firmwarefile" value="{html.escape(em_state.get('em_firmwarefile', ''))}">
   <input type="hidden" name="em_dlc_paths" value="{html.escape(em_state.get('em_dlc_paths', ''))}">
+  <input type="hidden" name="em_extra_paths" value="{html.escape(em_state.get('em_extra_paths', ''))}">
   <input type="hidden" name="em_edit_appid" value="{html.escape(em_edit_appid)}">
   <input type="hidden" name="em_edit_name" value="{html.escape(em_state.get('em_edit_name', ''))}">
 </form>
