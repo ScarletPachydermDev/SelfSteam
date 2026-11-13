@@ -792,7 +792,7 @@ def _extract_standalone_emulator_info(launch_options):
                     return name, _romfile_at(name, 3, argv)
             return None, None
         for name, entry in standalone_emulators.EMULATORS.items():
-            if entry.get("install_type") == "binary" and standalone_emulators.binary_path(name) == argv[0]:
+            if entry.get("install_type") == "binary" and argv[0] in standalone_emulators.binary_launch_paths(name):
                 return name, _romfile_at(name, 1, argv)
         return None, None
 

@@ -923,6 +923,52 @@ def nextendo_root():
     return os.path.join(_binary_dir(NEXTENDO_NAME), "publish", "portable")
 
 
+# Nextendo's first-run wizard has no way to open on its sign-in page.
+# Its other pages ask for what SelfSteam already installed, so the
+# launch wrapper below presses through them: one Tab, then Enter five
+# times (found by hand on a Steam Machine), and stops on sign-in. The
+# window title is localised, so it matches the "Nextendo — " prefix.
+# Named with "Ryujinx" so Preflight picks its Ryujinx backend; lives
+# beside the binary so Preflight, which looks for portable/
+# beside cmd[0], still finds Nextendo's own config.
+_NEXTENDO_LAUNCHER = """#!/bin/sh
+DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ ! -e "$DIR/portable/nextendo_setup_done" ] && command -v xdotool >/dev/null 2>&1; then
+  (
+    i=0
+    while [ $i -lt 120 ]; do
+      WIN="$(xdotool search --name '^Nextendo — ' 2>/dev/null | head -n 1)"
+      if [ -n "$WIN" ]; then
+        sleep 1.5
+        xdotool windowactivate --sync "$WIN" 2>/dev/null
+        xdotool key --window "$WIN" --delay 400 Tab Return Return Return Return Return
+        exit 0
+      fi
+      sleep 0.5
+      i=$((i + 1))
+    done
+  ) &
+fi
+exec "$DIR/Ryujinx" "$@"
+"""
+
+
+def nextendo_launcher_path():
+    """Writes (if changed) and returns the wrapper shortcuts launch."""
+    path = os.path.join(_binary_dir(NEXTENDO_NAME), "publish", "Ryujinx-selfsteam.sh")
+    try:
+        with open(path) as f:
+            current = f.read()
+    except OSError:
+        current = None
+    if current != _NEXTENDO_LAUNCHER:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write(_NEXTENDO_LAUNCHER)
+    os.chmod(path, 0o755)
+    return path
+
+
 def _nextendo_bootstrap_config(entry):
     """A Config.json for Nextendo before its first launch, copied from
     the newest Ryujinx-family one on this machine.
@@ -3622,6 +3668,17 @@ def binary_path(name):
     return _binary_path(name, entry)
 
 
+def binary_launch_paths(name):
+    """Every argv[0] a binary entry's shortcut can start with: the
+    binary itself, plus Nextendo's launch wrapper."""
+    path = binary_path(name)
+    if path is None:
+        return ()
+    if name == NEXTENDO_NAME:
+        return (path, os.path.join(_binary_dir(name), "publish", "Ryujinx-selfsteam.sh"))
+    return (path,)
+
+
 def installed(name):
     # Callers (see _add_standalone_emulator_shortcut) check this first
     # and only call install() when it's False -- a real Flatpak app,
@@ -4009,6 +4066,8 @@ def _emulator_argv(name, entry, romfile, zrif):
         path = _binary_path(name, entry)
         if not os.path.isfile(path):
             return None
+        if name == NEXTENDO_NAME:
+            path = nextendo_launcher_path()
         # Vita3K .pkg is a real, separate case, not just another
         # content-path -- see install_vita3k_pkg's own docstring for
         # why: --pkg/--zrif only installs, the actual launch afterward
