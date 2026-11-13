@@ -925,8 +925,9 @@ def nextendo_root():
 
 # Nextendo's first-run wizard has no way to open on its sign-in page.
 # Its other pages ask for what SelfSteam already installed, so the
-# launch wrapper below presses through them: one Tab, then Enter five
-# times (found by hand on a Steam Machine), and stops on sign-in. The
+# launch wrapper below presses through them: one Tab, Enter five times,
+# then Tab and Enter once more to press Sign in (found by hand on a
+# Steam Machine). The
 # window title is localised, so it matches the "Nextendo " prefix (the
 # main window's starts with "Ryujinx"; an em dash in the pattern never
 # matched under xdotool).
@@ -943,7 +944,7 @@ if [ ! -e "$DIR/portable/nextendo_setup_done" ] && command -v xdotool >/dev/null
       if [ -n "$WIN" ]; then
         sleep 1.5
         xdotool windowactivate --sync "$WIN" 2>/dev/null
-        xdotool key --window "$WIN" --delay 400 Tab Return Return Return Return Return
+        xdotool key --window "$WIN" --delay 400 Tab Return Return Return Return Return Tab Return
         exit 0
       fi
       sleep 0.5
