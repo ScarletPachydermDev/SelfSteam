@@ -927,7 +927,9 @@ def nextendo_root():
 # Its other pages ask for what SelfSteam already installed, so the
 # launch wrapper below presses through them: one Tab, then Enter five
 # times (found by hand on a Steam Machine), and stops on sign-in. The
-# window title is localised, so it matches the "Nextendo — " prefix.
+# window title is localised, so it matches the "Nextendo " prefix (the
+# main window's starts with "Ryujinx"; an em dash in the pattern never
+# matched under xdotool).
 # Named with "Ryujinx" so Preflight picks its Ryujinx backend; lives
 # beside the binary so Preflight, which looks for portable/
 # beside cmd[0], still finds Nextendo's own config.
@@ -937,7 +939,7 @@ if [ ! -e "$DIR/portable/nextendo_setup_done" ] && command -v xdotool >/dev/null
   (
     i=0
     while [ $i -lt 120 ]; do
-      WIN="$(xdotool search --name '^Nextendo — ' 2>/dev/null | head -n 1)"
+      WIN="$(xdotool search --name '^Nextendo ' 2>/dev/null | head -n 1)"
       if [ -n "$WIN" ]; then
         sleep 1.5
         xdotool windowactivate --sync "$WIN" 2>/dev/null
