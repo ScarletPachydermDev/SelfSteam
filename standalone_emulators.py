@@ -990,10 +990,6 @@ _NEXTENDO_CITRON_LAUNCHER = """#!/bin/sh
 DIR="$(cd "$(dirname "$0")" && pwd)"
 mkdir -p "$DIR/user"
 cd "$DIR" || exit 1
-# Steam's fossilize Vulkan layer crashed the AppImage's bundled RADV
-# while building pipelines (SIGSEGV in libvulkan_radeon.so under
-# libVkLayer_steam_fossilize.so, seen on a Steam Machine).
-export DISABLE_VK_LAYER_VALVE_steam_fossilize_1=1
 if [ ! -s "$DIR/user/config/nextendo_account.txt" ] && command -v xdotool >/dev/null 2>&1; then
   (
     i=0
