@@ -664,12 +664,14 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
 .tab-bar a[href="#tab-url"] { background: #fff; color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
 #tab-apps:target ~ .selfsteam-columns .tab-bar a[href="#tab-url"],
 #tab-retroarch:target ~ .selfsteam-columns .tab-bar a[href="#tab-url"],
-#tab-emulators:target ~ .selfsteam-columns .tab-bar a[href="#tab-url"] {
+#tab-emulators:target ~ .selfsteam-columns .tab-bar a[href="#tab-url"],
+#tab-nextendo:target ~ .selfsteam-columns .tab-bar a[href="#tab-url"] {
   background: transparent; color: var(--text-dim); box-shadow: none;
 }
 #tab-apps:target ~ .selfsteam-columns .tab-bar a[href="#tab-apps"],
 #tab-retroarch:target ~ .selfsteam-columns .tab-bar a[href="#tab-retroarch"],
-#tab-emulators:target ~ .selfsteam-columns .tab-bar a[href="#tab-emulators"] {
+#tab-emulators:target ~ .selfsteam-columns .tab-bar a[href="#tab-emulators"],
+#tab-nextendo:target ~ .selfsteam-columns .tab-bar a[href="#tab-nextendo"] {
   background: #fff; color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,0.12);
 }
 /* flex:1 on both so whichever tab is active can stretch to fill the
@@ -700,10 +702,17 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
 .tab-panel-url { display: flex; }
 #tab-apps:target ~ .selfsteam-columns .tab-panels .tab-panel-url,
 #tab-retroarch:target ~ .selfsteam-columns .tab-panels .tab-panel-url,
-#tab-emulators:target ~ .selfsteam-columns .tab-panels .tab-panel-url { display: none; }
+#tab-emulators:target ~ .selfsteam-columns .tab-panels .tab-panel-url,
+#tab-nextendo:target ~ .selfsteam-columns .tab-panels .tab-panel-url { display: none; }
 #tab-apps:target ~ .selfsteam-columns .tab-panels .tab-panel-apps,
 #tab-retroarch:target ~ .selfsteam-columns .tab-panels .tab-panel-retroarch,
-#tab-emulators:target ~ .selfsteam-columns .tab-panels .tab-panel-emulators { display: flex; }
+#tab-emulators:target ~ .selfsteam-columns .tab-panels .tab-panel-emulators,
+#tab-nextendo:target ~ .selfsteam-columns .tab-panels .tab-panel-nextendo { display: flex; }
+/* The Nextendo tab is an intro with a link into the Emulators tab: no
+   middle/right columns of its own and nothing to create from here. */
+#tab-nextendo:target ~ .selfsteam-columns .middle-panel-url,
+#tab-nextendo:target ~ .selfsteam-columns .right-panel-url,
+#tab-nextendo:target ~ .selfsteam-columns #selfsteam-add-button { display: none; }
 /* Middle/right columns: URL's own content is the default (also what
    Apps falls back to showing, same as before RetroArch/Emulators had
    any content of their own) -- only switches away from it when that
@@ -4956,6 +4965,20 @@ def _emulators_tab_panel_html(state, chosen=None):
             "The first launch of a game folder or .vpk installs it into Vita3K and "
             "stops at Vita3K's library. Quit and launch it again to play."
         )
+    elif emulator == standalone_emulators.NEXTENDO_NAME:
+        # Nextendo signs in through a browser on this machine, from its
+        # own setup wizard (shown while portable/nextendo_setup_done is
+        # missing), and only hands out online play and its shared
+        # shader cache once signed in -- nothing SelfSteam can do from
+        # this page.
+        notice_rows.append(
+            "The first launch opens Nextendo's setup, which signs in to your Nextendo "
+            "account in a browser. A mouse and keyboard (or a controller's touchpads) may be needed."
+        )
+        notice_rows.append(
+            "Online play needs the exact game version Nextendo asks for. Add that update "
+            "below, and link Discord on your Nextendo account if it asks."
+        )
     elif emulator == "melonDS":
         notice_rows.append("L3 swaps screens")
     elif emulator == "Azahar":
@@ -5327,7 +5350,29 @@ def render_custom_page(cu_state, cu_candidates_by_category=None, cu_chosen=None,
 """, extra_head=extra_head)
 
 
-_FORM_TABS = [("tab-url", "URL"), ("tab-apps", "Apps"), ("tab-retroarch", "RetroArch"), ("tab-emulators", "Emulators")]
+_FORM_TABS = [
+    ("tab-url", "URL"), ("tab-apps", "Apps"), ("tab-retroarch", "RetroArch"),
+    ("tab-emulators", "Emulators"), ("tab-nextendo", "Nextendo"),
+]
+
+
+def _nextendo_tab_panel_html():
+    # The game itself is set up in the Emulators tab with Nextendo
+    # picked: ROM, keys, firmware, updates/DLC and Preflight all work
+    # there already. This tab is the way in, plus what that tab cannot
+    # say on its own.
+    href = _em_url("/new", {}, em_install_source="binary", em_emulator=standalone_emulators.NEXTENDO_NAME)
+    return f"""
+<p>Nextendo is a Ryujinx build with its own accounts and online play. SelfSteam installs it
+separately from Ryubing, so its keys, saves and settings never mix with Ryubing's.</p>
+<ul>
+  <li>The first launch opens Nextendo's setup, which signs in to your Nextendo account in a browser.
+  A mouse and keyboard (or a controller's touchpads) may be needed for that one step.</li>
+  <li>Online play needs the exact game version Nextendo asks for, and some games need Discord
+  linked on your Nextendo account.</li>
+  <li>Once signed in, Nextendo offers its shared shader cache for supported games.</li>
+</ul>
+<a class="source-label active" href="{html.escape(href)}">Add a Nextendo game</a>"""
 
 
 def _tab_bar_targets_html():
@@ -6046,6 +6091,9 @@ def render_page(query="", couch_mode=False, browser="", sgdb_q="", matches=None,
     </div>
     <div class="tab-panel tab-panel-emulators" id="selfsteam-em-tab-panel">
       {_emulators_tab_panel_html(em_state, em_chosen)}
+    </div>
+    <div class="tab-panel tab-panel-nextendo">
+      {_nextendo_tab_panel_html()}
     </div>
   </div>
   {add_button}

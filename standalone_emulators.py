@@ -559,6 +559,7 @@ def _switch_keys_dirs():
         # builds' real ~/.local/share/eden/keys at all -- same
         # sandboxed-vs-real split this list already makes for Ryubing.
         _flatpak_data_dir(EDEN_FLATHUB_APP_ID, "eden", "keys"),
+        os.path.join(nextendo_root(), "system"),
     ]
 
 
@@ -906,7 +907,16 @@ EDEN_FLATHUB_APP_ID = "dev.eden_emu.eden"
 # has no per-title index file the way this dict/JSON approach does, so
 # it needs its own distinct install/seed logic rather than sharing this
 # set.
-SWITCH_DLC_UPDATE_EMULATORS = {"Ryubing", "Ryubing (AppImage)", "Ryubing Canary (AppImage)"}
+NEXTENDO_NAME = "Nextendo"
+SWITCH_DLC_UPDATE_EMULATORS = {"Ryubing", "Ryubing (AppImage)", "Ryubing Canary (AppImage)", NEXTENDO_NAME}
+
+
+def nextendo_root():
+    """Nextendo's whole config tree. It runs in Ryujinx's portable mode
+    (a "portable" folder beside the binary), so it never shares
+    ~/.config/Ryujinx with the Ryubing AppImage builds: keys, firmware,
+    saves, per-game updates and its own account token all live here."""
+    return os.path.join(_binary_dir(NEXTENDO_NAME), "publish", "portable")
 
 
 def _switch_games_dir(entry):
@@ -918,6 +928,8 @@ def _switch_games_dir(entry):
     only ever sees its own sandboxed ~/.var/app/.../config/Ryujinx, the
     AppImage builds (no app_id at all -- install_type "binary") read
     the real ~/.config/Ryujinx directly."""
+    if entry is EMULATORS.get(NEXTENDO_NAME):
+        return os.path.join(nextendo_root(), "games")
     app_id = entry.get("app_id")
     if app_id:
         return _flatpak_config_dir(app_id, "Ryujinx", "games")
@@ -3239,6 +3251,25 @@ EMULATORS = {
         "install_keys": _switch_install_keys,
         "keys_tooltip": "Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
     },
+    NEXTENDO_NAME: {
+        "install_type": "binary",
+        # A Ryujinx fork with its own accounts and online play. Gitea,
+        # self-hosted (also mirrored on GitHub under the same org name);
+        # each release has one Linux tarball that unpacks to publish/,
+        # with the real binary at publish/Ryujinx -- checked live
+        # against v1.10.5, not assumed from the Windows zip.
+        "release_api": "https://git.nextendo.network/api/v1/repos/NextendoNetwork/Ryujinx-Nextendo/releases?limit=1",
+        "binary_asset_re": re.compile(r"^Nextendo-[\d.]+-linux-x64\.tar\.gz$"),
+        "archive_binary": os.path.join("publish", "Ryujinx"),
+        "consoles": "Nintendo Switch",
+        "needs_bios": False,
+        "needs_keys": True,
+        "needs_firmware": True,
+        "args": _ryubing_args,
+        "keys_installed": _switch_keys_installed,
+        "install_keys": _switch_install_keys,
+        "keys_tooltip": "Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
+    },
     "Vita3K": {
         "install_type": "binary",
         # Real GitHub, not DMCA-blocked -- confirmed live (unlike Eden's
@@ -3478,6 +3509,10 @@ def _binary_dir(name):
 
 
 def _binary_path(name, entry):
+    # An entry shipped as a tarball names its binary inside the
+    # unpacked tree; everything else is one AppImage file.
+    if entry.get("archive_binary"):
+        return os.path.join(_binary_dir(name), entry["archive_binary"])
     return os.path.join(_binary_dir(name), f"{_binary_dir_name(name)}.AppImage")
 
 
@@ -3595,13 +3630,34 @@ def install_binary(name):
     last_error = None
     for _attempt in range(1, _INSTALL_ATTEMPTS + 1):
         try:
-            with urllib.request.urlopen(dl_req, timeout=300) as resp, open(dest_path, "wb") as f:
-                shutil.copyfileobj(resp, f)
+            if entry.get("archive_binary"):
+                _download_and_unpack_tarball(dl_req, dest_dir)
+                # Ryujinx only runs portable when this folder already
+                # exists at startup; without it, it would quietly share
+                # ~/.config/Ryujinx with the Ryubing AppImage builds.
+                os.makedirs(os.path.join(os.path.dirname(dest_path), "portable"), exist_ok=True)
+            else:
+                with urllib.request.urlopen(dl_req, timeout=300) as resp, open(dest_path, "wb") as f:
+                    shutil.copyfileobj(resp, f)
             os.chmod(dest_path, 0o755)
             return
-        except (urllib.error.URLError, OSError) as e:
+        except (urllib.error.URLError, OSError, tarfile.TarError) as e:
             last_error = e
     raise RuntimeError(f"{name}: download failed after {_INSTALL_ATTEMPTS} attempts: {last_error}")
+
+
+def _download_and_unpack_tarball(dl_req, dest_dir):
+    """Unpacks a release tarball over dest_dir. Over, not in place of:
+    a portable install keeps its user data (keys, saves, account) in a
+    folder inside the same tree, and a tarball never ships that folder,
+    so updating the program leaves it alone. The "data" filter refuses
+    absolute paths, links out of the tree and device files."""
+    with tempfile.TemporaryFile() as tmp:
+        with urllib.request.urlopen(dl_req, timeout=300) as resp:
+            shutil.copyfileobj(resp, tmp)
+        tmp.seek(0)
+        with tarfile.open(fileobj=tmp, mode="r:gz") as tar:
+            tar.extractall(dest_dir, filter="data")
 
 
 _INSTALL_TIMEOUT_SECONDS = 300
@@ -4031,6 +4087,7 @@ def _ryujinx_family_contents_dirs():
     return [
         _flatpak_config_dir("io.github.ryubing.Ryujinx", "Ryujinx", "bis", "system", "Contents"),
         _xdg_config_dir("Ryujinx", "bis", "system", "Contents"),
+        os.path.join(nextendo_root(), "bis", "system", "Contents"),
     ]
 
 
