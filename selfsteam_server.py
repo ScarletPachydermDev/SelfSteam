@@ -3374,6 +3374,12 @@ def _em_dlc_classify(state):
         if abs_path is None or not os.path.isfile(abs_path):
             rows.append({"path": p, "filename": filename, "kind": "error", "detail": "File not found"})
             continue
+        # A zip/7z/rar is only unpacked at Create (_em_dlc_state_unpacked),
+        # so its NSP inside cannot be read yet -- not the same as a file
+        # that failed to read.
+        if archives.is_archive(abs_path):
+            rows.append({"path": p, "filename": filename, "kind": "unknown", "detail": "Checked at Create"})
+            continue
         try:
             info = nsp_metadata.read_title_id(abs_path, header_key)
         except Exception:  # noqa: BLE001 -- one bad/unsupported file shouldn't block classifying the rest of the batch
@@ -4549,7 +4555,7 @@ def _em_extra_picker_section(state):
   <div class="field-group">
     <label class="field-label" style="display:flex;align-items:center;gap:0.4rem;min-width:0">
       <span style="flex:0 1 auto;min-width:0">Additional files (.sbi, .bin, .m3u) (optional) {_info_tooltip_icon_html(hint)}</span>
-      <span id="em-extra-upload-status" class="upload-status" style="display:none">Reading<span class="spinner"></span></span>
+      <span id="em-extra-upload-status" class="upload-status" style="display:none">Uploading<span class="spinner"></span></span>
     </label>
     {body}
   </div>"""
@@ -4708,7 +4714,7 @@ def _em_dlc_picker_section(state):
   <div class="field-group">
     <label class="field-label" style="display:flex;align-items:center;gap:0.4rem;min-width:0">
       <span style="flex:0 1 auto;min-width:0">{label_text}</span>
-      <span id="em-dlc-upload-status" class="upload-status" style="display:none">Reading<span class="spinner"></span></span>
+      <span id="em-dlc-upload-status" class="upload-status" style="display:none">Uploading<span class="spinner"></span></span>
     </label>
     {body}
   </div>"""

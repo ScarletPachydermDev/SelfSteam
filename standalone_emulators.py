@@ -3257,7 +3257,7 @@ EMULATORS = {
     },
     NEXTENDO_NAME: {
         "install_type": "binary",
-        "display_name": "Ryujinx",
+        "display_name": "Ryujinx Nextendo",
         # A Ryujinx fork with its own accounts and online play. Gitea,
         # self-hosted (also mirrored on GitHub under the same org name);
         # each release has one Linux tarball that unpacks to publish/,
