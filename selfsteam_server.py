@@ -5132,15 +5132,14 @@ def _emulators_tab_panel_html(state, chosen=None):
   </div>"""
 
     status_link = "" if not next_tab else f"""
-    <div style="margin-bottom:0.6rem">
-      <a href="https://nextendo.network/status" target="_blank" rel="noopener"
-         style="display:inline-flex;align-items:center;gap:0.35rem">Nextendo status {_EXTERNAL_LINK_ICON_SVG}</a>
-    </div>"""
+  <div class="field-group">
+    <a href="https://nextendo.network/status" target="_blank" rel="noopener"
+       style="display:inline-flex;align-items:center;gap:0.35rem">Nextendo status {_EXTERNAL_LINK_ICON_SVG}</a>
+  </div>"""
 
     return f"""
   <div class="field-group">
     {source_toggle}
-    {status_link}
     <form method="get" action="/new{_em_fragment(state)}" style="margin:0">
       {hidden_fields}
       <input type="hidden" name="em_emulator" id="em-emulator-hidden" value="{html.escape(emulator)}">
@@ -5149,6 +5148,7 @@ def _emulators_tab_panel_html(state, chosen=None):
   </div>
   {"" if notices_last else wheelwizard_notice}
   {preflight_block}
+  {status_link}
   {bios_block}
   {keys_block}
   {firmware_block}
