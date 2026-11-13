@@ -4995,6 +4995,19 @@ def _emulators_tab_panel_html(state, chosen=None):
             else (_ra_guess_name_from_filename(_em_romfile_display_name(emulator, romfile)) if romfile else "")
         )
     )
+    # Steam shortcuts are matched by name, so a second emulator's
+    # shortcut for a game would replace the first one. Name it after its
+    # emulator instead when the plain name is already another
+    # emulator's shortcut (an Edit of that same shortcut keeps its name).
+    if name_default and emulator and not state.get("em_edit_appid"):
+        try:
+            existing = create_webapp.list_gridge_shortcuts()
+        except Exception:  # noqa: BLE001 -- only a naming hint
+            existing = []
+        if any(sc.get("name") == name_default and sc.get("em_emulator") and sc["em_emulator"] != emulator
+               for sc in existing):
+            display = standalone_emulators.EMULATORS.get(emulator, {}).get("display_name", emulator)
+            name_default = f"{name_default} ({display})"
     name_reset_href = _em_url("/new", state, em_name_cleared=("" if name_cleared else "1"))
     name_reset_title = "Reset to guessed name" if name_cleared else "Clear"
     # onclick=selfsteamEmNav -- see _retroarch_tab_panel_html's own comment
