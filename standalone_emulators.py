@@ -907,7 +907,9 @@ EDEN_FLATHUB_APP_ID = "dev.eden_emu.eden"
 # has no per-title index file the way this dict/JSON approach does, so
 # it needs its own distinct install/seed logic rather than sharing this
 # set.
-NEXTENDO_NAME = "Nextendo"
+# Nextendo offers more than one emulator build (Ryujinx now, Citron
+# announced), each its own catalog entry under the Nextendo tab.
+NEXTENDO_NAME = "Nextendo Ryujinx"
 SWITCH_DLC_UPDATE_EMULATORS = {"Ryubing", "Ryubing (AppImage)", "Ryubing Canary (AppImage)", NEXTENDO_NAME}
 # The Nextendo tab's whole emulator list; the Emulators tab hides these.
 NEXT_EMULATORS = (NEXTENDO_NAME,)
@@ -3255,6 +3257,7 @@ EMULATORS = {
     },
     NEXTENDO_NAME: {
         "install_type": "binary",
+        "display_name": "Ryujinx",
         # A Ryujinx fork with its own accounts and online play. Gitea,
         # self-hosted (also mirrored on GitHub under the same org name);
         # each release has one Linux tarball that unpacks to publish/,
