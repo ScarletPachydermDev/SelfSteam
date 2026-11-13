@@ -1485,14 +1485,14 @@ function selfsteamTabFetch(url, swapIds, onDone) {
 // in-place swap every other tab interaction already gets, with the same
 // graceful real-navigation fallback if fetch throws (JS half-broken,
 // network weirdness) rather than leaving the picked file stuck nowhere.
-function selfsteamUploadFetch(input, swapIds, urlFn) {
+function selfsteamUploadFetch(input, swapIds, urlFn, onDone) {
   var form = input.form;
   var data = new FormData(form);
   var action = form.getAttribute("action");
   if (urlFn) action = urlFn(action);
   fetch(action, { method: "POST", body: data })
     .then(function (r) { if (!r.ok) throw new Error("bad status"); return r.text().then(function (t) { return {text: t, url: r.url}; }); })
-    .then(function (result) { selfsteamApplySwap(result.text, result.url, swapIds); })
+    .then(function (result) { selfsteamApplySwap(result.text, result.url, swapIds, onDone); })
     .catch(function () { form.submit(); });
 }
 
@@ -1653,10 +1653,51 @@ function selfsteamEmPreflightUrl(href) {
   return base + (qs ? "?" + qs : "") + hash;
 }
 
-function selfsteamEmFetch(url) { selfsteamTabFetch(selfsteamEmPreflightUrl(url), SELFSTEAM_EM_SWAP_IDS); }
+// The Name field and the artwork radios are DOM-only too, and both
+// live inside swapped regions, so adding a DLC file or opening a
+// picker used to put back the server's defaults. Snapshot them before
+// the fetch and restore them after, unless the nav changed what those
+// defaults come from (ROM, SGDB search, the Name reset button).
+var SELFSTEAM_EM_KEEP_UNLESS = ["em_romfile", "em_sgdb_q", "em_resolved", "em_name_cleared", "em_emulator"];
+
+function selfsteamEmSnapshot() {
+  var snap = {name: null, radios: []};
+  var field = document.getElementById("em-name-field");
+  if (field) snap.name = field.value;
+  document.querySelectorAll('input[type="radio"][name^="artwork_"]:checked').forEach(function (r) {
+    snap.radios.push([r.name, r.value]);
+  });
+  return snap;
+}
+
+function selfsteamEmRestorer(url) {
+  var snap = selfsteamEmSnapshot();
+  var before = new URLSearchParams(window.location.search);
+  return function () {
+    var q = url.indexOf("?");
+    var after = new URLSearchParams(q >= 0 ? url.slice(q + 1).split("#")[0] : "");
+    var changed = SELFSTEAM_EM_KEEP_UNLESS.some(function (k) {
+      return (before.get(k) || "") !== (after.get(k) || "");
+    });
+    if (changed) return;
+    var field = document.getElementById("em-name-field");
+    if (field && snap.name !== null) field.value = snap.name;
+    snap.radios.forEach(function (pair) {
+      document.querySelectorAll('input[type="radio"]').forEach(function (r) {
+        if (r.name === pair[0] && r.value === pair[1]) r.checked = true;
+      });
+    });
+  };
+}
+
+function selfsteamEmFetch(url) {
+  url = selfsteamEmPreflightUrl(url);
+  selfsteamTabFetch(url, SELFSTEAM_EM_SWAP_IDS, selfsteamEmRestorer(url));
+}
 
 function selfsteamEmUploadFetch(input) {
-  selfsteamUploadFetch(input, SELFSTEAM_EM_SWAP_IDS, selfsteamEmPreflightUrl);
+  selfsteamUploadFetch(input, SELFSTEAM_EM_SWAP_IDS, selfsteamEmPreflightUrl,
+                       selfsteamEmRestorer(input.form.getAttribute("action")));
 }
 
 function selfsteamEmNav(a) {
@@ -3404,7 +3445,7 @@ def _em_dlc_classify(state):
         elif offset == 0x800:
             rows.append({"path": p, "filename": filename, "kind": "update", "detail": "Update", "title_id": info.title_id})
         elif 0x1000 <= offset <= 0x1FFF:
-            rows.append({"path": p, "filename": filename, "kind": "dlc", "detail": f"DLC #{offset - 0x1000 + 1}", "title_id": info.title_id})
+            rows.append({"path": p, "filename": filename, "kind": "dlc", "detail": f"DLC #{offset - 0x1000}" if offset > 0x1000 else "DLC", "title_id": info.title_id})
         else:
             rows.append({"path": p, "filename": filename, "kind": "mismatch", "detail": "Unrecognized content type", "title_id": info.title_id})
 
@@ -4448,9 +4489,16 @@ def _em_extra_list_rows(abs_path, rel_path, state):
     if not entries:
         return '<div class="row" style="color:var(--text-dim)">Nothing here.</div>'
     already_added = set(_em_extra_paths_list(state))
+    # Nextendo's shader cache box: only a zip or loose cache files, and
+    # never a file the ROM or DLC+updates pickers already hold.
+    shader_only = state.get("em_emulator") == standalone_emulators.NEXTENDO_NAME
+    taken = set(_em_dlc_paths_list(state)) | {state.get("em_romfile") or ""}
     rows = []
     for entry in entries:
         entry_rel = f"{rel_path}/{entry.name}".lstrip("/")
+        if shader_only and not entry.is_dir() and (
+                entry_rel in taken or not entry.name.lower().endswith((".zip", ".data", ".toc"))):
+            continue
         if entry.is_dir():
             href = _em_url("/new", state, em_extrapath=entry_rel)
             rows.append(f'<a href="{href}" onclick="return selfsteamEmNav(this)"><span class="folder-icon">&#128193;</span>{html.escape(entry.name)}</a>')
@@ -5088,8 +5136,8 @@ def _emulators_tab_panel_html(state, chosen=None):
   {keys_block}
   {firmware_block}
   {rom_block}
-  {extra_block}
   {dlc_block}
+  {extra_block}
   {zrif_block}
   {wheelwizard_notice if next_tab else ""}
   <div class="selfsteam-spacer"></div>
