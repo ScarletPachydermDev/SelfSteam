@@ -80,6 +80,20 @@ APPS = {
         "release_api": "https://api.github.com/repos/domsvoboda/xodus-nexus/releases?per_page=20",
         "binary_asset_re": re.compile(r"^Xodus-Nexus-.*-x86_64\.AppImage$"),
     },
+    "io.github.elripalda.RecompLauncher": {
+        "name": "RecompLauncher",
+        # Real description, confirmed via the repo's own GitHub
+        # "description" field.
+        "summary": "Find, install, update and play PC recomps from one launcher",
+        "icon": "https://raw.githubusercontent.com/elripalda/RecompLauncher/main/src-tauri/icons/128x128.png",
+        "homepage": "https://github.com/elripalda/RecompLauncher",
+        "install_type": "github",
+        "release_api": "https://api.github.com/repos/elripalda/RecompLauncher/releases?per_page=5",
+        # Every release so far is a beta, published as a GitHub
+        # pre-release, so those count here.
+        "allow_prerelease": True,
+        "binary_asset_re": re.compile(r"^RecompLauncher_.*_amd64\.AppImage$"),
+    },
 }
 
 # Same layout convention as standalone_emulators._binary_dir -- a
@@ -118,7 +132,7 @@ def _install_github(app_id, entry):
     asset_re = entry["binary_asset_re"]
     match = None
     for release in releases:
-        if release.get("prerelease") or release.get("draft"):
+        if release.get("draft") or (release.get("prerelease") and not entry.get("allow_prerelease")):
             continue
         match = next((a for a in release["assets"] if asset_re.match(a["name"])), None)
         if match:
