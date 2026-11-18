@@ -50,7 +50,6 @@ import browser_catalog
 import config
 import create_webapp
 import appimage_apps
-import decomps
 import flatpak_bundle_apps
 import flathub_browse
 import host_exec
@@ -3183,7 +3182,7 @@ def _retroarch_tab_panel_html(state, chosen=None):
              value="{html.escape(name_default)}" placeholder="Shortcut name">
       <a href="{name_reset_href}" class="field-clear-btn" title="{name_reset_title}" onclick="return selfsteamRaNav(this)">&#10005;</a>
     </div>
-    {_decomps_button_html(name_default) if romfile else ""}
+    {_decomps_button_html(name_default, "ra-name-field")}
     </div>
   </div>"""
 
@@ -4293,19 +4292,18 @@ def _em_romfile_display_name(emulator, romfile_rel):
     return os.path.basename(romfile_rel)
 
 
-def _decomps_button_html(name):
-    """Round button beside a ROM tab's Name field: decomps.net's page for
-    this game (decompilation and PC-port projects), when it has one;
-    greyed out otherwise. Matched on the name SelfSteam guessed or
-    SteamGridDB resolved, see decomps.game_url."""
-    url = decomps.game_url(name)
+def _decomps_button_html(name, field_id):
+    """Round button beside a ROM tab's Name field: searches decomps.net (a
+    directory of decompilation and PC-port projects) for the name in the
+    field, read when clicked so an edited name is what gets searched."""
+    href = "https://decomps.net/search?" + urllib.parse.urlencode({"q": name or ""})
     logo = '<img src="/vendor/decomps-logo.svg" alt="" style="width:1.1rem;height:1.1rem;image-rendering:pixelated">'
     style = ("flex:0 0 auto;width:2.4rem;height:2.4rem;border-radius:50%;display:inline-flex;"
              "align-items:center;justify-content:center;border:1px solid var(--border, #ddd);background:#fff")
-    if url:
-        return (f'<a href="{html.escape(url)}" target="_blank" rel="noopener" style="{style}" '
-                f'title="Decomps and PC ports on decomps.net">{logo}</a>')
-    return f'<span style="{style};opacity:0.35" title="Not on decomps.net">{logo}</span>'
+    onclick = (f"var f=document.getElementById('{field_id}');"
+               "if(f)this.href='https://decomps.net/search?q='+encodeURIComponent(f.value).replace(/%20/g,'+');")
+    return (f'<a href="{html.escape(href)}" target="_blank" rel="noopener" style="{style}" '
+            f'onclick="{html.escape(onclick)}" title="Search decomps.net">{logo}</a>')
 
 
 def _em_start_relpath(state, path_key):
@@ -5088,7 +5086,7 @@ def _emulators_tab_panel_html(state, chosen=None):
              value="{html.escape(name_default)}" placeholder="Shortcut name">
       <a href="{name_reset_href}" class="field-clear-btn" title="{name_reset_title}" onclick="return selfsteamEmNav(this)">&#10005;</a>
     </div>
-    {_decomps_button_html(base_name) if romfile else ""}
+    {_decomps_button_html(base_name, "em-name-field")}
     </div>
   </div>"""
 
