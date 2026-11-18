@@ -16,6 +16,16 @@ M64Py, melonDS, PCSX2, Play!, PPSSPP, Rosalie's Mupen GUI, RPCS3, Ryubing
 Every one of them can use [Preflight](https://github.com/ScarletPachydermDev/Preflight)
 for controllers.
 
+### Nextendo
+
+The Emulators tab's third source, beside Flathub and AppImage, installs the
+[Nextendo Network](https://nextendo.network) builds, which have their own
+accounts and online play: Ryujinx Nextendo and Citron Nextendo, both kept in
+their own portable folders. On a game's first launch SelfSteam takes the
+emulator straight to the Nextendo sign-in in a browser. The notice under the
+pickers names the exact game version Nextendo needs for online play. Ryujinx
+Nextendo also takes a shader cache (a zip or the cache files) for the game.
+
 ## RetroArch tab
 
 Each console with the cores SelfSteam offers for it:
@@ -57,7 +67,11 @@ Each console with the cores SelfSteam offers for it:
 ## Apps tab
 
 Any app on Flathub, plus these AppImages, installed from their own GitHub
-releases: 240-MP, Minigalaxy, Quiver Launcher, Xodus Nexus.
+releases: 240-MP, Minigalaxy, Quiver Launcher, RecompLauncher, Xodus Nexus.
+
+The Flatpaks source has apps that are not on Flathub but ship a `.flatpak`
+bundle on GitHub: Archivist (an archive.org browser) and Deck Video Player.
+They install and run like any Flatpak.
 
 ## URL tab
 

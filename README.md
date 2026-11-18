@@ -22,6 +22,7 @@
 + Web UI running from your Steam Deck / Steam Machine in game mode, desktop mode is only needed to install app
 + Screen code authentication
 + Install emulators from flathub and appimages from developers source
++ Nextendo Network builds (Ryujinx and Citron) for online play, signed in on first launch
 + Auto update flatpak
 + Convert .nsz Switch roms to .nsp automatically so Ryujinx/Eden can load them
 + Automatic overscan cropping for N64 games in RetroArch

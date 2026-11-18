@@ -26,6 +26,21 @@
   </categories>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="0.1.38" date="2026-11-18">
+      <description>
+        <ul>
+          <li>Nextendo: a new source on the Emulators tab, beside Flathub and AppImage, for the Nextendo Network builds of Ryujinx and Citron with their own accounts and online play. The first launch goes straight to the Nextendo sign-in, Preflight works with both, and the exact game version needed online is shown</li>
+          <li>Ryujinx Nextendo can take a shader cache for the game</li>
+          <li>Apps tab: a new Flatpaks source for apps that ship a .flatpak on GitHub, starting with Archivist (archive.org) and Deck Video Player, which uses its own Steam artwork</li>
+          <li>RecompLauncher is now available on the Apps tab (AppImage)</li>
+          <li>Uploads that will not fit on the device are refused at once, saying how much space is needed and free, instead of stalling</li>
+          <li>Once a ROM is picked, the other file pickers open in its folder instead of the home folder</li>
+          <li>A second emulator's shortcut for the same game is named after its emulator, instead of replacing the first one</li>
+          <li>Fixed: files added in the additional files box were not sent with Create</li>
+          <li>Fixed: adding a DLC or update reset the chosen name and artwork</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.37" date="2026-11-02">
       <description>
         <ul>
