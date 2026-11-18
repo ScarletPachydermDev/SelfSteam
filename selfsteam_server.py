@@ -4299,7 +4299,7 @@ def _decomps_button_html(name, field_id):
     href = "https://decomps.net/search?" + urllib.parse.urlencode({"q": name or ""})
     logo = '<img src="/vendor/decomps-logo.svg" alt="" style="width:1.4rem;height:1.4rem;image-rendering:pixelated">'
     # Same height, border and fill as the Name field beside it.
-    style = ("flex:0 0 auto;align-self:stretch;aspect-ratio:1;border-radius:50%;display:inline-flex;"
+    style = ("flex:0 0 auto;width:2.9rem;height:2.9rem;box-sizing:border-box;border-radius:50%;display:inline-flex;"
              "align-items:center;justify-content:center;border:1px solid var(--input-border);background:#fff")
     # A trailing "(Ryujinx Nextendo)"-style emulator tag isn't part of
     # the game's name, so it is left out of the search.
