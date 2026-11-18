@@ -4282,12 +4282,26 @@ def _em_romfile_display_name(emulator, romfile_rel):
     return os.path.basename(romfile_rel)
 
 
+def _em_start_relpath(state, path_key):
+    """Where a picker's local browser opens: its own folder once the user
+    has browsed in it, otherwise the folder the ROM was picked from (so
+    DLC, updates and caches on the same external drive are one click
+    away), otherwise the usual home default."""
+    raw = state.get(path_key, "")
+    if not raw and path_key != "em_rompath":
+        romfile = state.get("em_romfile", "")
+        rom_dir = os.path.dirname(romfile) if romfile else state.get("em_rompath", "")
+        if rom_dir and os.path.isdir(_ra_safe_join(rom_dir) or ""):
+            return rom_dir
+    return _ra_resolve_relpath(raw)
+
+
 def _em_picker_section(prefix, label, state, already_installed=None, info_tooltip=None, info_link=None, optional=False):
     path_key = f"em_{prefix}path"
     file_key = f"em_{prefix}file"
     source_key = f"em_{prefix}source"
     skip_key = f"em_{prefix}_skip"
-    rel_path = _ra_resolve_relpath(state.get(path_key, ""))
+    rel_path = _em_start_relpath(state, path_key)
     selected_file = state.get(file_key, "")
     dom_prefix = f"em-{prefix}-source"
     source = state.get(source_key) or "local"
@@ -4573,7 +4587,7 @@ def _em_extra_picker_section(state):
       <input type="file" name="file"
              onchange="selfsteamShowUploading('em-extra'); selfsteamEmUploadFetch(this)">
     </form>"""
-        extra_rel_path = _ra_resolve_relpath(state.get("em_extrapath", ""))
+        extra_rel_path = _em_start_relpath(state, "em_extrapath")
         extra_abs_path = _ra_safe_join(extra_rel_path)
         if extra_abs_path is None or not os.path.isdir(extra_abs_path):
             extra_rel_path = _RA_DEFAULT_RELPATH
@@ -4745,7 +4759,7 @@ def _em_dlc_picker_section(state):
              onchange="selfsteamShowUploading('em-dlc'); selfsteamEmUploadFetch(this)">
     </form>"""
 
-        dlc_rel_path = _ra_resolve_relpath(state.get("em_dlcpath", ""))
+        dlc_rel_path = _em_start_relpath(state, "em_dlcpath")
         dlc_abs_path = _ra_safe_join(dlc_rel_path)
         if dlc_abs_path is None or not os.path.isdir(dlc_abs_path):
             dlc_rel_path = _RA_DEFAULT_RELPATH
