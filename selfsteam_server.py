@@ -3175,14 +3175,11 @@ def _retroarch_tab_panel_html(state, chosen=None):
   {ra_menu_hint}
   <div class="field-group">
     <label class="field-label" for="ra-name-field">Name</label>
-    <div style="display:flex;align-items:center;gap:0.5rem">
-    <div class="field-with-clear" style="flex:1 1 auto;min-width:0">
+    <div class="field-with-clear">
       <img class="name-field-icon" src="/vendor/name-field-wand.webp" alt="">
       <input type="text" name="ra_match_name" id="ra-name-field" form="{_ADD_FORM_ID}"
              value="{html.escape(name_default)}" placeholder="Shortcut name">
       <a href="{name_reset_href}" class="field-clear-btn" title="{name_reset_title}" onclick="return selfsteamRaNav(this)">&#10005;</a>
-    </div>
-    {_decomps_button_html(name_default, "ra-name-field")}
     </div>
   </div>"""
 
@@ -4292,24 +4289,6 @@ def _em_romfile_display_name(emulator, romfile_rel):
     return os.path.basename(romfile_rel)
 
 
-def _decomps_button_html(name, field_id):
-    """Round button beside a ROM tab's Name field: searches decomps.net (a
-    directory of decompilation and PC-port projects) for the name in the
-    field, read when clicked so an edited name is what gets searched."""
-    href = "https://decomps.net/search?" + urllib.parse.urlencode({"q": name or ""})
-    logo = '<img src="/vendor/decomps-logo.svg" alt="" style="width:1.4rem;height:1.4rem;image-rendering:pixelated">'
-    # Same height, border and fill as the Name field beside it.
-    style = ("flex:0 0 auto;width:2.9rem;height:2.9rem;box-sizing:border-box;border-radius:50%;display:inline-flex;"
-             "align-items:center;justify-content:center;border:1px solid var(--input-border);background:#fff")
-    # A trailing "(Ryujinx Nextendo)"-style emulator tag isn't part of
-    # the game's name, so it is left out of the search.
-    onclick = (f"var f=document.getElementById('{field_id}');"
-               "if(f)this.href='https://decomps.net/search?q='+encodeURIComponent("
-               "f.value.replace(/\\s*\\([^)]*\\)\\s*$/,'').trim()).replace(/%20/g,'+');")
-    return (f'<a href="{html.escape(href)}" target="_blank" rel="noopener" style="{style}" '
-            f'onclick="{html.escape(onclick)}" title="Search decomps.net">{logo}</a>')
-
-
 def _em_start_relpath(state, path_key):
     """Where a picker's local browser opens: its own folder once the user
     has browsed in it, otherwise the folder the ROM was picked from (so
@@ -5054,7 +5033,6 @@ def _emulators_tab_panel_html(state, chosen=None):
             else (_ra_guess_name_from_filename(_em_romfile_display_name(emulator, romfile)) if romfile else "")
         )
     )
-    base_name = name_default
     # Steam shortcuts are matched by name, so a second emulator's
     # shortcut for a game would replace the first one. Name it after its
     # emulator instead when the plain name is already another
@@ -5083,14 +5061,11 @@ def _emulators_tab_panel_html(state, chosen=None):
     name_field = f"""
   <div class="field-group">
     <label class="field-label" for="em-name-field">Name</label>
-    <div style="display:flex;align-items:center;gap:0.5rem">
-    <div class="field-with-clear" style="flex:1 1 auto;min-width:0">
+    <div class="field-with-clear">
       <img class="name-field-icon" src="/vendor/name-field-wand.webp" alt="">
       <input type="text" name="em_match_name" id="em-name-field" form="{_ADD_FORM_ID}"
              value="{html.escape(name_default)}" placeholder="Shortcut name">
       <a href="{name_reset_href}" class="field-clear-btn" title="{name_reset_title}" onclick="return selfsteamEmNav(this)">&#10005;</a>
-    </div>
-    {_decomps_button_html(base_name, "em-name-field")}
     </div>
   </div>"""
 
@@ -7010,7 +6985,7 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
 
-        if parsed.path in ("/vendor/selfsteam-logo.svg", "/vendor/decomps-logo.svg"):
+        if parsed.path == "/vendor/selfsteam-logo.svg":
             with open(os.path.join(os.path.dirname(__file__), "vendor", os.path.basename(parsed.path)), "rb") as f:
                 body = f.read()
             self.send_response(200)
