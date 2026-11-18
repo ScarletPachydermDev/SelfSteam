@@ -50,6 +50,7 @@ import browser_catalog
 import config
 import create_webapp
 import appimage_apps
+import flatpak_bundle_apps
 import flathub_browse
 import host_exec
 import maintenance
@@ -3614,7 +3615,13 @@ def _apps_state_from_params(params):
     return {key: (params.get(key) or [""])[0] for key in _APPS_STATE_KEYS}
 
 
-def _appimage_apps_hits():
+def _curated_apps(source):
+    """The hand-picked list behind a non-Flathub source: AppImages, or
+    apps that ship a .flatpak bundle on GitHub."""
+    return flatpak_bundle_apps.APPS if source == "flatpak" else appimage_apps.APPS
+
+
+def _appimage_apps_hits(source="appimage"):
     """appimage_apps.APPS reshaped to look like a Flathub API hit
     (app_id/name/summary/icon/homepage) -- so _apps_card_html and every
     caller downstream of it can treat both sources identically."""
@@ -3623,7 +3630,7 @@ def _appimage_apps_hits():
             "app_id": app_id, "name": entry["name"], "summary": entry["summary"],
             "icon": entry.get("icon", ""), "homepage": entry.get("homepage", ""),
         }
-        for app_id, entry in appimage_apps.APPS.items()
+        for app_id, entry in _curated_apps(source).items()
     ]
 
 
@@ -3688,12 +3695,15 @@ def _apps_source_installed(source, app_id):
     given source without duplicating the dispatch logic."""
     if source == "appimage":
         return appimage_apps.installed(app_id)
+    # A .flatpak bundle installs as an ordinary flatpak.
     return standalone_emulators.flathub_app_id_installed(app_id)
 
 
 def _apps_source_install(source, app_id):
     if source == "appimage":
         appimage_apps.install(app_id)
+    elif source == "flatpak":
+        flatpak_bundle_apps.install(app_id)
     else:
         standalone_emulators.install_flathub_app_id(app_id)
 
@@ -3874,6 +3884,10 @@ def _apps_tab_panel_html(state, hits, total_pages):
     # sitting too low instead. Confirmed live (2026-08-25).
     apps_appimage_tooltip_text = "AppImages are downloaded directly from the developer's own GitHub releases."
     apps_appimage_tooltip = f'<span style="position:relative;top:0.05rem">{_info_tooltip_icon_html(apps_appimage_tooltip_text)}</span>'
+    apps_flatpak_tooltip = (
+        '<span style="position:relative;top:0.05rem">'
+        f'{_info_tooltip_icon_html("Apps not on Flathub that ship a .flatpak bundle on GitHub; they install and run like any flatpak.")}</span>'
+    )
 
     def _apps_source_toggle_link(value, text, extra=""):
         active = "source-label active" if apps_source == value else "source-label"
@@ -3888,6 +3902,7 @@ def _apps_tab_panel_html(state, hits, total_pages):
     <div class="source-toggle" style="margin-bottom:0.6rem">
       {_apps_source_toggle_link("flathub", "Flathub")}
       {_apps_source_toggle_link("appimage", "AppImage", apps_appimage_tooltip)}
+      {_apps_source_toggle_link("flatpak", "Flatpaks", apps_flatpak_tooltip)}
     </div>"""
     # Search icon toggles #apps-search-box open/closed (selfsteamAppsToggleSearch,
     # PAGE_TAIL) -- typing live-searches (selfsteamAppsLiveSearch,
@@ -3901,7 +3916,7 @@ def _apps_tab_panel_html(state, hits, total_pages):
     # Category dropdown/search box only mean anything for Flathub
     # browsing -- appimage_apps.APPS is a fixed, tiny, hand-picked list
     # with no categories or search of its own to offer.
-    category_picker = "" if apps_source == "appimage" else f"""
+    category_picker = "" if apps_source in ("appimage", "flatpak") else f"""
   <div class="field-group" style="display:flex;flex-direction:row;align-items:center;gap:0.5rem">
     <select id="apps-category-select" onchange="location.href=this.value" style="flex:1">{category_options}</select>
     <button type="button" class="search-submit-btn" title="Search Flathub" onclick="selfsteamAppsToggleSearch()">{_SEARCH_ICON_SVG}</button>
@@ -3919,10 +3934,12 @@ def _apps_tab_panel_html(state, hits, total_pages):
     # subprocess per card -- see installed_flathub_app_ids' own
     # docstring. AppImage mode uses appimage_apps.installed() per entry
     # instead -- only ever 3 apps, not worth a matching batch helper.
-    installed_ids = (
-        {app_id for app_id in appimage_apps.APPS if appimage_apps.installed(app_id)}
-        if apps_source == "appimage" else standalone_emulators.installed_flathub_app_ids()
-    )
+    if apps_source == "appimage":
+        installed_ids = {app_id for app_id in appimage_apps.APPS if appimage_apps.installed(app_id)}
+    elif apps_source == "flatpak":
+        installed_ids = set(flatpak_bundle_apps.APPS) & standalone_emulators.installed_flathub_app_ids()
+    else:
+        installed_ids = standalone_emulators.installed_flathub_app_ids()
     # Which of those this user can actually remove. Resolved once per
     # render, not per card (see user_installed_flathub_app_ids). An
     # AppImage is always ours to delete, so there installed and
@@ -7177,11 +7194,11 @@ class Handler(BaseHTTPRequestHandler):
             # top of the current category) -- apps_category defaults to
             # "game" either way (see flathub_browse.search_category) so
             # this is meaningful even on a bare, param-less /new.
-            if apps_state.get("apps_source") == "appimage":
+            if apps_state.get("apps_source") in ("appimage", "flatpak"):
                 # A fixed, tiny, hand-picked list (appimage_apps.APPS) --
                 # no category/search/pagination concept applies, unlike
                 # Flathub's own real catalog below.
-                apps_hits, apps_total_pages = _appimage_apps_hits(), 1
+                apps_hits, apps_total_pages = _appimage_apps_hits(apps_state.get("apps_source")), 1
             else:
                 requested_page = int(apps_state.get("apps_page") or 1)
                 try:
@@ -7241,8 +7258,17 @@ class Handler(BaseHTTPRequestHandler):
                 # one's.
                 apps_match_index = int(apps_state.get("apps_match_index") or 0)
                 apps_match_index = max(0, min(apps_match_index, len(apps_matches) - 1))
-                apps_chosen = apps_matches[apps_match_index]
-                apps_candidates = _fetch_candidates(apps_chosen["id"])
+                own_art = _curated_apps(apps_state.get("apps_source")).get(apps_app_id, {}).get("steam_artwork")
+                if apps_matches:
+                    apps_chosen = apps_matches[apps_match_index]
+                    apps_candidates = _fetch_candidates(apps_chosen["id"])
+                elif own_art:
+                    apps_chosen = {"id": None, "name": apps_guessed}
+                # An app that ships its own Steam artwork: offer it first,
+                # so it is what gets picked by default.
+                if own_art:
+                    for basename, url in own_art.items():
+                        apps_candidates[basename] = [{"url": url, "thumb": url}] + list(apps_candidates.get(basename) or [])
             self._send_html(render_page(
                 ra_state=ra_state, ra_candidates_by_category=ra_candidates, ra_chosen=ra_chosen,
                 em_state=em_state, em_candidates_by_category=em_candidates, em_chosen=em_chosen,

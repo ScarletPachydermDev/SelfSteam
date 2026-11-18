@@ -20,6 +20,7 @@ import retroarch_cores
 import sgdb_client as sgdb
 import shortcuts_vdf
 import appimage_apps
+import flatpak_bundle_apps
 import standalone_emulators
 import steam_paths
 
@@ -827,7 +828,7 @@ def _extract_apps_info(launch_options):
     if preflight:
         tokens = tokens[2:]
     if len(tokens) == 3 and os.path.basename(tokens[0]) == "flatpak" and tokens[1] == "run":
-        return tokens[2], "flathub", preflight
+        return tokens[2], ("flatpak" if tokens[2] in flatpak_bundle_apps.APPS else "flathub"), preflight
     if len(tokens) == 1:
         for app_id in appimage_apps.APPS:
             if appimage_apps.binary_path(app_id) == tokens[0]:
