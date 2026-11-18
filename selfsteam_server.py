@@ -4297,9 +4297,10 @@ def _decomps_button_html(name, field_id):
     directory of decompilation and PC-port projects) for the name in the
     field, read when clicked so an edited name is what gets searched."""
     href = "https://decomps.net/search?" + urllib.parse.urlencode({"q": name or ""})
-    logo = '<img src="/vendor/decomps-logo.svg" alt="" style="width:1.1rem;height:1.1rem;image-rendering:pixelated">'
-    style = ("flex:0 0 auto;width:2.4rem;height:2.4rem;border-radius:50%;display:inline-flex;"
-             "align-items:center;justify-content:center;border:1px solid var(--border, #ddd);background:#fff")
+    logo = '<img src="/vendor/decomps-logo.svg" alt="" style="width:1.4rem;height:1.4rem;image-rendering:pixelated">'
+    # Same height, border and fill as the Name field beside it.
+    style = ("flex:0 0 auto;align-self:stretch;aspect-ratio:1;border-radius:50%;display:inline-flex;"
+             "align-items:center;justify-content:center;border:1px solid var(--input-border);background:#fff")
     # A trailing "(Ryujinx Nextendo)"-style emulator tag isn't part of
     # the game's name, so it is left out of the search.
     onclick = (f"var f=document.getElementById('{field_id}');"
@@ -7009,8 +7010,8 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
 
-        if parsed.path == "/vendor/selfsteam-logo.svg":
-            with open(os.path.join(os.path.dirname(__file__), "vendor", "selfsteam-logo.svg"), "rb") as f:
+        if parsed.path in ("/vendor/selfsteam-logo.svg", "/vendor/decomps-logo.svg"):
+            with open(os.path.join(os.path.dirname(__file__), "vendor", os.path.basename(parsed.path)), "rb") as f:
                 body = f.read()
             self.send_response(200)
             self.send_header("Content-Type", "image/svg+xml")
@@ -7110,9 +7111,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_html(render("<p>Not found</p>"), status=404)
             return
 
-        if parsed.path.startswith("/vendor/emulator-icons/"):
+        if parsed.path.startswith(("/vendor/emulator-icons/", "/vendor/app-icons/")):
             filename = os.path.basename(parsed.path)
-            icon_path = os.path.join(_EMULATOR_ICONS_DIR, filename)
+            icons_dir = (_EMULATOR_ICONS_DIR if parsed.path.startswith("/vendor/emulator-icons/")
+                         else os.path.join(os.path.dirname(__file__), "vendor", "app-icons"))
+            icon_path = os.path.join(icons_dir, filename)
             if filename.endswith(".png") and os.path.isfile(icon_path):
                 with open(icon_path, "rb") as f:
                     body = f.read()
