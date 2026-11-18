@@ -2833,6 +2833,13 @@ def _ra_picker_section(prefix, label, state, already_installed=None):
     source_key = f"ra_{prefix}source"
     skip_key = f"ra_{prefix}_skip"
     rel_path = _ra_resolve_relpath(state.get(path_key, ""))
+    # Same as the Emulators tab (see _em_start_relpath): until this
+    # picker has been browsed, open it in the folder the ROM came from.
+    if prefix != "rom" and not state.get(path_key):
+        romfile = state.get("ra_romfile", "")
+        rom_dir = os.path.dirname(romfile) if romfile else state.get("ra_rompath", "")
+        if rom_dir and os.path.isdir(_ra_safe_join(rom_dir) or ""):
+            rel_path = rom_dir
     selected_file = state.get(file_key, "")
     dom_prefix = f"ra-{prefix}-source"
     # A console's BIOS is a one-time install shared by every game that
