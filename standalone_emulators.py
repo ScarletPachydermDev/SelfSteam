@@ -1029,6 +1029,47 @@ def nextendo_citron_launcher_path():
     return path
 
 
+def _nextendo_citron_bootstrap_config(entry):
+    """Turns on Citron's Nextendo redirection (Nextendo menu > Enable
+    Redirection, setting enable_nextendo). It is off by default, and
+    without it a game's online traffic goes to Nintendo, not Nextendo:
+    a signed-in Citron still failed online in MK8D on a Steam Machine.
+    Qt writes it under both [Network] and [Services]; every copy is set.
+    With no qt-config.ini yet, a [Network] section alone is written --
+    Citron fills every other setting with its default on first start."""
+    path = os.path.join(nextendo_citron_root(), "config", "qt-config.ini")
+    on = ["enable_nextendo\\default=false\n", "enable_nextendo=true\n"]
+    try:
+        with open(path, encoding="utf-8") as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.writelines(["[Network]\n"] + on)
+        return
+    out = []
+    found = False
+    for line in lines:
+        key = line.split("=", 1)[0]
+        if key == "enable_nextendo\\default":
+            out.append(on[0])
+            found = True
+        elif key == "enable_nextendo":
+            out.append(on[1])
+            found = True
+        else:
+            out.append(line)
+    if not found:
+        idx = next((i for i, l in enumerate(out) if l.strip() == "[Network]"), None)
+        if idx is None:
+            out += ["[Network]\n"] + on
+        else:
+            out[idx + 1:idx + 1] = on
+    if out != lines:
+        with open(path, "w", encoding="utf-8") as f:
+            f.writelines(out)
+
+
 def _nextendo_bootstrap_config(entry):
     """A Config.json for Nextendo before its first launch, copied from
     the newest Ryujinx-family one on this machine.
@@ -3544,6 +3585,7 @@ EMULATORS = {
         "keys_installed": _switch_keys_installed,
         "install_keys": _switch_install_keys,
         "keys_tooltip": "Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
+        "bootstrap_config": _nextendo_citron_bootstrap_config,
     },
     "Vita3K": {
         "install_type": "binary",
@@ -3728,7 +3770,7 @@ def picker_emulator_names(install_type):
 # variant.
 # Every emulator on the Emulators tab: Preflight has a backend for each
 # one (its own BACKENDS table, checked against its repo 2026-10-02).
-PREFLIGHT_EMULATORS = frozenset(EMULATORS) - {NEXTENDO_CITRON_NAME}
+PREFLIGHT_EMULATORS = frozenset(EMULATORS)
 
 EMULATOR_ICON_SLUGS = {
     "Dolphin": "dolphin",
