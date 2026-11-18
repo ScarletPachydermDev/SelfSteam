@@ -4300,8 +4300,11 @@ def _decomps_button_html(name, field_id):
     logo = '<img src="/vendor/decomps-logo.svg" alt="" style="width:1.1rem;height:1.1rem;image-rendering:pixelated">'
     style = ("flex:0 0 auto;width:2.4rem;height:2.4rem;border-radius:50%;display:inline-flex;"
              "align-items:center;justify-content:center;border:1px solid var(--border, #ddd);background:#fff")
+    # A trailing "(Ryujinx Nextendo)"-style emulator tag isn't part of
+    # the game's name, so it is left out of the search.
     onclick = (f"var f=document.getElementById('{field_id}');"
-               "if(f)this.href='https://decomps.net/search?q='+encodeURIComponent(f.value).replace(/%20/g,'+');")
+               "if(f)this.href='https://decomps.net/search?q='+encodeURIComponent("
+               "f.value.replace(/\\s*\\([^)]*\\)\\s*$/,'').trim()).replace(/%20/g,'+');")
     return (f'<a href="{html.escape(href)}" target="_blank" rel="noopener" style="{style}" '
             f'onclick="{html.escape(onclick)}" title="Search decomps.net">{logo}</a>')
 
