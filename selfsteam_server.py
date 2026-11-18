@@ -871,6 +871,7 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
    asterisk row has nothing else claiming that space, and the selected-
    file row's own flex:1 filename span already eats the rest, so this
    still lands past the remove button either way. */
+.upload-status.upload-error { color: #c0392b; white-space: normal; }
 .upload-status {
   margin-left: auto; flex: 0 0 auto; align-items: center; gap: 0.3rem;
   color: var(--text-dim); font-size: 0.85rem; font-weight: 600; white-space: nowrap;
@@ -1254,6 +1255,7 @@ function selfsteamToggleSource(prefix, mode, stateKey) {
 function selfsteamShowUploading(prefix) {
   var status = document.getElementById(prefix + "-upload-status");
   if (status) status.style.display = "inline-flex";
+  window.selfsteamUploadPrefix = prefix;
 }
 
 // Fires on the Add form's own submit (not the button's click -- see the
@@ -1476,7 +1478,28 @@ function selfsteamTabFetch(url, swapIds, onDone) {
 // in-place swap every other tab interaction already gets, with the same
 // graceful real-navigation fallback if fetch throws (JS half-broken,
 // network weirdness) rather than leaving the picked file stuck nowhere.
+// Asks the server how much room its upload folder has before sending
+// anything: a file that cannot fit fails here, at once, with the sizes,
+// instead of uploading for minutes into a full disk (seen on a Steam
+// Machine: a 4.9 GB update stalled forever at 3.85 GB).
 function selfsteamUploadFetch(input, swapIds, urlFn, onDone) {
+  var size = 0;
+  for (var i = 0; i < (input.files || []).length; i++) size += input.files[i].size;
+  var status = document.getElementById((window.selfsteamUploadPrefix || "") + "-upload-status");
+  fetch("/upload-space")
+    .then(function (r) { return r.json(); })
+    .then(function (space) {
+      if (size + space.margin <= space.free) { selfsteamUploadSend(input, swapIds, urlFn, onDone); return; }
+      var gb = function (n) { return (n / 1e9).toFixed(1) + " GB"; };
+      var msg = "Not enough space: this upload needs " + gb(size) + ", " + gb(Math.max(0, space.free - space.margin)) + " is free.";
+      if (space.trash > 1e9) msg += " The Trash holds " + gb(space.trash) + "; emptying it frees that.";
+      if (status) { status.textContent = msg; status.classList.add("upload-error"); }
+      input.value = "";
+    })
+    .catch(function () { selfsteamUploadSend(input, swapIds, urlFn, onDone); });
+}
+
+function selfsteamUploadSend(input, swapIds, urlFn, onDone) {
   var form = input.form;
   var data = new FormData(form);
   var action = form.getAttribute("action");
@@ -2574,6 +2597,42 @@ def _ra_resolve_relpath(raw):
 # moves or deletes those files), but new uploads now land in a
 # separate ~/.local/share/selfsteam/uploads/ instead of alongside them.
 _RA_UPLOAD_DIR = os.path.join(_HOME_DIR, ".local", "share", "selfsteam", "uploads")
+# Room kept free on top of an upload's own size, so a disk is never
+# filled to the last byte.
+_UPLOAD_SPACE_MARGIN = 256 * 1024 * 1024
+
+
+def _upload_free_bytes():
+    os.makedirs(_RA_UPLOAD_DIR, exist_ok=True)
+    return shutil.disk_usage(_RA_UPLOAD_DIR).free
+
+
+def _trash_bytes():
+    """Size of the files in the user's Trash, which SelfSteam itself
+    fills: an uploaded archive goes there once it has been unpacked."""
+    total = 0
+    for root, _dirs, files in os.walk(os.path.join(_HOME_DIR, ".local", "share", "Trash", "files")):
+        for name in files:
+            try:
+                total += os.lstat(os.path.join(root, name)).st_size
+            except OSError:
+                pass
+    return total
+
+
+def _upload_space_error(length):
+    """A message when an upload of length bytes cannot fit, else None.
+    The browser checks first (see selfsteamUploadFetch); this catches a
+    request that skipped that, before any of the body is read."""
+    free = _upload_free_bytes()
+    if length + _UPLOAD_SPACE_MARGIN <= free:
+        return None
+    msg = (f"Not enough space: this upload needs {length / 1e9:.1f} GB, "
+           f"{max(0, free - _UPLOAD_SPACE_MARGIN) / 1e9:.1f} GB is free.")
+    trash = _trash_bytes()
+    if trash > 1e9:
+        msg += f" The Trash holds {trash / 1e9:.1f} GB; emptying it frees that."
+    return msg
 # Where picked archives are unpacked (see archives.py). Beside uploads
 # rather than inside it, so it never shows up as a folder in the
 # "Uploaded" pickers, and under the same home-wide read access every
@@ -7103,6 +7162,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_html(render("<p>Not found</p>"), status=404)
             return
 
+        if parsed.path == "/upload-space":
+            self._send_json({"free": _upload_free_bytes(), "margin": _UPLOAD_SPACE_MARGIN,
+                             "trash": _trash_bytes()})
+            return
+
         if parsed.path == "/":
             self._send_html(render_gallery())
             return
@@ -8368,6 +8432,12 @@ class Handler(BaseHTTPRequestHandler):
 
         content_type = self.headers.get("Content-Type", "")
         length = int(self.headers.get("Content-Length", 0))
+        space_error = _upload_space_error(length)
+        if space_error:
+            # The body is never read, so the connection can't be reused.
+            self.close_connection = True
+            self._send_html(render_done("Upload", ok=False, error=space_error))
+            return
         dest_dir = os.path.join(_RA_UPLOAD_DIR, "roms" if slot == "rom" else "bios")
         os.makedirs(dest_dir, exist_ok=True)
 
@@ -8444,6 +8514,12 @@ class Handler(BaseHTTPRequestHandler):
 
         content_type = self.headers.get("Content-Type", "")
         length = int(self.headers.get("Content-Length", 0))
+        space_error = _upload_space_error(length)
+        if space_error:
+            # The body is never read, so the connection can't be reused.
+            self.close_connection = True
+            self._send_html(render_done("Upload", ok=False, error=space_error))
+            return
         dest_dir = os.path.join(_RA_UPLOAD_DIR, f"em-{slot}")
         os.makedirs(dest_dir, exist_ok=True)
 
@@ -8496,8 +8572,16 @@ class Handler(BaseHTTPRequestHandler):
 
         content_type = self.headers.get("Content-Type", "")
         length = int(self.headers.get("Content-Length", 0))
+        space_error = _upload_space_error(length)
+        if space_error:
+            # The body is never read, so the connection can't be reused.
+            self.close_connection = True
+            self._send_html(render_done("Upload", ok=False, error=space_error))
+            return
         dest_dir = os.path.join(_RA_UPLOAD_DIR, "em-dlc")
         os.makedirs(dest_dir, exist_ok=True)
+
+        made = []
 
         def make_dest_path(filename):
             # Same private-temp-name-then-rename reasoning as
@@ -8506,11 +8590,17 @@ class Handler(BaseHTTPRequestHandler):
             # own headers are parsed, which happens mid-stream here.
             fd, tmp_path = tempfile.mkstemp(dir=dest_dir, prefix=".upload-")
             os.close(fd)
+            made.append(tmp_path)
             return tmp_path
 
         try:
             saved = multipart_upload.save_uploaded_files(self.rfile, content_type, length, make_dest_path)
         except (ValueError, OSError):
+            # A half-written part would otherwise sit there taking space.
+            for tmp_path in made:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            self.close_connection = True
             self._send_html(render_done("DLC/updates", ok=False, error="Upload failed -- please try again"))
             return
 
@@ -8540,17 +8630,30 @@ class Handler(BaseHTTPRequestHandler):
 
         content_type = self.headers.get("Content-Type", "")
         length = int(self.headers.get("Content-Length", 0))
+        space_error = _upload_space_error(length)
+        if space_error:
+            # The body is never read, so the connection can't be reused.
+            self.close_connection = True
+            self._send_html(render_done("Upload", ok=False, error=space_error))
+            return
         dest_dir = os.path.join(_RA_UPLOAD_DIR, "em-extra")
         os.makedirs(dest_dir, exist_ok=True)
+
+        made = []
 
         def make_dest_path(filename):
             fd, tmp_path = tempfile.mkstemp(dir=dest_dir, prefix=".upload-")
             os.close(fd)
+            made.append(tmp_path)
             return tmp_path
 
         try:
             saved = multipart_upload.save_uploaded_files(self.rfile, content_type, length, make_dest_path)
         except (ValueError, OSError):
+            for tmp_path in made:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            self.close_connection = True
             self._send_html(render_done("Additional files", ok=False, error="Upload failed -- please try again"))
             return
 
