@@ -50,6 +50,7 @@ import browser_catalog
 import config
 import create_webapp
 import appimage_apps
+import decomps
 import flatpak_bundle_apps
 import flathub_browse
 import host_exec
@@ -3175,11 +3176,14 @@ def _retroarch_tab_panel_html(state, chosen=None):
   {ra_menu_hint}
   <div class="field-group">
     <label class="field-label" for="ra-name-field">Name</label>
-    <div class="field-with-clear">
+    <div style="display:flex;align-items:center;gap:0.5rem">
+    <div class="field-with-clear" style="flex:1 1 auto;min-width:0">
       <img class="name-field-icon" src="/vendor/name-field-wand.webp" alt="">
       <input type="text" name="ra_match_name" id="ra-name-field" form="{_ADD_FORM_ID}"
              value="{html.escape(name_default)}" placeholder="Shortcut name">
       <a href="{name_reset_href}" class="field-clear-btn" title="{name_reset_title}" onclick="return selfsteamRaNav(this)">&#10005;</a>
+    </div>
+    {_decomps_button_html(name_default) if romfile else ""}
     </div>
   </div>"""
 
@@ -4289,6 +4293,21 @@ def _em_romfile_display_name(emulator, romfile_rel):
     return os.path.basename(romfile_rel)
 
 
+def _decomps_button_html(name):
+    """Round button beside a ROM tab's Name field: decomps.net's page for
+    this game (decompilation and PC-port projects), when it has one;
+    greyed out otherwise. Matched on the name SelfSteam guessed or
+    SteamGridDB resolved, see decomps.game_url."""
+    url = decomps.game_url(name)
+    logo = '<img src="/vendor/decomps-logo.svg" alt="" style="width:1.1rem;height:1.1rem;image-rendering:pixelated">'
+    style = ("flex:0 0 auto;width:2.4rem;height:2.4rem;border-radius:50%;display:inline-flex;"
+             "align-items:center;justify-content:center;border:1px solid var(--border, #ddd);background:#fff")
+    if url:
+        return (f'<a href="{html.escape(url)}" target="_blank" rel="noopener" style="{style}" '
+                f'title="Decomps and PC ports on decomps.net">{logo}</a>')
+    return f'<span style="{style};opacity:0.35" title="Not on decomps.net">{logo}</span>'
+
+
 def _em_start_relpath(state, path_key):
     """Where a picker's local browser opens: its own folder once the user
     has browsed in it, otherwise the folder the ROM was picked from (so
@@ -5033,6 +5052,7 @@ def _emulators_tab_panel_html(state, chosen=None):
             else (_ra_guess_name_from_filename(_em_romfile_display_name(emulator, romfile)) if romfile else "")
         )
     )
+    base_name = name_default
     # Steam shortcuts are matched by name, so a second emulator's
     # shortcut for a game would replace the first one. Name it after its
     # emulator instead when the plain name is already another
@@ -5061,11 +5081,14 @@ def _emulators_tab_panel_html(state, chosen=None):
     name_field = f"""
   <div class="field-group">
     <label class="field-label" for="em-name-field">Name</label>
-    <div class="field-with-clear">
+    <div style="display:flex;align-items:center;gap:0.5rem">
+    <div class="field-with-clear" style="flex:1 1 auto;min-width:0">
       <img class="name-field-icon" src="/vendor/name-field-wand.webp" alt="">
       <input type="text" name="em_match_name" id="em-name-field" form="{_ADD_FORM_ID}"
              value="{html.escape(name_default)}" placeholder="Shortcut name">
       <a href="{name_reset_href}" class="field-clear-btn" title="{name_reset_title}" onclick="return selfsteamEmNav(this)">&#10005;</a>
+    </div>
+    {_decomps_button_html(base_name) if romfile else ""}
     </div>
   </div>"""
 
@@ -5121,8 +5144,8 @@ def _emulators_tab_panel_html(state, chosen=None):
                 "account in a browser. A mouse and keyboard (or a controller's touchpads) may be needed."
             )
         version_row = (
-            "Online play needs the exact game version Nextendo asks for. Add that update "
-            "below, and link Discord on your Nextendo account if it asks."
+            "Online play needs the exact game version Nextendo asks for. "
+            "Discord account link will be needed too."
         )
         if state.get("em_romfile"):
             rom_tid, _rows, _err = _em_dlc_classify(state)
@@ -5130,8 +5153,8 @@ def _emulators_tab_panel_html(state, chosen=None):
             if online and online[0]:
                 wanted = " or ".join(f"<strong>{html.escape(v)}</strong>" for v in online[0])
                 version_row = (
-                    f"Online play needs version {wanted} of this game. Add that update "
-                    "below, and link Discord on your Nextendo account if it asks."
+                    f"Online play needs version {wanted} of this game. "
+                    "Discord account link will be needed too."
                 )
             elif rom_tid is not None and online is None and standalone_emulators._nextendo_catalog["games"]:
                 version_row = "Nextendo doesn't list this game for online play."
