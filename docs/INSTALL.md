@@ -15,8 +15,12 @@
 In Desktop Mode, run in a terminal:
 
 ```
-flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo && flatpak remote-add --user --if-not-exists selfsteam https://raw.githubusercontent.com/ScarletPachydermDev/SelfSteam/master/packaging/io.github.ScarletPachydermDev.SelfSteam.flatpakrepo && flatpak install --user selfsteam io.github.ScarletPachydermDev.SelfSteam
+flatpak install --user https://raw.githubusercontent.com/ScarletPachydermDev/SelfSteam/master/packaging/io.github.ScarletPachydermDev.SelfSteam.flatpakref
 ```
+
+The `.flatpakref` adds the SelfSteam remote, and Flathub for its runtime,
+if they are missing. Discover can install it too: save the file from that
+link and open it.
 
 Then open **SelfSteam** once from the app menu. It:
 
