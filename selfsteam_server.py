@@ -8146,6 +8146,10 @@ class Handler(BaseHTTPRequestHandler):
             # click for any given emulator being slow) -- already-
             # installed check short-circuits every time after that.
             was_already_installed = standalone_emulators.installed(em_emulator)
+            if was_already_installed and standalone_emulators.binary_update_available(em_emulator):
+                # Unpacked over the old one; its user data stays.
+                _set_install_step(f"Updating {_em_display_name(em_emulator)}")
+                standalone_emulators.install(em_emulator)
             if not was_already_installed:
                 _set_install_step(f"Downloading {_em_display_name(em_emulator)}")
                 standalone_emulators.install(em_emulator)

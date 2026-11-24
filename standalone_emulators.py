@@ -3568,6 +3568,7 @@ EMULATORS = {
         "install_keys": _switch_install_keys,
         "keys_tooltip": "Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
         "bootstrap_config": _nextendo_bootstrap_config,
+        "update_on_create": True,
     },
     NEXTENDO_CITRON_NAME: {
         "install_type": "binary",
@@ -3586,6 +3587,7 @@ EMULATORS = {
         "install_keys": _switch_install_keys,
         "keys_tooltip": "Pick prod.keys -- if title.keys is sitting in the same folder, it'll be picked up automatically too.",
         "bootstrap_config": _nextendo_citron_bootstrap_config,
+        "update_on_create": True,
     },
     "Vita3K": {
         "install_type": "binary",
@@ -3956,6 +3958,7 @@ def install_binary(name):
     os.makedirs(dest_dir, exist_ok=True)
     dest_path = _binary_path(name, entry)
     dl_req = urllib.request.Request(match["browser_download_url"], headers={"User-Agent": "SelfSteam"})
+    release_id = _release_id(release, match)
 
     # Same reasoning as flatpak install's own _INSTALL_ATTEMPTS: a large
     # download failing partway through on a real transient network blip
@@ -3976,10 +3979,53 @@ def install_binary(name):
                 with urllib.request.urlopen(dl_req, timeout=300) as resp, open(dest_path, "wb") as f:
                     shutil.copyfileobj(resp, f)
             os.chmod(dest_path, 0o755)
+            with open(_release_marker_path(name), "w") as f:
+                f.write(release_id)
             return
         except (urllib.error.URLError, OSError, tarfile.TarError) as e:
             last_error = e
     raise RuntimeError(f"{name}: download failed after {_INSTALL_ATTEMPTS} attempts: {last_error}")
+
+
+def _release_marker_path(name):
+    """Which release a binary install came from, written by install_binary."""
+    return os.path.join(_binary_dir(name), ".selfsteam-release")
+
+
+def _release_id(release, asset):
+    # The asset name too, not just the tag: Citron Nextendo republishes
+    # one rolling "nightly-linux" tag, and only its file name changes.
+    return f"{release.get('tag_name', '')} {asset['name']}"
+
+
+def binary_update_available(name):
+    """True when an entry marked update_on_create has a newer release than
+    the one installed. Nextendo's builds refuse to run once a newer one
+    is out (they send you to their download page instead), so those are
+    brought up to date at Create. A failed check counts as no update: an
+    offline Create still works with what is installed."""
+    entry = EMULATORS.get(name) or {}
+    if entry.get("install_type") != "binary" or not entry.get("update_on_create"):
+        return False
+    try:
+        req = urllib.request.Request(entry["release_api"], headers={"User-Agent": "SelfSteam"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            releases = json.load(resp)
+        asset_re = entry["binary_asset_re"]
+        for release in releases:
+            match = next((a for a in release.get("assets", ()) if asset_re.match(a["name"])), None)
+            if match:
+                break
+        else:
+            return False
+        with open(_release_marker_path(name)) as f:
+            installed_id = f.read().strip()
+    except FileNotFoundError:
+        # Installed before this marker existed: update once to learn it.
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+    return installed_id != _release_id(release, match)
 
 
 def _download_and_unpack_tarball(dl_req, dest_dir):
